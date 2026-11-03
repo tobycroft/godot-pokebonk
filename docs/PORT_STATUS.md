@@ -10,7 +10,7 @@
 ./scripts/verify.sh            # 导入编译 + 无头断言套件 + 六个场景真实渲染启动
 ```
 
-当前结果：**437 项断言 0 失败**，`MainMenu / Pokedex / Lab / FusionMachine / SaveManager / Run` 全部零错误启动。
+当前结果：**465 项断言 0 失败**，`MainMenu / Pokedex / Lab / FusionMachine / SaveManager / Run` 全部零错误启动。
 断言套件在 `test/smoke_test.gd`，其中公式部分不是自证：它比对 `data/pb/golden_values.json`，该文件由
 `tools-re/golden_values.py` 用**独立的 Python 实现**按同样的逆向公式算出（双实现互验）。
 无头模拟对局（`PbRun.simulate`）实测：150 秒内 170 次击杀、等级 18、进入第 2 阶段。
@@ -96,4 +96,40 @@ python3 build_fusion_extras.py                # 18 同属性 + 8 反应 + 1 Miss
 python3 golden_values.py                      # 公式平价用的期望值
 python3 make_placeholders.py                  # 占位音频 + 缺口登记
 python3 repair_glb.py                         # 资源体检 + glb 修复/占位 + 保留原始字节
+python3 extract_ui_tokens.py                   # data/pb/ui_theme.json（CSS 变量/组件规则/keyframes/稀有度/危险计表）
 ```
+
+## 1:1 复刻补齐（UI/交互/反馈，按差异清单编号）
+
+以 `pokebonk-web` 为唯一权威参考，UI 全部走 `data/pb/ui_theme.json` 设计 token（`extract_ui_tokens.py`
+从打包 CSS/JS 抽取的 `:root` 变量、`.hud-*/.card/.btn/.seg/.switch/.dx-*/.lab-*/.mm-*` 组件规则、
+33 条 `@keyframes`、稀有度表 `nD`@1386869 / `Ke`@news54781、危险计 `dH/fH/pH`@2122027），
+`src/ui/pb_theme.gd` 做 CSS 解析（var/color-mix/box-shadow/linear-gradient/animation），
+`src/ui/pb_widgets.gd` 提供 StyleBoxFlat 表达不了的控件（渐变+条纹 GradRect、conic 冷却环、开关、XP 环）。
+
+| 编号 | 已补齐 | 落点 |
+|---|---|---|
+| #1 | Run HUD 一比一重建：hud-top（ht-l 生态/阶段 pips/天气、ht-c 精灵球计时器+7 段危险计+金币钱包、ht-r 时钟）、hud-tl（xp 环勋章+名牌+属性+生命+多层 hpbar 含红残影/护盾/文字+pw-row）、hud-bl（融合 conic 环+击杀计数+kgoal 目标卡）、bossbar、banner、toasts | `src/ui/hud_layer.gd` |
+| #2 | 升级三选一改为 `.card.offer` 卡片：稀有度/属性顶带渐变+条纹+徽章、[1][2][3] 键位、offerIn 错峰、hover 抬升、reroll/skip/banish 计数禁用、放逐两击确认、buildMini 招式行、结算卡片化 | `run_screen.gd` + `UI.card_offer` |
+| #3 | 屏公共外壳：`.scr-head`（返回胶囊+kbd Esc+斜切条纹 `.scr-title`）、`.seg/.pill.on` 分段、`.switch`、`.field`、toasts 顶部堆叠、屏内入场动画 | 四屏 + `ui_kit.gd` |
+| #4 | 主题 token 管线扩展 + 深色模式（`PbTheme.set_mode`，`App.set_theme_mode`，设置里深色开关） | `pb_theme.gd`/`app.gd` |
+| #5 | 主菜单二级导航改 `.mm-item` 磁贴（`.mm-ic` 图标块+标题/副标题+分类色底边+hover） | `main_menu.gd` + `UI.mm_tile` |
+| #6 | 研究所改 `.lab-card`（渐变顶带、等级/价格胶囊随余额 `.kind.price.ok/.no` 变色、tileIn 错峰） | `lab_screen.gd` |
+| #7 | 反馈/音效：按钮 hover 音、卡片选择/拒绝音、阶段 banner、低血 pulse、危险计升档提示 | 各屏 + `audio_service.gd` |
+| #8 | 玩法补齐：Revivir Máximo（`@848700` 死亡顺序：复活→60% HP+3s 无敌）、危险计（估计倍率，`TODO(reverse)`）、kgoal 首领倒计时/血条、pw-row 增益摘要 | `pb_actor/pb_run/hud_layer` |
+
+### 无法 1:1 的近似（差异登记）
+
+| Web 效果 | Godot 限制 | 采用的近似 | 后续逼近 |
+|---|---|---|---|
+| `.btn/.card .top` 垂直/135° 渐变 | StyleBoxFlat 无渐变 | `GradRect` 用 `draw_polygon` 逐顶点色插值沿 CSS 角度铺（首帧确定，不用 GradientTexture 异步） | 需要曲线渐变时上 shader |
+| `.btn:after` `--stripes` 斜纹 | 无 background-image | 生成 20px 斜纹 tile（`PbTheme.stripes()` 参数）+ `texture_repeat` 叠加 | 已按 token 参数化，接近 |
+| `box-shadow` 双层/`0 0 0 4px` 环 | Godot 单层 shadow | 主层→`shadow_*`，spread 环/`0 4px 0` 底边→border 折叠 | 需要精确投影再上 shadow shader |
+| `.card:hover translateY(-4px) scale(1.05)` | Control 无内建 hover transform | `mouse_entered/exited` + Tween scale（pivot 居中）；容器内 position 由布局接管故只做 scale | — |
+| `.scr-title/.banner h1/.modal h1` `skew(-8deg)` | Control 不能剪切 canvas transform | 底板 `rotation(-8deg)`+子节点反旋，保留倾斜观感 | 需要真斜切用 shader |
+| `.ult-ring/.tl-ring` conic-gradient | 无 CSS conic | `draw_polygon`/`draw_arc` 扇形逼近，颜色取 `.ult.ready`/`.tl-ring` token | 锯齿明显改 shader |
+| `backdrop-filter blur`（`.modal.sm-modal`） | 需环境采样 | 半透明径向遮罩 `.screen.dim` 近似，未做全屏 blur | BackBufferCopy+blur shader |
+| 精灵球价 `.wl-ball`、商店/事件 Meowth、小地图 openMap、联机/协作/任务/排行 | 属未迁移的服务器玩法 | 结构位保留但默认隐藏（与 Web 无数据时一致），不静默造数 | 见上「无法从远端拉取的部分」 |
+
+数据侧仅新增/重跑 `data/pb/ui_theme.json`（提取器产物）；`data/*.json` 与既有 `data/pb/*.json`
+数值零改动；升级卡 `rarity` 为按幅度估计并标注，遵循本文「档位幅度为估计」的既有纪律。
