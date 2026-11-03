@@ -33,6 +33,8 @@ func _ready() -> void:
 	_run_flow()
 	_save_flow()
 	_asset_checks()
+	_theme_ui_checks()
+	_revive_checks()
 	report()
 	get_tree().quit(0 if _failures.is_empty() else 1)
 
@@ -448,6 +450,67 @@ func _asset_checks() -> void:
 	var en := PbData.localized_name("pokemon", 1, "en")
 	var zh := PbData.localized_name("pokemon", 1, "zh")
 	ok(not en.is_empty() and not zh.is_empty() and en != zh, "i18n name lookup works (en=%s zh=%s)" % [en, zh])
+
+
+## ------------------------------------------------------------------ 7. theme tokens
+## The 1:1 UI port is driven by ui_theme.json; these lock the parser + the small
+## JS tables (rarity/danger) + the shared formatters the HUD reuses.
+func _theme_ui_checks() -> void:
+	section("design tokens + UI kit")
+	var v := PbTheme.vars()
+	ok(v.has("--red") and v.has("--yellow") and v.has("--radius"), "light vars loaded")
+	ok(PbTheme.css_color("#f00").r > 0.9 and PbTheme.css_color("#f00").g < 0.1, "css_color #rgb")
+	ok(PbTheme.css_color("#80808080").a > 0.49 and PbTheme.css_color("#80808080").a < 0.51, "css_color #rrggbbaa alpha")
+	# color-mix(in srgb, #ffcc33 50%, white) -> halfway to white
+	var mixed := PbTheme.css_color("color-mix(in srgb, #000000 50%, white)")
+	ok(absf(mixed.r - 0.5) < 0.02, "color-mix 50% black/white")
+	# rarity colours are the --r0..--r4 tokens and all distinct
+	var seen := {}
+	for i in 5:
+		seen[PbTheme.rarity_color(i).to_html()] = true
+	ok(seen.size() == 5, "five distinct rarity colours")
+	ok(PbTheme.rarity_color(0) == PbTheme.css_color(String(PbTheme.vars().get("--r0", ""))), "rarity0 == --r0")
+	var th := PbTheme.danger_thresholds()
+	ok(th.size() == 7 and float(th[0]) == 0.0 and float(th[6]) == 7.0, "danger thresholds [0..7]")
+	ok(PbTheme.danger_colors().size() == 7, "danger has 7 segment colours")
+	ok(PbTheme.danger_level(7.0) == 6 and PbTheme.danger_level(0.5) == 0, "danger_level bucketing")
+	ok(PbTheme.rarity_labels().size() == 5, "rarity labels table")
+	# gradient + keyframe parsing
+	var btn_g := PbTheme.gradient(String(PbTheme.decls(".btn").get("background", "")))
+	ok(btn_g.get("type", "") == "linear" and PbJson.as_array(btn_g.get("stops", [])).size() == 3, ".btn gradient 3 stops")
+	ok(PbTheme.keyframe_frames("cardIn").size() >= 1, "cardIn keyframe parsed")
+	ok(String(PbTheme.anim_of(".card", "cardIn")["name"]) == "cardIn", ".card anim name")
+	var st := PbTheme.stripes()
+	ok(absf(float(st["angle"]) + 45.0) < 0.1 and int(st["period"]) == 20, "--stripes parsed")
+	ok(PbTheme.stylebox(".hud-top") != null, "stylebox(.hud-top) builds")
+	ok(PbTheme.rule(".timer").contains("font-title"), "rule(.timer) present")
+	# formatters mirror the bundle P()/rl()/il()
+	ok(UI.fmt_num(999.0) == "999", "fmt_num <10k plain")
+	ok(UI.fmt_num(10000.0) == "10k", "fmt_num 10k")
+	ok(UI.fmt_num(1500000.0) == "1.5M", "fmt_num 1.5M")
+	ok(UI.fmt_num(2000000000.0) == "2B", "fmt_num 2B")
+	ok(UI.fmt_clock(65.0) == "1:05", "fmt_clock m:ss")
+	ok(UI.fmt_clock_t(65.4) == "1:05.4", "fmt_clock_t tenths")
+	# dark mode flips the ink token
+	PbTheme.set_mode("dark")
+	var dark_ink := PbTheme.ink()
+	PbTheme.set_mode("light")
+	ok(dark_ink != PbTheme.ink(), "dark theme changes ink")
+
+
+## ------------------------------------------------------------------ 8. revive
+func _revive_checks() -> void:
+	section("revive gameplay")
+	var actor := PbActor.create(4, {"revive": 2})
+	ok(int(actor.get("revives", 0)) == 2, "lab revive seeds actor.revives")
+	var run := PbRun.create(4, "forest", 999, {"revive": 1})
+	var p: Dictionary = run["player"]
+	p["hp"] = 0.0
+	var revived := PbRun._try_revive(run)
+	ok(revived, "_try_revive returns true with a charge")
+	ok(float(p["hp"]) > 0.0 and absf(float(p["hp"]) - float(p["maxHp"]) * 0.6) < 0.01, "revive restores 60% max HP")
+	ok(int(p["revives"]) == 0, "revive consumes a charge")
+	ok(not PbRun._try_revive(run), "second death with 0 charges fails")
 
 
 func report() -> void:
