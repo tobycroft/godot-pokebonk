@@ -38,6 +38,7 @@ func _ready() -> void:
 	_danger_golden_checks()
 	_ui_build_checks()
 	_terrain_checks()
+	_locale_checks()
 	report()
 	get_tree().quit(0 if _failures.is_empty() else 1)
 
@@ -644,3 +645,32 @@ func _terrain_checks() -> void:
 	ok(prop_match, "the first %d props land in the same spots with the same flips" % first_props.size())
 	ok(not t.in_bounds(0, t.walk_lim() + 5.0), "outside the walk limit is out of bounds")
 	ok(t.height(0.0, 0.0) > 4.0, "the centre dais is above the terrace step")
+
+
+# ------------------------------------------------------------------ language
+## The port is Chinese-only for now: the locale is pinned, the switch is gone, and every name
+## the tables carry resolves to zh (with the Spanish source as the last fallback).
+func _locale_checks() -> void:
+	section("language: zh-only")
+	ok(App.locale == "zh", "App.locale is pinned to zh (got %s)" % App.locale)
+	ok(App._detect_locale() == "zh", "locale detection answers zh")
+	ok(TranslationServer.get_locale().begins_with("zh"), "TranslationServer runs zh")
+	ok(PbData.biome_label("forest") == "青翠森林",
+		"biome title resolves to zh (got %s)" % PbData.biome_label("forest"))
+	ok(PbData.biome_label("graveyard") == "紫苑塔",
+		"tower biome title resolves to zh (got %s)" % PbData.biome_label("graveyard"))
+	ok(not PbData.biome_text("desert", "desc").is_empty(), "biome blurb resolves to zh")
+	ok(PbData.localized_name("pokemon", 1) == "妙蛙种子",
+		"species name defaults to zh (got %s)" % PbData.localized_name("pokemon", 1))
+	ok(PbData.localized_name("moves", "asceno") == "藤鞭" or PbData.localized_name("pokemon", 4) == "小火龙",
+		"i18n lookups stay zh by default")
+	# The menu must not offer a language switch any more.
+	var packed = load("res://scenes/MainMenu.tscn")
+	var menu: Node = (packed as PackedScene).instantiate()
+	add_child(menu)
+	var pills: Array[String] = []
+	for node in menu.get_children():
+		if String(node.name) == "LangPill":
+			pills.append(String(node.name))
+	menu.queue_free()
+	ok(pills.is_empty(), "no LangPill in the main menu")

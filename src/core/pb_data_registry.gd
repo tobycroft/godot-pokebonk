@@ -218,13 +218,27 @@ func world_fx() -> Dictionary:
 	return PbJson.as_dict(pb_table("world_fx"))
 
 
-## Biome titles come with es/en/zh/zht variants straight from the mirror's locale chunks.
-func biome_label(id: String, locale: String = "en") -> String:
+## Biome titles come with es/en/zh/zht variants straight from the mirror's locale chunks. The
+## port is zh-only for now, so zh wins and the Spanish source string is the last resort.
+func biome_label(id: String, locale: String = "zh") -> String:
 	var raw = biome(id).get("name", {})
 	if raw is Dictionary:
-		var text := PbJson.as_string(raw.get(locale, ""))
-		return text if not text.is_empty() else PbJson.as_string(raw.get("es", id), id)
+		for key in [locale, "zh", "zht", "es"]:
+			var text := PbJson.as_string(raw.get(key, ""))
+			if not text.is_empty():
+				return text
 	return PbJson.as_string(raw, id)
+
+
+## Same fallback order for the free text the tables carry (biome blurbs, zone and hazard names).
+func biome_text(id: String, key: String, locale: String = "zh") -> String:
+	var raw = biome(id).get(key, {})
+	if raw is Dictionary:
+		for k in [locale, "zh", "zht", "es"]:
+			var text := PbJson.as_string(raw.get(k, ""))
+			if not text.is_empty():
+				return text
+	return PbJson.as_string(raw, "")
 
 
 # ------------------------------------------------------------------ i18n
@@ -232,7 +246,8 @@ func i18n(locale: String) -> Dictionary:
 	return _cached_dict("i18n_" + locale, "res://data/i18n/%s.json" % locale)
 
 
-func localized_name(kind: String, id_or_key: Variant, locale: String = "en") -> String:
+## `locale` defaults to the port's pinned language.
+func localized_name(kind: String, id_or_key: Variant, locale: String = "zh") -> String:
 	var table := i18n(locale)
 	var section := PbJson.as_dict(table.get(kind, {}))
 	var key := str(int(id_or_key)) if typeof(id_or_key) != TYPE_STRING else String(id_or_key)

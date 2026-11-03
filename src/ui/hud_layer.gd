@@ -581,7 +581,9 @@ func sync(state: Dictionary, dt: float) -> void:
 	var xp_next := maxf(1.0, float(player.get("xpNext", 1)))
 	ring.progress = clampf(float(player.get("xp", 0)) / xp_next * 100.0, 0.0, 100.0)
 	(_els["level"] as Label).text = str(int(player.get("level", 1)))
-	(_els["name"] as Label).text = String(player.get("name", "?"))
+	# zh species title from the mirror's i18n table; the actor's raw name is the fallback.
+	(_els["name"] as Label).text = App.t("pokemon", int(player.get("species_id", 0)),
+		String(player.get("name", "?")))
 	_sync_types(player)
 
 	# hpbar with red lag + shield overlay
@@ -643,8 +645,13 @@ func _sync_minimap(state: Dictionary, player: Dictionary) -> void:
 
 
 func _biome_name(id: String) -> String:
+	# The mirror's own region titles (zh), e.g. forest -> 青翠森林; the short names stay as the
+	# fallback so the HUD never shows a raw id when the table is unavailable.
+	var label := PbData.biome_label(id)
+	if not label.is_empty() and label != id:
+		return label
 	var names := {"forest": "森林", "coast": "海岸", "desert": "沙漠",
-		"glacier": "冰川", "graveyard": "墓地"}
+		"glacier": "冰川", "graveyard": "墓地", "volcano": "火山"}
 	return String(names.get(id, id))
 
 

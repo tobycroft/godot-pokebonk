@@ -11,7 +11,11 @@ const SCENES := {
 	"save": "res://scenes/SaveManager.tscn",
 }
 
-var locale := "en"
+## The port is Chinese-only for now: the mirror ships zh/zht/en/es/... but the game we are
+## matching is played in zh, so the locale is pinned and the language switch stays hidden.
+const DEFAULT_LOCALE := "zh"
+
+var locale := DEFAULT_LOCALE
 var last_result: Dictionary = {}
 var last_settle: Dictionary = {}
 var selected_species := 1
@@ -83,12 +87,11 @@ func back_to_menu() -> void:
 	goto("menu")
 
 
+## Language switching is off for now, so this always answers zh. It stays a function (rather
+## than reading the constant directly) so re-enabling a picker later only means restoring the
+## detection loop over the locales the mirror ships.
 func _detect_locale() -> String:
-	var tag := TranslationServer.get_locale().split("_")[0]
-	for available in ["en", "zh", "zht", "ja", "ko", "fr", "pt", "ru"]:
-		if tag == available:
-			return available
-	return "en"
+	return DEFAULT_LOCALE
 
 
 func t(kind: String, id: Variant, fallback: String = "") -> String:

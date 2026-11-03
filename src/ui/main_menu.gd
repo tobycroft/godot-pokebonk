@@ -96,14 +96,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # ------------------------------------------------------------------- header
-## The two floating pills (`.mm-lang`, fullscreen) on the left and the trainer bar on the
-## right, exactly where the web puts them.
+## The two floating pills on the left (language stays hidden while the port is zh-only) and the
+## trainer bar on the right, exactly where the web puts them.
 func _top_row() -> Control:
 	var row := UI.hbox(10)
-	var lang := UI.small_button("ZH", _cycle_locale, "blue")
-	lang.name = "LangPill"
-	row.add_child(lang)
 	var fs := UI.small_button("⛶", _toggle_fullscreen, "blue")
+	fs.name = "FullscreenPill"
 	row.add_child(fs)
 
 	var spacer := Control.new()
@@ -152,12 +150,6 @@ func _ask_account() -> void:
 	# the port keeps it honest rather than inventing a signup.
 	UI.toast(self, "离线镜像：游客存档保存在本地，用「存档管理」导出")
 	Audio.sfx("deny")
-
-
-func _cycle_locale() -> void:
-	var codes := ["en", "zh", "zht", "ja", "fr", "pt", "ru", "ko", "es"]
-	var i := maxi(0, codes.find(App.locale))
-	_set_locale(codes[(i + 1) % codes.size()])
 
 
 func _toggle_fullscreen() -> void:
@@ -458,14 +450,8 @@ func _settings_card() -> Control:
 	theme_row.add_child(theme_sw)
 	box.add_child(theme_row)
 
-	# Language: the site ships 9 locales; the port exposes the ones with data.
-	box.add_child(UI.dim("界面语言"))
-	var codes := ["en", "zh", "zht", "ja", "fr", "pt", "ru"]
-	var lang_items := []
-	for code in codes:
-		lang_items.append({"id": code, "text": code.to_upper()})
-	box.add_child(UI.segment(lang_items, App.locale,
-		func(id): _set_locale(id)))
+	# Language: the port is Chinese-only for now, so the web's language row is intentionally
+	# absent here rather than shown as a one-option switch.
 
 	box.add_child(HSeparator.new())
 	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))
@@ -843,12 +829,6 @@ func _persist(key: String, value) -> void:
 	settings[key] = value
 	Save.handle("PUT", "/profile/prefs", {}, {"settings": settings})
 	Audio.apply_profile_settings(PbJson.as_dict(Save.store.get("settings", {})))
-
-
-func _set_locale(code: String) -> void:
-	App.locale = code
-	TranslationServer.set_locale(code)
-	refresh()
 
 
 func _start_run() -> void:

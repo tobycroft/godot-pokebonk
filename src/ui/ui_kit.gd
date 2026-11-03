@@ -151,8 +151,13 @@ static func chip(text: String, color: Color) -> PanelContainer:
 	return p
 
 
+## Type chip. The port is Chinese-only for now, so the label comes from the mirror's zh
+## `types` table (草/毒/火...) and the raw id is only a fallback.
 static func type_chip(type_name: String) -> PanelContainer:
-	return chip(type_name.to_upper(), PbTheme.type_color(type_name))
+	var label := PbData.localized_name("types", type_name)
+	if label.is_empty():
+		label = type_name.to_upper()
+	return chip(label, PbTheme.type_color(type_name))
 
 
 ## Wallet-style pill: small muted caption above a bold value, in one card row.

@@ -231,3 +231,14 @@ Container，之前磁贴在网格里会塌成最小宽度导致文字互相压�
 
 **验证**：`./scripts/verify.sh` → 506 项 0 失败，六屏零错误启动；`./scripts/shot.sh MainMenu` 与
 `/tmp/web-04-menu.png`（re 实机）逐区对照。
+
+## 语言：暂时只做中文（默认 zh，去掉语言切换）
+
+* `App.DEFAULT_LOCALE = "zh"`，`_detect_locale()` 直接返回 zh（保留函数，日后要恢复切换只需把检测循环加回来）。
+* 主菜单去掉语言 pill（只留全屏 pill），设置弹窗去掉「界面语言」分段；`_cycle_locale` / `_set_locale` 一并删除。
+* 取名默认走 zh：`PbData.localized_name(kind, id, locale = "zh")`、`biome_label(id)` 与新增的 `biome_text(id, key)`
+  按 `locale → zh → zht → es` 回退，所以表里的群系名/描述/区域名/危险地形名都出中文。
+* 实机文案对齐：HUD 名牌改用图鉴中文名（妙蛙种子），`UI.type_chip` 用 zh 属性表（草/毒），
+  `_biome_name` 用真表的区域名（青翠森林 / 紫苑塔 …），原来的短名表退化为兜底。
+* 新增 SmokeTest「language: zh-only」段：locale 钉死、TranslationServer 为 zh、区域/种族名出中文、
+  主菜单里不再有 LangPill。**515 项断言 0 失败**，六屏零错误启动。
