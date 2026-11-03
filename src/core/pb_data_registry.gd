@@ -186,6 +186,47 @@ func pmd_meta(species_id: int) -> Dictionary:
 	return PbJson.as_dict(sprites_map().get(str(species_id), {}))
 
 
+# ------------------------------------------------------------------ world / terrain
+## Tables recovered from the offline mirror by tools/extract_world.py. They drive
+## PbTerrain (height field, props, colliders) and the arena renderer.
+func world_biomes() -> Array:
+	return PbJson.as_array(PbJson.as_dict(pb_table("world_biomes")).get("biomes"))
+
+
+func biome(id: String) -> Dictionary:
+	for b in world_biomes():
+		var entry := PbJson.as_dict(b)
+		if String(entry.get("id", "")) == id:
+			return entry
+	push_warning("Data: unknown biome %s" % id)
+	return world_biomes()[0] if not world_biomes().is_empty() else {}
+
+
+func world_pack(pack: String) -> Dictionary:
+	return PbJson.as_dict(PbJson.as_dict(pb_table("world_props")).get("packs")).get(pack, {})
+
+
+func world_constants() -> Dictionary:
+	return PbJson.as_dict(pb_table("world_constants"))
+
+
+func world_palettes() -> Dictionary:
+	return PbJson.as_dict(pb_table("world_palettes"))
+
+
+func world_fx() -> Dictionary:
+	return PbJson.as_dict(pb_table("world_fx"))
+
+
+## Biome titles come with es/en/zh/zht variants straight from the mirror's locale chunks.
+func biome_label(id: String, locale: String = "en") -> String:
+	var raw = biome(id).get("name", {})
+	if raw is Dictionary:
+		var text := PbJson.as_string(raw.get(locale, ""))
+		return text if not text.is_empty() else PbJson.as_string(raw.get("es", id), id)
+	return PbJson.as_string(raw, id)
+
+
 # ------------------------------------------------------------------ i18n
 func i18n(locale: String) -> Dictionary:
 	return _cached_dict("i18n_" + locale, "res://data/i18n/%s.json" % locale)

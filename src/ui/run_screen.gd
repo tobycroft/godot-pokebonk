@@ -18,6 +18,9 @@ const ENEMY_POOL := 64
 var _run: Dictionary = {}
 var _player_node: Node3D
 var _camera: Camera3D
+var _terrain: PbTerrain
+var _view: PbWorldView
+var _sun: DirectionalLight3D
 var _enemy_nodes: Array[MeshInstance3D] = []
 var _orb_nodes: Array[MeshInstance3D] = []
 var _hud: RunHud
@@ -45,6 +48,7 @@ func _ready() -> void:
 	_build_world()
 	_build_hud()
 	_start_run()
+	_build_terrain()
 	# QA hook (like --pb-shot): render the level-up modal immediately for screenshots.
 	if "--pb-offer-demo" in OS.get_cmdline_user_args():
 		_run["pendingLevels"] = 1
@@ -68,37 +72,11 @@ func _build_world() -> void:
 	sun.rotation_degrees = Vector3(-55.0, 35.0, 0.0)
 	sun.light_energy = 1.0
 	add_child(sun)
-
-	var ground := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(ARENA_SIZE, ARENA_SIZE)
-	ground.mesh = plane
-	var mat := StandardMaterial3D.new()
-	var biome := String(Save.store.get("lastBiome", "forest"))
-	var ground_tex := "res://assets/env/%s/ground.png" % biome
-	if ResourceLoader.exists(ground_tex):
-		mat.albedo_texture = load(ground_tex)
-		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-		# Godot 4 tiles through uv1_scale (the 3.x u_scale/v_scale pair is gone).
-		mat.uv1_scale = Vector3(24.0, 24.0, 24.0)
-	else:
-		mat.albedo_color = Color(0.2, 0.32, 0.22)
-		push_warning("Run: biome texture missing (%s), using flat colour" % ground_tex)
-	ground.material_override = mat
-	add_child(ground)
-
-	# Real .glb props that ship with pokebonk-web: proves the model pipeline.
-	for prop in ["tower_portal", "tower_pillar"]:
-		var path := "res://assets/models/%s.glb" % prop
-		if ResourceLoader.exists(path):
-			var packed = load(path)
-			if packed is PackedScene:
-				var node: Node = packed.instantiate()
-				if node is Node3D:
-					(node as Node3D).position = Vector3(-8.0 if prop == "tower_portal" else 9.0, 0.0, -6.0)
-					add_child(node)
-		else:
-			push_warning("Run: prop model missing %s" % path)
+	_sun = sun
+	# The height field, props and water arrive once the run's seed/biome are known.
+	_view = PbWorldView.new()
+	_view.name = "World"
+	add_child(_view)
 
 	_player_node = Node3D.new()
 	add_child(_player_node)
@@ -228,6 +206,36 @@ func _start_run() -> void:
 	Audio.play_cry(species)
 
 
+## Build the arena from the run's own seed + biome, so the same seed walks the same map as
+## the web client (PbTerrain is asserted against the shipped generator, see tools/terrain_reference.mjs).
+func _build_terrain() -> void:
+	var biome_id := String(_run.get("biome", "forest"))
+	var seed_value := int(_run.get("seed", 0))
+	var biome_dict := PbData.biome(biome_id)
+	if biome_dict.is_empty():
+		push_warning("Run: unknown biome %s, falling back to a flat arena" % biome_id)
+		return
+	var started := Time.get_ticks_msec()
+	_terrain = PbTerrain.create(biome_dict, PbData.world_pack(biome_id), seed_value)
+	var palette_all := PbData.world_palettes()
+	var palette := PbJson.as_dict(PbJson.as_dict(palette_all.get("by_pack")).get(biome_id))
+	_view.setup(_terrain, biome_dict, PbData.world_pack(biome_id), palette, PbData.world_fx())
+	_view.place_models()
+	# Lights and environment follow the biome's own look (sun colour/intensity + fog).
+	var light := PbJson.as_float(biome_dict.get("light"), 1.0)
+	_sun.light_energy = clampf(0.7 * light, 0.3, 1.6)
+	_sun.light_color = PbWorldView.color_from_int(int(PbJson.as_int(biome_dict.get("sun"), 16773590)))
+	print("Run: terrain %s seed=%d in %d ms (res=%d, props=%d)" % [
+		biome_id, seed_value, Time.get_ticks_msec() - started, _terrain.res, _terrain.props.size()])
+
+
+## Height of the walkable surface at (x, z): terrain, or the water/ice above it.
+func _ground_y(x: float, z: float) -> float:
+	if _terrain == null:
+		return 0.0
+	return _terrain.surface(x, z)
+
+
 func _process(delta: float) -> void:
 	if _run.is_empty():
 		return
@@ -268,12 +276,27 @@ func _move_input(dt: float) -> void:
 	if dir != Vector2.ZERO:
 		var speed := float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) * 6.0
 		dir = dir.normalized()
-		player["x"] = float(player.get("x", 0.0)) + dir.x * speed * dt
-		player["z"] = float(player.get("z", 0.0)) + dir.y * speed * dt
+		var nx := float(player.get("x", 0.0)) + dir.x * speed * dt
+		var nz := float(player.get("z", 0.0)) + dir.y * speed * dt
+		# Prop colliders block the way: the same cylinder test the reference runs against its
+		# collider grid. When a diagonal move hits, slide along the axis that is still free.
+		if _terrain == null:
+			player["x"] = nx
+			player["z"] = nz
+		else:
+			var cx := float(player.get("x", 0.0))
+			var cz := float(player.get("z", 0.0))
+			if not _terrain.hit_prop(nx, nz, _ground_y(nx, nz) + 0.6, 0.45):
+				player["x"] = nx
+				player["z"] = nz
+			elif not _terrain.hit_prop(nx, cz, _ground_y(nx, cz) + 0.6, 0.45):
+				player["x"] = nx
+			elif not _terrain.hit_prop(cx, nz, _ground_y(cx, nz) + 0.6, 0.45):
+				player["z"] = nz
 		player["facing"] = 2 if dir.x > 0.0 else 6
-	var half := ARENA_SIZE * 0.5 - 2.0
-	player["x"] = clampf(float(player.get("x", 0.0)), -half, half)
-	player["z"] = clampf(float(player.get("z", 0.0)), -half, half)
+	var lim := _terrain.walk_lim() if _terrain != null else ARENA_SIZE * 0.5 - 2.0
+	player["x"] = clampf(float(player.get("x", 0.0)), -lim, lim)
+	player["z"] = clampf(float(player.get("z", 0.0)), -lim, lim)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -336,7 +359,10 @@ func _render(dt: float) -> void:
 	var player: Dictionary = _run.get("player", {})
 	var px := float(player.get("x", 0.0))
 	var pz := float(player.get("z", 0.0))
-	_player_node.position = Vector3(px, 0.0, pz)
+	var py := _ground_y(px, pz)
+	_player_node.position = Vector3(px, py, pz)
+	if _view != null:
+		_view.tick(dt, Vector3(px, py, pz), _camera)
 	if _player_node.get_child_count() == 0:
 		_player_node.add_child(PbVisuals.avatar(int(player.get("species_id", 1))))
 	else:
@@ -361,8 +387,9 @@ func _render(dt: float) -> void:
 	var shake_amount := _trauma * _trauma * 0.6 * _shake_scale
 	var shake_offset := Vector3(PbRng.randf_range(-shake_amount, shake_amount),
 		PbRng.randf_range(-shake_amount, shake_amount), 0.0)
-	_camera.position = Vector3(px, sin(pitch) * dist, pz + cos(pitch) * dist) + shake_offset
-	_camera.look_at(Vector3(px + shake_offset.x * 0.3, 1.0, pz + shake_offset.z * 0.3), Vector3.UP)
+	# Same rig as the reference (pitch .45, dist 9), riding the height field.
+	_camera.position = Vector3(px, py + sin(pitch) * dist, pz + cos(pitch) * dist) + shake_offset
+	_camera.look_at(Vector3(px + shake_offset.x * 0.3, py + 1.0, pz + shake_offset.z * 0.3), Vector3.UP)
 
 	var pool: Dictionary = _run.get("enemies", {})
 	var used := 0
@@ -376,8 +403,10 @@ func _render(dt: float) -> void:
 		used += 1
 		node.visible = true
 		var scale := float(PbEnemies.get_field(pool, "scale", i))
-		node.position = Vector3(float(PbEnemies.get_field(pool, "x", i)), scale * 0.55,
-			float(PbEnemies.get_field(pool, "z", i)))
+		var ex := float(PbEnemies.get_field(pool, "x", i))
+		var ez := float(PbEnemies.get_field(pool, "z", i))
+		# Enemies stand on the height field, not on a flat plane.
+		node.position = Vector3(ex, _ground_y(ex, ez) + scale * 0.55, ez)
 		(node.mesh as QuadMesh).size = Vector2(1.4, 1.4) * scale
 		var species := int(PbEnemies.get_field(pool, "species", i))
 		var mat := node.material_override as StandardMaterial3D
@@ -401,7 +430,7 @@ func _render(dt: float) -> void:
 		var node2 := _orb_nodes[orb_used]
 		orb_used += 1
 		node2.visible = true
-		node2.position = Vector3(float(orb["x"]), 0.4, float(orb["z"]))
+		node2.position = Vector3(float(orb["x"]), _ground_y(float(orb["x"]), float(orb["z"])) + 0.4, float(orb["z"]))
 	for i in range(orb_used, _orb_nodes.size()):
 		_orb_nodes[i].visible = false
 

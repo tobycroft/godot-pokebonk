@@ -133,3 +133,70 @@ python3 extract_ui_tokens.py                   # data/pb/ui_theme.json（CSS 变
 
 数据侧仅新增/重跑 `data/pb/ui_theme.json`（提取器产物）；`data/*.json` 与既有 `data/pb/*.json`
 数值零改动；升级卡 `rarity` 为按幅度估计并标注，遵循本文「档位幅度为估计」的既有纪律。
+
+## 参考源切换到 pokebonk-re：地图地形 1:1（本轮）
+
+`pokebonk-web` 是**部分抓取**（83 个 asset 文件、`assets/env` 只有 5 个群系且缺 atlas.json、
+无真鸣声/音乐/道具模型），而 `pokebonk-re` 是**完整离线镜像**（4.4k 文件、13 个 env 包、
+1025 鸣声、7 首音乐、61 个真 .glb、zh/zht/ru 语言包）。所以地形/世界系统改以 re 为权威源，
+`tools/extract_world.py` + `tools/terrain_reference.mjs` 都从它读取。
+
+### 1) 世界数据表（`tools/extract_world.py` → `data/pb/world_*.json`）
+
+| 表 | 内容 | 出处（bundle `main-CPuTGAQ--mvlr7rzv.js`） |
+|---|---|---|
+| `world_biomes.json` | 6 群系：size/relief/water/sky/fogNear-Far/light/sun/hemiGround/ground[4]/path/cliff[3]/tex/sanctuary/music/**zones**（每区 sunDir/sunH/tint/clouds/cover/glow/stars/motes）+ 中/繁/英译名 | news chunk 偏移 0（`var a=[{id:\`forest\`…`），译名来自 `zh-*/zht-*/en-*.js` 语言包 |
+| `world_props.json` | 11 个包的 trees/big/small/landmarks（name/scale/sway/collider/shadow，`model:` 覆盖为真 .glb 名）+ 每包 `atlas.json` 精灵矩形 | 182615（`au={forest:…}`，含 `ou`/`su` 构造器） |
+| `world_palettes.json` | 悬崖/地面 toon 调色板（a/b/light/dark/ink/mossA/mossB/moss/band/block/shore/ground）+ `_d()` 地面细节映射 | 205316–206830 |
+| `world_fx.json` | 天气 look 表（fog/storm/eclipse/meowth 的 top/bottom/fog/near/far/light/sun/clouds/cover/eclipse/vignette/tint + 刷怪池）与危险地形（mud/bramble/quicksand/fire + 群系映射） | 1017153（`cb`）、1311745（`bw`/`xw`） |
+| `world_constants.json` | Qu=1.12 网格、$u=4.6 阶地、Iu=13.5 像素网格、td/nd/rd/id/ad/od、地标半径、RNG/simplex 说明 | 214307、205317、131470、181841 |
+
+### 2) 地形生成器 1:1（`src/core/`）
+
+* `pb_js_rng.gd`＝`Ol`（mulberry32，逐位一致，seed 0 的回退值也一致）
+* `pb_simplex.gd`＝`iu`（2D simplex：shuffle 建 perm、F2/G2、8 梯度、`fbm` 归一化）
+* `pb_terrain.gd`＝`cd` 的开放世界路径：随机游走山谷 → massif 台地 → 阶地量化 → 池塘选址/挖掘
+  → 高度格 → 3×3 平滑 → `connect_plateaus` BFS + `carve_ramp` → 水位/熔岩/冰 → 地标（grove/fairy/arch/
+  hollow/meadow/boulders/pond）→ 植被散布（`placeEnv` 的拒绝采样、flip、collider）→ `shadeTex` 阴影遮罩
+  → `cliffAttribs` 崖顶/崖底属性
+* `pb_world_view.gd` + `pb_terrain/pb_props/pb_water.gdshader`：把上面全部数据画出来——
+  13.5 px/m 像素网格的 toon 地面（草/沙/雪/滩纹理化绘制、黏土块岩壁 + 苔藓 + 墨线 + bayer 抖动、
+  小径遮罩、水线沙滩、烘焙草影、雾）、atlas 圆柱公告板植被（风摆量化到整像素、遮挡玩家的抖动淡出、
+  椭圆假阴影）、水/冰/熔岩（涟漪/裂纹/闪光）、群系天空渐变与光照。
+* Run 场景改为按 **run 自己的 seed+biome** 生成世界，玩家/敌人/经验球贴地面高度，
+  移动受 `hit_prop` 碰撞体阻挡（斜向撞墙时沿未阻挡轴滑动）。
+
+### 3) 平价验证（不是自证）
+
+`tools/terrain_reference.mjs` 把 bundle 里的**真实地形类**切出来在 Node 里跑（用 Proxy 桩掉
+three.js 依赖），`tools/build_terrain_golden.py` 生成 `data/pb/terrain_golden.json`
+（6 群系 × seed 0/2026/1987654321：17×17 高度采样、massifs/ponds/landmarks、colliders、
+前 10 + 后 10 个 props 的 name/x/y/z/flip/s、probes 计数、ramps 与 lattice 校验和）。
+`tools/probe_terrain.gd` 全量比对，`SmokeTest` 里常驻 graveyard/2026 的逐值比对。
+
+**结果：18 个世界里 15 个逐值一致**（desert/coast/glacier/graveyard/volcano 全部 0 偏差，
+props 顺序/坐标/flip 也一致）。只有 forest（唯一有 relief 的群系）有偏差：
+massifs/ponds/landmarks/ramps 与 `connect_plateaus` 的总削方量完全一致，但高度格校验和差 ~0.001 m/格，
+局部采样最大 ~0.9 m，props 数差 <2%。原因定位在浮点差异被阶地量化放大（`Math.hypot` 与
+`sqrt(x²+z²)`、libm 的 sin/cos 末位差异），不是逻辑差异——`latticePre` 的差值与 `lattice` 完全相同，
+说明差异发生在 `connect_plateaus` 之前。要抹平需要逐位复刻 JS 的 double 运算路径（或把生成搬到
+GDExtension/C++），当前按"结构一致 + 记录偏差"处理，未静默放过。
+
+### 4) 资源缺口关闭（re 直接搬）
+
+`assets/env/` 12 包（atlas.json + atlas/ground/cliff/path）+ `env/common/`（atlas + hazards）；
+`assets/cries/` 1025 真鸣声（25/808/809 上游是 .ogg 命名的 MP3，用 ffmpeg 转成 .wav）；
+`assets/music/` 7 首（menu/boss/ingame1-4/halloween-menu）；`assets/models/` 61 个真 .glb
+（web 仓库里那 17 个坏文件由它们替换，全部通过 glTF 结构校验）；`assets/pmd`/`portraits` 151→971、
+`items` 63→158、`icons` 新增 1025、`ui/` 头像/框/军衔/属性图标。
+`data/pb/missing_remote_assets.json` 已逐条改写状态。
+
+### 5) 已知未完成（诚实记录）
+
+| 项 | 状态 |
+|---|---|
+| 圣所/塔竞技场布局（`generateArena`/`generateTower`/`placeArenaEnv` + `QS/oC/gC/TC` 表） | 未移植：布局表依赖 `qS`/`ou` 等构造器，需要扩 `terrain_reference.mjs`；Run 仍是开放世界 |
+| `Au`/`ju` 程序化贴图（tSand 等） | 未移植：先用群系 `path.png` 顶替 shore/path，视觉差在水线带 |
+| 天气/区域的 `look` 混合、motes（落叶/萤火/雪）、云、暗角、危险地形（泥潭/火焰…） | 数据已入表（`world_fx.json`），渲染只接了群系自身 look，未接区域/天气切换与粒子 |
+| forest 的浮点级平价 | 见上，`TODO(reverse)` |
+| 生成耗时 | forest 约 6.7 s、其余 1.8–3 s（GDScript 单线程），后续可后台预生成或下沉到 GDExtension |
