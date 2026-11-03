@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://tuwwo2rgmv3s"
-path="res://.godot/imported/glacier_spire_snow.png-b16fd4ce87eab7fd97fbf9cf9a7fbc31.ctex"
+path.s3tc="res://.godot/imported/glacier_spire_snow.png-b16fd4ce87eab7fd97fbf9cf9a7fbc31.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "cc7ffea057c6739e1d9f4677ecab74f8"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/glacier_spire_snow.png"
-dest_files=["res://.godot/imported/glacier_spire_snow.png-b16fd4ce87eab7fd97fbf9cf9a7fbc31.ctex"]
+dest_files=["res://.godot/imported/glacier_spire_snow.png-b16fd4ce87eab7fd97fbf9cf9a7fbc31.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

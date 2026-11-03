@@ -590,6 +590,12 @@ static func mm_tile(icon_name: String, title_text: String, sub_text: String,
 	var row := hbox(10)
 	row.add_theme_constant_override("separation", 10)
 	tile.add_child(row)
+	# A Button is not a Container, so the row has to be pinned to the tile's rect; without this
+	# the tile only reports its stylebox as minimum size and grid columns collapse.
+	row.set_anchors_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 10
+	row.offset_right = -10
+	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var ic := PanelContainer.new()
 	var ic_s := PbTheme.stylebox(".mm-ic", {"--c": "#" + accent.to_html(false)})
 	ic.add_theme_stylebox_override("panel", ic_s)

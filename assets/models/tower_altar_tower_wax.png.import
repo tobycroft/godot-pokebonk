@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://b6o31nrb5yy6b"
-path="res://.godot/imported/tower_altar_tower_wax.png-d9f3f0b0e06f64151b37a5f60c99e975.ctex"
+path.s3tc="res://.godot/imported/tower_altar_tower_wax.png-d9f3f0b0e06f64151b37a5f60c99e975.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "b6552007f171984602ef254a5d97ebf0"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/tower_altar_tower_wax.png"
-dest_files=["res://.godot/imported/tower_altar_tower_wax.png-d9f3f0b0e06f64151b37a5f60c99e975.ctex"]
+dest_files=["res://.godot/imported/tower_altar_tower_wax.png-d9f3f0b0e06f64151b37a5f60c99e975.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

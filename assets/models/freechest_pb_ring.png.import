@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cjmvcihaehscr"
-path="res://.godot/imported/freechest_pb_ring.png-a195a6f32f93dcd8703358351ee8ef65.ctex"
+path.s3tc="res://.godot/imported/freechest_pb_ring.png-a195a6f32f93dcd8703358351ee8ef65.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "867b5220e1e5af31278a314b3f8ca731"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/freechest_pb_ring.png"
-dest_files=["res://.godot/imported/freechest_pb_ring.png-a195a6f32f93dcd8703358351ee8ef65.ctex"]
+dest_files=["res://.godot/imported/freechest_pb_ring.png-a195a6f32f93dcd8703358351ee8ef65.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

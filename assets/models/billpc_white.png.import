@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://b0jqpfvsy6ei8"
-path="res://.godot/imported/billpc_white.png-dbd4c1e259f38e2b0e4e6a742785af23.ctex"
+path.s3tc="res://.godot/imported/billpc_white.png-dbd4c1e259f38e2b0e4e6a742785af23.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "8350d4a8db10fdff6ba095af7f7dff45"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/billpc_white.png"
-dest_files=["res://.godot/imported/billpc_white.png-dbd4c1e259f38e2b0e4e6a742785af23.ctex"]
+dest_files=["res://.godot/imported/billpc_white.png-dbd4c1e259f38e2b0e4e6a742785af23.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

@@ -1,14 +1,23 @@
 extends Control
-## Main menu, laid out like the web build's start screen: brand row + wallet
-## pills across the top, a hero card with the chunky pill actions on the left,
-## the starter showcase and settings on the right, all painted from the ported
-## CSS tokens (PbTheme) over the recreated page backdrop.
+## Main menu, laid out node-for-node like the web build's start screen (v0.8.34, mirrored in
+## pokebonk-re): floating language/fullscreen pills top-left, the trainer bar top-right, the
+## PokéBonk wordmark with its BETA badge, the `.mm-item` grid (a big striped `play` tile plus
+## endless / coop / event / tasks), the five small tiles, the mini row, and the season card on
+## the right -- all painted from the ported CSS tokens (PbTheme) over the page backdrop.
+##
+## The port-only extras (derived stats, move list, sliders, locale picker) live in the
+## `Ajustes` modal instead of crowding the menu, which is also where the web puts them.
 ##
 ## Data flows through the ported API routes exactly as the web client does:
 ## GET /profile, POST /profile/starter, PUT /profile/prefs.
 
 
 var _wallet: HBoxContainer
+var _wallet_name: Label
+var _wallet_sub: Label
+var _wallet_avatar: TextureRect
+var _play_sub: Label
+var _play_sprite: PmdSprite
 var _showcase_sprite: PmdSprite
 var _showcase_name: Label
 var _showcase_meta: Label
@@ -17,6 +26,7 @@ var _stat_grid: GridContainer
 var _moves_box: VBoxContainer
 var _recent: VBoxContainer
 var _hint: Label
+var _settings_scrim: PanelContainer
 var _starter := 4
 
 
@@ -25,20 +35,21 @@ func _ready() -> void:
 	var root := UI.screen()
 	add_child(root)
 	UI.fill(root)
-	var column := UI.content(root, 26)
+	var column := UI.content(root, 22)
 
-	column.add_child(_brand_row())
-	column.add_child(HSeparator.new())
+	column.add_child(_top_row())
 
-	var hero := UI.hbox(16)
-	hero.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(hero)
-	hero.add_child(_actions_card())
-	hero.add_child(_showcase_card())
-	hero.add_child(_settings_card())
+	var body := UI.hbox(18)
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(body)
+	body.add_child(_nav_column())
+	body.add_child(_season_card())
 
-	_hint = UI.paragraph("操作：WASD / 方向键移动 · F 融合（两招满级后）· P 暂停 · 1-3 选卡 · Esc 结算本局", 13, PbTheme.ink_muted(), 1)
+	_hint = UI.paragraph("操作：WASD / 方向键移动 · F 融合（两招满级后）· P 暂停 · 1-3 选卡 · Esc 结算本局", 12, PbTheme.ink_muted(), 1)
 	column.add_child(_hint)
+	column.add_child(_legal_footer())
+
+	_build_settings_modal()
 
 	_starter = int(Save.store.get("starter", 0))
 	if _starter <= 0:
@@ -51,6 +62,8 @@ func _ready() -> void:
 	# QA hook for screenshots: open the starter picker immediately.
 	if "--pb-starter-demo" in OS.get_cmdline_user_args():
 		_open_starter_picker.call_deferred()
+	if "--pb-settings-demo" in OS.get_cmdline_user_args():
+		_open_settings.call_deferred()
 
 
 func _debug_layout() -> void:
@@ -69,58 +82,311 @@ func _collect() -> Array:
 	return out
 
 
-func _process(_dt: float) -> void:
-	# Esc on the menu closes the app, like leaving the web page.
-	if Input.is_key_pressed(KEY_ESCAPE):
+func _unhandled_input(event: InputEvent) -> void:
+	# Edge-triggered (the web's Esc): close the top-most overlay, else leave the page.
+	if not (event is InputEventKey) or not event.pressed or event.keycode != KEY_ESCAPE:
+		return
+	if _settings_scrim != null and _settings_scrim.visible:
+		_close_settings()
+	elif _picker != null and is_instance_valid(_picker):
+		_picker.queue_free()
+		_picker = null
+	else:
 		get_tree().quit()
 
 
 # ------------------------------------------------------------------- header
-func _brand_row() -> Control:
-	var row := UI.hbox(12)
-	var brand := UI.vbox(0)
-	brand.add_theme_constant_override("separation", 0)
-	var title := UI.title("PokéBonk", 44)
-	brand.add_child(title)
-	brand.add_child(UI.dim("Godot 移植版 · 完全离线 · 数据与公式来自 pokebonk-web"))
-	row.add_child(brand)
+## The two floating pills (`.mm-lang`, fullscreen) on the left and the trainer bar on the
+## right, exactly where the web puts them.
+func _top_row() -> Control:
+	var row := UI.hbox(10)
+	var lang := UI.small_button("ZH", _cycle_locale, "blue")
+	lang.name = "LangPill"
+	row.add_child(lang)
+	var fs := UI.small_button("⛶", _toggle_fullscreen, "blue")
+	row.add_child(fs)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
-
-	_wallet = UI.hbox(8)
-	row.add_child(_wallet)
+	row.add_child(_trainer_bar())
 	return row
 
 
-# ------------------------------------------------------------------- actions
-func _actions_card() -> Control:
-	var card := UI.panel(18)
-	card.custom_minimum_size = Vector2(320, 0)
-	var box := UI.vbox(10)
-	card.add_child(box)
-	box.add_child(UI.subtitle("开始你的对局"))
-	box.add_child(UI.button("开始对局", _start_run, true, "yellow"))
+## `.trainer`: avatar + name + subtitle, then the wallet pills and the two actions.
+func _trainer_bar() -> Control:
+	var bar := UI.panel(10)
+	bar.name = "TrainerBar"
+	var row := UI.hbox(10)
+	bar.add_child(row)
 
-	# .mm-nav: the secondary destinations as web .mm-item tiles.
-	var nav := UI.grid(1, 8)
+	_wallet_avatar = TextureRect.new()
+	_wallet_avatar.custom_minimum_size = Vector2(44, 44)
+	_wallet_avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_wallet_avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	row.add_child(_wallet_avatar)
+
+	var who := UI.vbox(0)
+	who.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wallet_name = UI.label("?", 17, PbTheme.ink())
+	_wallet_name.add_theme_font_override("font", PbTheme.font("title"))
+	who.add_child(_wallet_name)
+	_wallet_sub = UI.dim("")
+	who.add_child(_wallet_sub)
+	row.add_child(who)
+
+	_wallet = UI.hbox(6)
+	row.add_child(_wallet)
+	row.add_child(UI.button("存入账号", _ask_account, false, "blue", true))
+	row.add_child(UI.button("退出", _quit, false, "blue", true))
+	return bar
+
+
+func _quit() -> void:
+	Audio.sfx("ui")
+	get_tree().quit()
+
+
+func _ask_account() -> void:
+	# The mirror's backend has no account flow for guests; the web offers the same button and
+	# the port keeps it honest rather than inventing a signup.
+	UI.toast(self, "离线镜像：游客存档保存在本地，用「存档管理」导出")
+	Audio.sfx("deny")
+
+
+func _cycle_locale() -> void:
+	var codes := ["en", "zh", "zht", "ja", "fr", "pt", "ru", "ko", "es"]
+	var i := maxi(0, codes.find(App.locale))
+	_set_locale(codes[(i + 1) % codes.size()])
+
+
+func _toggle_fullscreen() -> void:
+	var win := get_window()
+	win.mode = Window.MODE_FULLSCREEN if win.mode != Window.MODE_FULLSCREEN else Window.MODE_MAXIMIZED
+
+
+## Wordmark + BETA badge, the `.mm-item` grid and the mini row.
+func _nav_column() -> Control:
+	var box := UI.vbox(12)
+	box.custom_minimum_size = Vector2(620, 0)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var brand := UI.hbox(10)
+	brand.add_theme_constant_override("separation", 8)
+	var title := UI.title("PokéBonk", 58)
+	brand.add_child(title)
+	brand.add_child(UI.chip("BETA v0.8.34", PbTheme.accent_color("red", "c")))
+	box.add_child(brand)
+	box.add_child(UI.dim("Godot 移植版 · 完全离线 · 世界与公式对齐 pokebonk-re 镜像"))
+
+	# .mm-nav: the play tile is full width (`.mm-item.play` spans the grid), then the four
+	# mode/event tiles two-up, the five small tiles, and the mini row.
+	var nav := UI.vbox(10)
 	nav.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(nav)
-	nav.add_child(UI.mm_tile("globe", "图鉴", "151 只宝可梦与实时公式", PbTheme.accent_color("blue", "c"), func(): App.goto("dex")))
-	nav.add_child(UI.mm_tile("stardust", "研究所", "永久强化", PbTheme.accent_color("green", "c"), func(): App.goto("lab")))
-	nav.add_child(UI.mm_tile("rotate", "融合机器", "招式合成配方", PbTheme.accent_color("purple", "c"), func(): App.goto("fusion")))
-	nav.add_child(UI.mm_tile("lock", "存档管理", "导出 / 导入 / 备份", PbTheme.accent_color("orange", "c"), func(): App.goto("save")))
+	nav.add_child(_play_tile())
 
-	box.add_child(HSeparator.new())
-	# Starter selection (web `sp` screen @1951000): a 3-way pick, not a ◀▶ cycle.
-	box.add_child(UI.button("选择初始伙伴", _open_starter_picker, false, "purple"))
+	var grid := UI.grid(2, 10)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nav.add_child(grid)
+	grid.add_child(UI.mm_tile("moon-stone", "生存模式", "无尽 · 迁移与首领", PbTheme.accent_color("purple", "c"), _start_endless))
+	grid.add_child(UI.mm_tile("friends", "合作模式", "与好友 2-4 人", PbTheme.accent_color("green", "c"), _todo_coop))
+	grid.add_child(UI.mm_tile("map-boss", "Lavanda 之夜", "活动 · 14 天后结束", PbTheme.accent_color("orange", "c"), _todo_event))
+	grid.add_child(UI.mm_tile("mission", "委托", "3 项 · 19 小时后刷新", PbTheme.accent_color("blue", "c"), _todo_tasks))
+
+	var tiles := UI.grid(5, 8)
+	tiles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(tiles)
+	tiles.add_child(_mini_tile("globe", "图鉴", "%d/151" % int(Save.summary().get("captured", 0)),
+		PbTheme.accent_color("blue", "c"), func(): App.goto("dex")))
+	tiles.add_child(_mini_tile("stardust", "研究所", "%d" % int(Save.summary().get("lab", 0)),
+		PbTheme.accent_color("green", "c"), func(): App.goto("lab")))
+	tiles.add_child(_mini_tile("crown", "成就", "0/228", PbTheme.accent_color("red", "c"), _todo_achievements))
+	tiles.add_child(_mini_tile("gold", "排行", "14 d", PbTheme.accent_color("yellow", "c"), _todo_ranking))
+	tiles.add_child(_mini_tile("clan", "氏族", "无氏族", PbTheme.accent_color("purple", "c"), _todo_clan))
+
+	var mini := UI.hbox(8)
+	box.add_child(mini)
+	mini.add_child(UI.mm_tile("brush", "设置", "", PbTheme.accent_color("blue", "c"), _open_settings))
+	mini.add_child(UI.mm_tile("bug", "反馈", "", PbTheme.accent_color("orange", "c"), _todo_report))
+	mini.add_child(UI.mm_tile("chat", "Discord", "", PbTheme.accent_color("purple", "c"), _todo_discord))
+	mini.add_child(UI.mm_tile("megaphone", "Charcher", "", PbTheme.accent_color("green", "c"), _todo_dev))
 
 	box.add_child(HSeparator.new())
 	box.add_child(UI.dim("最近对局（profile.runs，结算后写入）"))
 	_recent = UI.vbox(2)
 	box.add_child(_recent)
+	return box
+
+
+## `.mm-item.play`: red gradient + stripes, the label, the Liga progress line and the current
+## partner's sprite on the right -- the web's hero tile.
+func _play_tile() -> Control:
+	var tile := Button.new()
+	tile.flat = true
+	tile.focus_mode = Control.FOCUS_NONE
+	tile.name = "PlayTile"
+	tile.custom_minimum_size = Vector2(0, 108)
+	var s := PbTheme.stylebox(".mm-item.play", {"--c": "#" + PbTheme.accent_color("red", "c").to_html(false)})
+	s.content_margin_left = 14
+	s.content_margin_top = 12
+	s.content_margin_bottom = 12
+	s.content_margin_right = 12
+	for state in ["normal", "hover", "pressed"]:
+		tile.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+	tile.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	# `.mm-item.play` is a red gradient with stripes -- a StyleBoxFlat cannot express that, so
+	# the band is painted behind the content (same trick as the season header).
+	var band := PbWidgets.GradRect.new()
+	band.set_anchors_preset(Control.PRESET_FULL_RECT)
+	band.corner = 22.0
+	band.setup(PbTheme.gradient("linear-gradient(135deg, #ff8f94, #ff5a5f 60%, #e0303e)"), null, true)
+	tile.add_child(band)
+
+	var row := UI.hbox(12)
+	tile.add_child(row)
+	# Pin the row to the tile: a Button lays its children out by anchors, not by container.
+	row.set_anchors_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 14
+	row.offset_right = -14
+	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var ic := PanelContainer.new()
+	ic.add_theme_stylebox_override("panel", PbTheme.stylebox(".mm-ic", {"--c": "#ff5a5f"}))
+	ic.custom_minimum_size = Vector2(56, 56)
+	ic.add_child(UI.icon_rect("poke-ball", 42))
+	row.add_child(ic)
+
+	var tx := UI.vbox(2)
+	tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var big := UI.label("开始对局", 30, Color.WHITE)
+	big.add_theme_font_override("font", PbTheme.font("title"))
+	tx.add_child(big)
+	_play_sub = UI.label("", 13, Color(1, 1, 1, 0.92))
+	tx.add_child(_play_sub)
+	row.add_child(tx)
+
+	_play_sprite = PmdSprite.new()
+	_play_sprite.custom_minimum_size = Vector2(64, 64)
+	row.add_child(_play_sprite)
+
+	tile.pressed.connect(_start_run)
+	tile.mouse_entered.connect(func():
+		tile.pivot_offset = tile.size * 0.5
+		tile.create_tween().tween_property(tile, "scale", Vector2(1.02, 1.02), 0.12))
+	tile.mouse_exited.connect(func():
+		tile.create_tween().tween_property(tile, "scale", Vector2.ONE, 0.12))
+	return tile
+
+
+## `.lb-card`-style season panel on the right: striped header, segmented tabs, the region
+## selector, the empty leaderboard state and the prize ladder.
+func _season_card() -> Control:
+	var card := UI.panel(0)
+	card.name = "SeasonCard"
+	card.custom_minimum_size = Vector2(320, 0)
+	var box := UI.vbox(8)
+	card.add_child(box)
+
+	var head := UI.hbox(8)
+	head.add_theme_constant_override("separation", 8)
+	var word := UI.label("赛季 2", 20, Color.WHITE)
+	word.add_theme_font_override("font", PbTheme.font("title"))
+	head.add_child(word)
+	var head_sp := Control.new()
+	head_sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(head_sp)
+	head.add_child(UI.label("14 天后结束", 12, Color(1, 1, 1, 0.92)))
+	box.add_child(_banner(58, head))
+
+	box.add_child(UI.segment([
+		{"id": "kills", "text": "击败"},
+		{"id": "endless", "text": "生存"},
+		{"id": "race", "text": "竞速"},
+		{"id": "clans", "text": "氏族"},
+	], "kills", func(_id): _todo_ranking()))
+	box.add_child(UI.mm_tile("globe", "全球", "所有地区合计", PbTheme.accent_color("purple", "c"), _todo_ranking))
+	box.add_child(UI.dim("还没有人打过本赛季 —— 开一局就能直接进前 100。"))
+
+	var mine := UI.panel(12)
+	mine.name = "SeasonMine"
+	var mbox := UI.vbox(4)
+	mine.add_child(mbox)
+	mbox.add_child(UI.section("你的赛季"))
+	mbox.add_child(UI.paragraph("游客不计入排行榜。", 14, PbTheme.ink(), 2))
+	box.add_child(mine)
+
+	box.add_child(UI.dim("奖励：前 100 名获得徽章、边框与星尘"))
+	var prizes := UI.hbox(6)
+	for label_text in ["#1", "#2-3", "#4-10", "#11-25", "#26-50", "#51-100"]:
+		prizes.add_child(UI.chip(label_text, PbTheme.accent_color("yellow", "c")))
+	box.add_child(prizes)
+	box.add_child(UI.button("查看完整排行", _todo_ranking, false, "blue"))
 	return card
+
+
+## A striped gradient band (the web's `.lab-top` / season header trick): GradRect fills a fixed
+## height box and the content row is overlaid on top of it.
+func _banner(height: int, content: Control) -> Control:
+	var wrap := UI.panel(0)
+	wrap.custom_minimum_size = Vector2(0, height)
+	var band := PbWidgets.GradRect.new()
+	band.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# GradRect paints the gradient + stripes itself; handing it a StyleBoxFlat draws
+	# outside _draw and trips "canvas_item is null", so only the corner radius is set.
+	band.corner = 18.0
+	band.setup(PbTheme.gradient("linear-gradient(135deg, #ffb04a, #ff8a2f)"), null, true)
+	wrap.add_child(band)
+	var margins := MarginContainer.new()
+	margins.set_anchors_preset(Control.PRESET_FULL_RECT)
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		margins.add_theme_constant_override(side, 10)
+	margins.add_child(content)
+	wrap.add_child(margins)
+	return wrap
+
+
+## `.mm-item.tile`: the small vertical tiles (icon on top, title, value) the web uses for the
+## secondary destinations row.
+func _mini_tile(icon_name: String, title_text: String, value_text: String,
+		accent: Color, on_click: Callable) -> Control:
+	var tile := Button.new()
+	tile.flat = true
+	tile.focus_mode = Control.FOCUS_NONE
+	tile.custom_minimum_size = Vector2(0, 92)
+	var s := PbTheme.stylebox(".mm-item.tile", {"--c": "#" + accent.to_html(false)})
+	for state in ["normal", "hover", "pressed"]:
+		tile.add_theme_stylebox_override(state, s)
+	tile.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var col := UI.vbox(4)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.set_anchors_preset(Control.PRESET_FULL_RECT)
+	tile.add_child(col)
+	var ic := PanelContainer.new()
+	ic.add_theme_stylebox_override("panel", PbTheme.stylebox(".mm-ic", {"--c": "#" + accent.to_html(false)}))
+	ic.custom_minimum_size = Vector2(40, 40)
+	ic.add_child(UI.icon_rect(icon_name, 30))
+	col.add_child(ic)
+	var t := UI.label(title_text, 15, PbTheme.ink())
+	t.add_theme_font_override("font", PbTheme.font("title"))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(t)
+	var v := UI.dim(value_text)
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(v)
+	if on_click.is_valid():
+		tile.pressed.connect(on_click)
+	return tile
+
+
+func _legal_footer() -> Control:
+	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))
+	return UI.paragraph(
+		"PokéBonk 是非官方同人作品，无广告、无内购、无盈利意图，与 Nintendo / Creatures / GAME FREAK 无关。"
+		+ "宝可梦名称与角色为各自权利所有者的商标 · © 1995-2026 · 精灵图来自 PMD SpriteCollab (CC BY-NC 4.0)。"
+		+ "移植来源：%s build %s / %s" % [String(meta.get("ported_from_repo", "pokebonk-web")),
+		String(meta.get("site_build", "?")), String(meta.get("site_version", "?"))],
+		11, PbTheme.ink_muted(), 3)
 
 
 # ------------------------------------------------------------------- showcase
@@ -229,14 +495,17 @@ func _slider_row(caption: String, value: float, on_change: Callable) -> Control:
 func refresh() -> void:
 	var profile: Dictionary = Save.load_profile()
 	var s := Save.summary()
+	_wallet_name.text = String(s.get("name", "?"))
+	_wallet_sub.text = "%d 场对局 · %d 个家族已捕获" % [int(s.get("runs", 0)), int(s.get("captured", 0))]
+	var portrait := "res://assets/portraits/%d.png" % _starter
+	_wallet_avatar.texture = load(portrait) as Texture2D if ResourceLoader.exists(portrait) else null
 	for c in _wallet.get_children():
 		c.queue_free()
-	_wallet.add_child(UI.stat_pill("训练家", String(s.get("name", "?")), "blue"))
 	_wallet.add_child(UI.stat_pill("星尘", _num(int(s.get("stardust", 0))), "yellow"))
-	_wallet.add_child(UI.stat_pill("邦币", _num(int(s.get("bonk", 0))), "purple"))
-	_wallet.add_child(UI.stat_pill("联盟", "%d" % int(s.get("league", 0)), "green"))
 	_wallet.add_child(UI.stat_pill("图鉴", "%d/151" % int(s.get("captured", 0)), "orange"))
-	_wallet.add_child(UI.stat_pill("对局", "%d" % int(s.get("runs", 0)), "red"))
+	if _play_sub != null:
+		_play_sub.text = "经典模式 · %d/151 在你的联盟 · 联盟 %d · 邦币 %d" % [
+			int(s.get("captured", 0)), int(s.get("league", 0)), int(s.get("bonk", 0))]
 	for c in _recent.get_children():
 		c.queue_free()
 	var runs: Array = PbJson.as_array(profile.get("runs", []))
@@ -249,6 +518,94 @@ func refresh() -> void:
 			int(rec.get("level", 0)), int(rec.get("kills", 0)), float(rec.get("time", 0.0)),
 			"胜利" if bool(rec.get("victory", false)) else "失败"]))
 	_show_starter(int(profile.get("starter", 0)) if int(profile.get("starter", 0)) > 0 else _starter)
+	if _play_sprite != null and is_instance_valid(_play_sprite):
+		_play_sprite.setup(_starter, "idle")
+
+
+# ------------------------------------------------------------- settings modal
+## The web keeps partner stats, sliders, aim mode and language behind `Ajustes`; the port does
+## the same so the menu itself matches the reference layout.
+func _build_settings_modal() -> void:
+	_settings_scrim = PanelContainer.new()
+	_settings_scrim.name = "SettingsScrim"
+	_settings_scrim.add_theme_stylebox_override("panel", PbTheme.modal_scrim())
+	UI.fill(_settings_scrim)
+	_settings_scrim.visible = false
+	add_child(_settings_scrim)
+	UI.fill(_settings_scrim)
+	var col := UI.vbox(12)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	_settings_scrim.add_child(col)
+	var head := UI.hbox(10)
+	col.add_child(head)
+	var title := UI.modal_title("设置", false)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	head.add_child(UI.button("关闭 (Esc)", _close_settings, false, "ghost", true))
+	var row := UI.hbox(14)
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(row)
+	row.add_child(_showcase_card())
+	row.add_child(_settings_card())
+
+
+func _open_settings() -> void:
+	_settings_scrim.visible = true
+	Audio.sfx("ui")
+
+
+func _close_settings() -> void:
+	_settings_scrim.visible = false
+	Audio.sfx("ui")
+
+
+## Modes and systems the mirror's backend does not expose offline. Each one says so instead
+## of pretending to work, matching how the port documents the rest of its gaps.
+func _start_endless() -> void:
+	UI.toast(self, "生存模式未移植：需要服务器端的迁移/塔层系统")
+	Audio.sfx("deny")
+
+
+func _todo_coop() -> void:
+	_ui_todo("合作模式（re 镜像里有完整的联机协议，但需要 WebRTC/中继服务）")
+
+
+func _todo_event() -> void:
+	_ui_todo("活动「Lavanda 之夜」是限时服务器事件")
+
+
+func _todo_tasks() -> void:
+	_ui_todo("委托任务由服务器下发，镜像里没有该接口")
+
+
+func _todo_achievements() -> void:
+	_ui_todo("成就页未移植：数据在 profile.counters，界面待建")
+
+
+func _todo_ranking() -> void:
+	_ui_todo("排行榜是服务器玩法，离线镜像无数据")
+
+
+func _todo_clan() -> void:
+	_ui_todo("Clans 为服务器玩法（firebase/clans.mjs 未被离线后端实现）")
+
+
+func _todo_report() -> void:
+	_ui_todo("反馈接口指向线上服务，离线不可用")
+
+
+func _todo_discord() -> void:
+	_ui_todo("外部链接：离线镜像不跳转")
+
+
+func _todo_dev() -> void:
+	_ui_todo("开发者主页为线上内容")
+
+
+func _ui_todo(text: String) -> void:
+	UI.toast(self, text)
+	Audio.sfx("deny")
 
 
 func _show_starter(species_id: int) -> void:

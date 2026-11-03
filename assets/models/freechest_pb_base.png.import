@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://5lbiykvv7hah"
-path="res://.godot/imported/freechest_pb_base.png-4c4c7f5b58bdc7c585fb923e42b4fb6a.ctex"
+path.s3tc="res://.godot/imported/freechest_pb_base.png-4c4c7f5b58bdc7c585fb923e42b4fb6a.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "879321687d9c04fdc16d5c650038a38d"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/freechest_pb_base.png"
-dest_files=["res://.godot/imported/freechest_pb_base.png-4c4c7f5b58bdc7c585fb923e42b4fb6a.ctex"]
+dest_files=["res://.godot/imported/freechest_pb_base.png-4c4c7f5b58bdc7c585fb923e42b4fb6a.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

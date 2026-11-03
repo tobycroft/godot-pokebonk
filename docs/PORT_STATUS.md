@@ -200,3 +200,34 @@ GDExtension/C++），当前按"结构一致 + 记录偏差"处理，未静默放
 | 天气/区域的 `look` 混合、motes（落叶/萤火/雪）、云、暗角、危险地形（泥潭/火焰…） | 数据已入表（`world_fx.json`），渲染只接了群系自身 look，未接区域/天气切换与粒子 |
 | forest 的浮点级平价 | 见上，`TODO(reverse)` |
 | 生成耗时 | forest 约 6.7 s、其余 1.8–3 s（GDScript 单线程），后续可后台预生成或下沉到 GDExtension |
+
+## 界面 1:1 第一轮：主菜单按 re 实机重建
+
+参考源改为**跑起来的 re 镜像**（`node server.mjs` → 127.0.0.1:8080，v0.8.34），逐屏截图 +
+`getComputedStyle` 取真实值，而不是读压缩 CSS 猜。取到的关键事实：
+`--paper:#fff`、`--ink:#2a2440`、`--radius:22px`、`--stripes: repeating-linear-gradient(-45deg,#ffffff24 0 10px,#fff0 10px 20px)`、
+`--font-title:"M PLUS Rounded 1c"`、body 字体带 CJK 回退、`.btn` 是 `linear-gradient(180deg,#ff787c,#ff5a5f 60%,#e0303e)`
++ `0 4px 0` 硬底边 + hover `scale(1.02) translateY(-2)`、`.seg` 底槽 `#f3f1fa` + inset 阴影 + `skewX(3°)`。
+
+`src/ui/main_menu.gd` 按实机结构重排（不再是三栏仪表盘）：
+
+| 区域 | 对齐点 |
+|---|---|
+| 左上浮动 pill | 语言（点击循环 9 语言）+ 全屏 |
+| 右上 `.trainer` | 头像（`assets/portraits/<dex>.png`）+ 名字 + `N 场对局 · M 个家族已捕获` + 星尘/图鉴胶囊 + 存入账号/退出 |
+| wordmark | `PokéBonk` 58px 标题字体 + `BETA v0.8.34` 胶囊 |
+| `.mm-item.play` | 整宽红色渐变 + 斜纹（GradRect，StyleBoxFlat 表达不了渐变）、图标块、标题/副标题、右侧当前伙伴 PMD |
+| `.mm-item` ×4 | 生存 / 合作 / 活动 / 委托 两列 |
+| `.mm-item.tile` ×5 | 竖排小磁贴：图鉴 151/151、研究所、成就 0/228、排行、氏族 |
+| `.mm-item.mini` | 设置 / 反馈 / Discord / 开发者 |
+| 右侧赛季卡 | 橙色斜纹渐变头 + 分段（击败/生存/竞速/氏族）+ 全球下拉 + 空状态 + `你的赛季` + 奖励阶梯 + 按钮 |
+| 页脚 | 非官方声明 + 移植来源 build/版本 |
+
+设置与"当前伙伴派生值/招式"移入 `Ajustes` 弹窗（Web 也把它们放在设置屏，菜单本体保持与参考一致）。
+未迁移的入口（生存/合作/活动/委托/成就/排行/氏族/反馈）逐个 toast 说明原因，不做假按钮。
+
+顺带修的通用 bug：`UI.mm_tile` 把内容行锚到按钮矩形并设 `SIZE_EXPAND_FILL` —— Button 不是
+Container，之前磁贴在网格里会塌成最小宽度导致文字互相压叠（这条影响所有用 mm_tile 的屏）。
+
+**验证**：`./scripts/verify.sh` → 506 项 0 失败，六屏零错误启动；`./scripts/shot.sh MainMenu` 与
+`/tmp/web-04-menu.png`（re 实机）逐区对照。
