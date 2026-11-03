@@ -1,0 +1,216 @@
+class_name PbDataRegistry
+extends Node
+## Singleton that owns every static table ported from pokebonk-web.
+##
+## Registered as the "Data" autoload. Two families of tables:
+##   res://data/*     -- copied verbatim from pokebonk-web/data (the game's own JSON)
+##   res://data/pb/*  -- recovered from the minified bundle by tools-re/build_pb_data.py
+##
+## Loading is lazy: a table is parsed the first time it is requested, so a
+## headless smoke test only pays for what it touches.
+
+const KANTO_SIZE := 151
+
+var _cache := {}
+var _by_key := {}
+var _move_by_key := {}
+var _move_by_id := {}
+var _type_index := {}
+var _children_of := {}
+
+
+func _ready() -> void:
+	# Warm the indexes the whole game depends on.
+	types_table()
+	pokemon_list()
+	moves_list()
+
+
+# ------------------------------------------------------------------ raw tables
+func types_table() -> Dictionary:
+	return _cached_dict("types", "res://data/types.json")
+
+
+func pokemon_list() -> Array:
+	var list := _cached_array("pokemon", "res://data/pokemon.json")
+	if _by_key.is_empty():
+		for p in list:
+			_by_key[int(p["id"])] = p
+			_by_key[String(p["key"])] = p
+			var from = p.get("evoFrom")
+			if from != null:
+				var parent := int(from)
+				if not _children_of.has(parent):
+					_children_of[parent] = []
+				_children_of[parent].append(p)
+	return list
+
+
+func moves_list() -> Array:
+	var list := _cached_array("moves", "res://data/moves.json")
+	if _move_by_key.is_empty():
+		for m in list:
+			_move_by_key[String(m["key"])] = m
+			_move_by_id[int(m["id"])] = m
+	return list
+
+
+func abilities_map() -> Dictionary:
+	return _cached_dict("abilities", "res://data/abilities.json")
+
+
+func items_map() -> Dictionary:
+	return _cached_dict("items", "res://data/items.json")
+
+
+func learnsets_map() -> Dictionary:
+	return _cached_dict("learnsets", "res://data/learnsets.json")
+
+
+func sprites_map() -> Dictionary:
+	return _cached_dict("sprites", "res://data/sprites.json")
+
+
+func pb_table(name: String) -> Variant:
+	return _cached_value("pb_" + name, "res://data/pb/%s.json" % name)
+
+
+func constants() -> Dictionary:
+	return PbJson.as_dict(pb_table("constants"))
+
+
+func const_of(path: String, default: Variant = null) -> Variant:
+	## constants_of("player_stats.hp_base") style lookups used across the port.
+	var node: Variant = constants()
+	for part in path.split("."):
+		if typeof(node) != TYPE_DICTIONARY or not node.has(part):
+			return default
+		node = node[part]
+	return node
+
+
+# ------------------------------------------------------------------ accessors
+func species(id_or_key: Variant) -> Dictionary:
+	pokemon_list()
+	var found = _by_key.get(int(id_or_key) if typeof(id_or_key) != TYPE_STRING else id_or_key)
+	return found if found is Dictionary else {}
+
+
+func move_def(key: String) -> Dictionary:
+	moves_list()
+	return _move_by_key.get(key, {})
+
+
+## learnsets.json references moves by *id*, so an id index is needed too.
+func move_by_id(move_id: int) -> Dictionary:
+	moves_list()
+	return _move_by_id.get(move_id, {})
+
+
+func ability(id_or_key: Variant) -> Dictionary:
+	var table := abilities_map()
+	if typeof(id_or_key) == TYPE_STRING:
+		for key in table.keys():
+			if String(table[key].get("key", "")) == String(id_or_key):
+				return table[key]
+		return {}
+	return PbJson.as_dict(table.get(str(int(id_or_key)), {}))
+
+
+func learnset(species_id: int) -> Array:
+	## Entries are [moveId, level] exactly as shipped in learnsets.json.
+	return PbJson.as_array(learnsets_map().get(str(species_id), []))
+
+
+func evolutions_of(species_id: int) -> Array:
+	pokemon_list()
+	return _children_of.get(species_id, [])
+
+
+func evo_chain_root(species_id: int) -> int:
+	var current := species(species_id)
+	while current.get("evoFrom") != null:
+		current = species(int(current["evoFrom"]))
+	return int(current.get("id", species_id))
+
+
+func dex_ids(gen: int = 1) -> Array:
+	var out := []
+	for p in pokemon_list():
+		if int(p.get("gen", 1)) <= gen:
+			out.append(int(p["id"]))
+	return out
+
+
+func kanto_ids() -> Array:
+	var out := []
+	for p in pokemon_list():
+		var id := int(p["id"])
+		if id >= 1 and id <= KANTO_SIZE:
+			out.append(id)
+	return out
+
+
+# ------------------------------------------------------------------ type chart
+func type_index(type_name: String) -> int:
+	if _type_index.is_empty():
+		var names: Array = PbJson.as_array(types_table().get("types", []))
+		for i in names.size():
+			_type_index[String(names[i])] = i
+	return _type_index.get(type_name, -1)
+
+
+func type_names() -> Array:
+	return PbJson.as_array(types_table().get("types", []))
+
+
+func chart_cell(atk: String, def: String) -> float:
+	## Raw Pokemon chart value (0 / 0.5 / 1 / 2); PokeBonk remaps it in PbDamage.
+	var chart := PbJson.as_array(types_table().get("chart", []))
+	var ai := type_index(atk)
+	var di := type_index(def)
+	if ai < 0 or di < 0 or chart.is_empty():
+		return 1.0
+	var row := PbJson.as_array(chart[ai])
+	if di >= row.size():
+		return 1.0
+	return float(row[di])
+
+
+func type_label(type_name: String) -> String:
+	return String(PbJson.as_dict(types_table().get("names", {})).get(type_name, type_name))
+
+
+# ------------------------------------------------------------------ sprite data
+func pmd_meta(species_id: int) -> Dictionary:
+	return PbJson.as_dict(sprites_map().get(str(species_id), {}))
+
+
+# ------------------------------------------------------------------ i18n
+func i18n(locale: String) -> Dictionary:
+	return _cached_dict("i18n_" + locale, "res://data/i18n/%s.json" % locale)
+
+
+func localized_name(kind: String, id_or_key: Variant, locale: String = "en") -> String:
+	var table := i18n(locale)
+	var section := PbJson.as_dict(table.get(kind, {}))
+	var key := str(int(id_or_key)) if typeof(id_or_key) != TYPE_STRING else String(id_or_key)
+	return String(section.get(key, ""))
+
+
+# ------------------------------------------------------------------ plumbing
+func _cached_value(tag: String, path: String) -> Variant:
+	if not _cache.has(tag):
+		_cache[tag] = PbJson.read_json(path)
+	var value = _cache[tag]
+	if value == null:
+		push_error("Data: table '%s' unavailable at %s" % [tag, path])
+	return value
+
+
+func _cached_dict(tag: String, path: String) -> Dictionary:
+	return PbJson.as_dict(_cached_value(tag, path))
+
+
+func _cached_array(tag: String, path: String) -> Array:
+	return PbJson.as_array(_cached_value(tag, path))
