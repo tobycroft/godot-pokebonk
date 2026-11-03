@@ -35,6 +35,8 @@ func _ready() -> void:
 	_asset_checks()
 	_theme_ui_checks()
 	_revive_checks()
+	_danger_golden_checks()
+	_ui_build_checks()
 	report()
 	get_tree().quit(0 if _failures.is_empty() else 1)
 
@@ -511,6 +513,52 @@ func _revive_checks() -> void:
 	ok(float(p["hp"]) > 0.0 and absf(float(p["hp"]) - float(p["maxHp"]) * 0.6) < 0.01, "revive restores 60% max HP")
 	ok(int(p["revives"]) == 0, "revive consumes a charge")
 	ok(not PbRun._try_revive(run), "second death with 0 charges fails")
+
+
+## ------------------------------------------------------------------ 9. danger parity
+## PbRun.danger() must match the independent Python implementation in
+## golden_values.py (structure parity; magnitude is the port's estimate).
+func _danger_golden_checks() -> void:
+	section("danger golden parity")
+	var cases: Array = PbJson.as_array(_golden.get("danger", []))
+	ok(cases.size() >= 5, "golden danger cases present")
+	for c in cases:
+		var entry := PbJson.as_dict(c)
+		var state := {
+			"stage": int(entry["stage"]), "time": float(entry["time"]),
+			"diff": {"enemyDamage": 1.0, "enemyAmount": 1.0, "enemySpeed": 1.0},
+		}
+		close(PbRun.danger(state), float(entry["value"]),
+			"danger stage %s time %s" % [str(entry["stage"]), str(entry["time"])])
+	var s1 := {"stage": 1, "time": 0.0, "diff": {}}
+	var s5 := {"stage": 5, "time": 300.0, "diff": {}}
+	ok(PbRun.danger(s5) > PbRun.danger(s1), "danger rises with stage/time")
+
+
+## ------------------------------------------------------------------ 10. UI builders
+## The new kit widgets must construct without a renderer and expose the right
+## structure (they are the 1:1 port of the web DOM classes).
+func _ui_build_checks() -> void:
+	section("UI kit builders")
+	ok(UI.field("x") is LineEdit, "UI.field returns a LineEdit")
+	ok(UI.chip("t", Color.RED) is PanelContainer, "UI.chip returns a PanelContainer")
+	ok(UI.type_chip("fire") is PanelContainer, "UI.type_chip returns a PanelContainer")
+	var seg := UI.segment([{"id": "a", "text": "A"}, {"id": "b", "text": "B"}], "a", Callable())
+	ok(seg is PanelContainer and seg.get_child_count() == 1, "UI.segment builds a track with pills")
+	var head := UI.screen_head("T", "S", Callable())
+	ok(head.get_child_count() >= 3, "UI.screen_head has back + kbd + title")
+	var tile := UI.mm_tile("globe", "T", "S", Color.BLUE, Callable())
+	ok(tile.get_child_count() >= 1, "UI.mm_tile builds a row")
+	var sw := PbWidgets.SwitchToggle.new()
+	sw.set_pressed(true)
+	ok(sw.on and sw.get_child_count() == 1, "SwitchToggle builds + toggles")
+	var card := UI.card_offer({"rc": Color.BLUE, "title": "X", "lines": ["a"], "key": "1"}, Callable(), 0)
+	ok(card.get_child_count() >= 1, "UI.card_offer builds a body column")
+	# the danger/label colour tables resolve
+	ok(PbTheme.rarity_dot_color(0) != PbTheme.rarity_dot_color(4), "rarity dot colours distinct")
+	# number formatter edge cases
+	ok(UI.fmt_num(1.0e15) == "1Q", "fmt_num 1Q")
+	ok(UI.fmt_clock(0.0) == "0:00", "fmt_clock zero")
 
 
 func report() -> void:

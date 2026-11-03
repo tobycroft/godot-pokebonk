@@ -161,6 +161,22 @@ static func _tick_director(state: Dictionary, dt: float) -> void:
 		_message(state, "stage %d" % int(state["stage"]))
 
 
+## Danger meter (bundle director.danger @882422 = 0.5*log2(hpMult*dmgMult*
+## enemyDamage*enemyAmount*enemySpeed^2)). The hpMult/dmgMult/ve inputs live in
+## unrecoverable closures, so we feed the port's own stage/time multipliers --
+## same shape, estimated magnitude, mirrored by tools-re/golden_values.py.
+static func danger(state: Dictionary) -> float:
+	var diff := PbJson.as_dict(state.get("diff", {}))
+	var stage := float(int(state.get("stage", 1)))
+	var time := float(state.get("time", 0.0))
+	var hp_mult := 1.0 + (stage - 1.0) * 0.35
+	var dmg_mult := (1.0 + time / 60.0 * 0.13) * hp_mult
+	var raw := hp_mult * dmg_mult * float(diff.get("enemyDamage", 1.0)) \
+		* float(diff.get("enemyAmount", 1.0)) * float(diff.get("enemySpeed", 1.0)) \
+		* float(diff.get("enemySpeed", 1.0))
+	return 0.5 * (log(maxf(1.0, raw)) / log(2.0))
+
+
 static func _try_revive(state: Dictionary) -> bool:
 	var player: Dictionary = state["player"]
 	if int(player.get("revives", 0)) <= 0:

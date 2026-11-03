@@ -742,18 +742,8 @@ func _sync_hp(player: Dictionary, stats: Dictionary, dt: float) -> void:
 
 
 func _sync_danger(state: Dictionary) -> void:
-	# Ported formula: 0.5*log2(hp* dmg * diff products) with the estimated
-	# multipliers the port already ships (TODO(reverse): full director
-	# hpMult/dmgMult/ve tables — diff-list #8).
-	var diff := PbJson.as_dict(state.get("diff", {}))
-	var stage := float(int(state.get("stage", 1)))
-	var time := float(state.get("time", 0.0))
-	var hp_mult := 1.0 + (stage - 1.0) * 0.35
-	var dmg_mult := (1.0 + time / 60.0 * 0.13) * hp_mult
-	var raw := hp_mult * dmg_mult * float(diff.get("enemyDamage", 1.0)) \
-		* float(diff.get("enemyAmount", 1.0)) * float(diff.get("enemySpeed", 1.0)) \
-		* float(diff.get("enemySpeed", 1.0))
-	var danger := 0.5 * log(maxf(1.0, raw)) / log(2.0)
+	# Single source: PbRun.danger() (mirrored by tools-re/golden_values.py).
+	var danger := PbRun.danger(state)
 	var thresholds := PbTheme.danger_thresholds()
 	var level := 0
 	for i in thresholds.size():

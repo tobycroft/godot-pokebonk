@@ -220,7 +220,7 @@ class SwitchToggle:
 		_track.add_theme_stylebox_override("panel", PbTheme.switch_track_style(on, accent))
 		_knob.add_theme_stylebox_override("panel", PbTheme.switch_knob_style())
 		var target := Vector2(30, 4) if on else Vector2(4, 4)
-		if instant:
+		if instant or not is_inside_tree():
 			_knob.position = target
 		else:
 			var tw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
