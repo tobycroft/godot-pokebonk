@@ -171,22 +171,34 @@ func _settings_card() -> Control:
 	box.add_child(_slider_row("镜头震动", float(settings.get("shake", 1.0)),
 		func(v): _persist("shake", v)))
 
-	box.add_child(UI.dim("瞄准模式（auto＝自动锁定最近敌人）"))
-	var aim := OptionButton.new()
-	for mode in ["auto", "manual"]:
-		aim.add_item(mode)
-	aim.selected = 0 if String(settings.get("aimMode", "auto")) == "auto" else 1
-	aim.item_selected.connect(func(i): _persist("aimMode", ["auto", "manual"][i]))
-	box.add_child(aim)
+	# .seg/.pill: aim mode as a segmented control (auto = lock nearest enemy).
+	box.add_child(UI.dim("瞄准模式"))
+	box.add_child(UI.segment([
+		{"id": "auto", "text": "自动"},
+		{"id": "manual", "text": "手动"},
+	], String(settings.get("aimMode", "auto")),
+		func(id): _persist("aimMode", id)))
 
+	# Theme switch (web Ajustes -> Tema): light/dark design tokens.
+	var theme_row := UI.hbox(8)
+	theme_row.add_child(UI.label("深色主题", 15, PbTheme.ink()))
+	var theme_sp := Control.new()
+	theme_sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	theme_row.add_child(theme_sp)
+	var theme_sw := PbWidgets.SwitchToggle.new()
+	theme_sw.set_pressed(String(settings.get("theme", "light")) == "dark")
+	theme_sw.toggled.connect(func(on): App.set_theme_mode("dark" if on else "light"))
+	theme_row.add_child(theme_sw)
+	box.add_child(theme_row)
+
+	# Language: the site ships 9 locales; the port exposes the ones with data.
 	box.add_child(UI.dim("界面语言"))
-	var lang := OptionButton.new()
 	var codes := ["en", "zh", "zht", "ja", "fr", "pt", "ru"]
+	var lang_items := []
 	for code in codes:
-		lang.add_item(code)
-	lang.selected = maxi(0, codes.find(App.locale))
-	lang.item_selected.connect(func(i): _set_locale(codes[i]))
-	box.add_child(lang)
+		lang_items.append({"id": code, "text": code.to_upper()})
+	box.add_child(UI.segment(lang_items, App.locale,
+		func(id): _set_locale(id)))
 
 	box.add_child(HSeparator.new())
 	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))

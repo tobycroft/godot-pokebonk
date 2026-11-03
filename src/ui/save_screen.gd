@@ -12,6 +12,7 @@ var _input: LineEdit
 var _log: Label
 var _exported_path: String = ""
 var _backup_count := 0
+var _pending_reset: Variant = null
 
 
 func _ready() -> void:
@@ -21,7 +22,7 @@ func _ready() -> void:
 	UI.fill(scr)
 	var root := UI.content(scr, 18)
 
-	root.add_child(UI.title("存档管理 / Gestor de guardado"))
+	root.add_child(UI.screen_head("存档管理", "Gestor de guardado", func(): App.back_to_menu()))
 	root.add_child(UI.paragraph("Godot 存档位置：user://pb.offline.profile.json（等价于浏览器 localStorage）", 13, PbTheme.ink_muted(), 1))
 	_summary = UI.label("", 15)
 	root.add_child(_summary)
@@ -36,9 +37,11 @@ func _ready() -> void:
 	actions.add_child(UI.button("导出到文件", func(): _do(_export_file())))
 	actions.add_child(UI.button("复制存档文本（打印到控制台）", func(): _do(_export_console())))
 	actions.add_child(UI.button("自动备份（保留最近 5 份）", func(): _do(_backup())))
-	actions.add_child(UI.button("重置为满解锁存档", func(): _do(_reset(true))))
-	actions.add_child(UI.button("重置为空存档", func(): _do(_reset(false))))
-	actions.add_child(UI.button("返回主菜单", func(): App.back_to_menu()))
+	actions.add_child(UI.button("返回主菜单", func(): App.back_to_menu(), false, "ghost"))
+	# Danger zone (web save-ui.js groups destructive actions below a red rule).
+	actions.add_child(HSeparator.new())
+	actions.add_child(UI.button("重置为满解锁存档", func(): _confirm_reset(true), false, "red"))
+	actions.add_child(UI.button("重置为空存档", func(): _confirm_reset(false), false, "red"))
 
 	var middle := UI.vbox(6)
 	row.add_child(middle)
@@ -63,12 +66,20 @@ func _ready() -> void:
 	_log = UI.dim("")
 	root.add_child(_log)
 	refresh()
+	# save-ui.js nags on entry when it has been a while since the last backup.
+	if Save.stale_seconds() > 300.0 or Save.list_backups().is_empty():
+		UI.toast(self, "距上次备份已较久，建议先导出或自动备份")
 
 
 func _do(result: String) -> void:
 	_log.text = result
 	Audio.sfx("ui")
 	refresh()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		App.back_to_menu()
 
 
 func _save_now() -> String:
@@ -119,6 +130,18 @@ func _reset(to_full: bool) -> String:
 	Save.auto_backup()
 	Save.reset(to_full)
 	return "已重置为%s存档" % ("满解锁" if to_full else "空白")
+
+
+## Two-step destructive confirm, mirroring save-ui.js's "再点一次确认" pattern.
+func _confirm_reset(to_full: bool) -> void:
+	if _pending_reset != null and bool(_pending_reset) == to_full:
+		_pending_reset = null
+		_do(_reset(to_full))
+		return
+	_pending_reset = to_full
+	Audio.sfx("deny")
+	UI.toast(self, "再次点击「%s」以确认重置（会先自动备份）" % (
+		"满解锁" if to_full else "空存档"))
 
 
 func refresh() -> void:

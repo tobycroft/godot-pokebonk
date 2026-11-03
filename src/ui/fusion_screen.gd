@@ -23,10 +23,9 @@ func _ready() -> void:
 	UI.fill(scr)
 	var root := UI.content(scr, 18)
 
-	root.add_child(UI.title("融合机器 / Máquina de fusión"))
+	root.add_child(UI.screen_head("融合机器", "Máquina de fusión", func(): App.back_to_menu()))
 	_status = UI.dim("")
 	root.add_child(_status)
-
 	var row := UI.hbox(12)
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(row)
@@ -50,8 +49,10 @@ func _ready() -> void:
 			String(def.get("arch", "")), int(PbJson.as_dict(m).get("level", 1))], 14))
 	lv.add_child(HSeparator.new())
 	lv.add_child(UI.button("把招式设为 8 级（可融合）", func(): _toggle_levels()))
-	lv.add_child(UI.button("重新随机招式", func(): _reroll_moves()))
-	lv.add_child(UI.button("返回", func(): App.back_to_menu()))
+	var swap := UI.hbox(6)
+	lv.add_child(swap)
+	swap.add_child(UI.button("重新随机招式", func(): _reroll_moves()))
+	swap.add_child(UI.button("返回", func(): App.back_to_menu(), false, "ghost"))
 
 	# ---- middle: offers / catalogue
 	var mid := UI.panel(12)
@@ -60,12 +61,10 @@ func _ready() -> void:
 	var mv := UI.vbox(4)
 	mid.add_child(mv)
 	mv.add_child(UI.label("可融合组合", 18))
-	var filters := UI.hbox(4)
-	mv.add_child(filters)
+	var kind_items := []
 	for kind in ["all", "signature", "reaction", "type", "glitch"]:
-		var b := UI.button(kind, func(): _set_filter(kind))
-		b.custom_minimum_size = Vector2(80, 26)
-		filters.add_child(b)
+		kind_items.append({"id": kind, "text": _kind_label(kind)})
+	mv.add_child(UI.segment(kind_items, _filter, func(id): _set_filter(id)))
 	var sc := UI.scroll()
 	sc.custom_minimum_size = Vector2(340, 380)
 	mv.add_child(sc)
@@ -80,6 +79,11 @@ func _ready() -> void:
 	right.add_child(_preview)
 
 	refresh()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		App.back_to_menu()
 
 
 func _actor() -> Dictionary:
@@ -123,6 +127,13 @@ func _catalogue_size() -> int:
 func _set_filter(kind: String) -> void:
 	_filter = kind
 	refresh()
+
+
+## Chinese gloss for the recipe kind filter (data keys stay English).
+func _kind_label(kind: String) -> String:
+	var zh := {"all": "全部", "signature": "签名", "reaction": "反应",
+		"type": "同属性", "glitch": "故障"}
+	return String(zh.get(kind, kind))
 
 
 func refresh() -> void:

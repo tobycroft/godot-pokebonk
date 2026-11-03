@@ -16,7 +16,8 @@ func _ready() -> void:
 	UI.fill(scr)
 	var root := UI.content(scr, 18)
 
-	root.add_child(UI.title("研究所 / Laboratorio"))
+	# .scr-head: back pill (Esc) + striped title plate (web screen chrome).
+	root.add_child(UI.screen_head("研究所", "Laboratorio · 永久强化", func(): App.back_to_menu()))
 	root.add_child(UI.paragraph("永久强化，每局生效。花费 = 10 ×(当前等级+1)，与 web 版 api-core 一致。", 13, PbTheme.ink_muted(), 1))
 	_stardust = UI.label("", 18, PbTheme.accent_color("blue", "cd"))
 	_stardust.add_theme_font_override("font", PbTheme.font("title"))
@@ -33,9 +34,13 @@ func _ready() -> void:
 
 	var footer := UI.hbox(8)
 	root.add_child(footer)
-	footer.add_child(UI.button("返回 / Volver", func(): App.back_to_menu()))
-	footer.add_child(UI.dim("左滑可查看全部 22 项强化；数据来自 api-core.js 的 LAB 表。"))
+	footer.add_child(UI.dim("数据来自 api-core.js 的 LAB 表；走 /lab/<id>/buy 路由。"))
 	refresh()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		App.back_to_menu()
 
 
 func _card(id: String, max_rank: int) -> Control:

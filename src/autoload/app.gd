@@ -26,12 +26,33 @@ var _shot_frames := 0
 func _ready() -> void:
 	locale = _detect_locale()
 	TranslationServer.set_locale(locale)
+	# The web keeps the light/dark choice in localStorage('pokebonk.theme'); the
+	# port rides it along as an extra settings key (see Save prefs merge).
+	_apply_theme_mode()
 	# One Theme instance for every screen; children inherit it from the window.
 	get_tree().root.theme = PbTheme.build()
 	var args := OS.get_cmdline_user_args()
 	for i in args.size():
 		if String(args[i]) == "--pb-shot" and i + 1 < args.size():
 			_shot_path = String(args[i + 1])
+
+
+## Switch the design tokens to light/dark and rebuild the shared Theme, then
+## re-assert it on the window so every screen repaints (PbTheme caches clear).
+func set_theme_mode(mode: String) -> void:
+	var settings: Dictionary = PbJson.as_dict(Save.store.get("settings", {}))
+	settings["theme"] = mode
+	Save.handle("PUT", "/profile/prefs", {}, {"settings": settings})
+	_apply_theme_mode()
+	get_tree().root.theme = PbTheme.build()
+
+
+func _apply_theme_mode() -> void:
+	var settings: Dictionary = PbJson.as_dict(Save.store.get("settings", {}))
+	var mode := String(settings.get("theme", "light"))
+	if mode != "dark":
+		mode = "light"
+	PbTheme.set_mode(mode)
 
 
 func _process(_delta: float) -> void:

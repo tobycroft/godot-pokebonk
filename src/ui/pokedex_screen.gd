@@ -7,8 +7,7 @@ extends Control
 
 var _detail: VBoxContainer
 var _gen := 1
-var _gen_buttons: Array[Button] = []
-var _title: Label
+var _grid: GridContainer
 
 
 func _ready() -> void:
@@ -18,32 +17,30 @@ func _ready() -> void:
 	UI.fill(root)
 	var column := UI.content(root, 18)
 
+	# .scr-head: back pill (Esc) + the skewed striped title plate.
+	column.add_child(UI.screen_head("图鉴", "Pokédex · 151 de Kanto", func(): App.back_to_menu()))
+
 	var row := UI.hbox(14)
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(row)
 
 	var left := UI.vbox(8)
 	row.add_child(left)
-	_title = UI.title("图鉴 / Pokédex")
-	left.add_child(_title)
 
-	var gens := UI.hbox(6)
-	left.add_child(gens)
+	# Generation filter as a .seg of .pill buttons (was a row of chunky buttons).
+	var gen_items := []
 	for gen in [1, 2, 3, 4]:
-		var b := UI.button("Gen %d" % gen, func(): _set_gen(gen))
-		b.custom_minimum_size = Vector2(90, 32)
-		b.size_flags_horizontal = Control.SIZE_FILL
-		gens.add_child(b)
-		_gen_buttons.append(b)
+		gen_items.append({"id": str(gen), "text": "Gen %d" % gen})
+	left.add_child(UI.segment(gen_items, str(_gen), func(id): _set_gen(int(id))))
 
 	left.add_child(UI.paragraph("点击查看种族值、属性与可学招式（实时公式已按 web 版移植）", 13, PbTheme.ink_muted(), 1))
 	var sc := UI.scroll()
-	sc.custom_minimum_size = Vector2(430, 520)
+	sc.custom_minimum_size = Vector2(430, 480)
 	left.add_child(sc)
-	var grid := UI.grid(5, 6)
-	sc.add_child(grid)
+	_grid = UI.grid(5, 6)
+	sc.add_child(_grid)
 	for id in _ids():
-		grid.add_child(_cell(id))
+		_grid.add_child(_cell(id))
 
 	var panel := UI.panel()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -53,6 +50,11 @@ func _ready() -> void:
 	panel.add_child(detail_scroll)
 	detail_scroll.add_child(_detail)
 	_show(PbData.kanto_ids()[0])
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		App.back_to_menu()
 
 
 func _ids() -> Array:
@@ -65,20 +67,11 @@ func _set_gen(gen: int) -> void:
 
 
 func _rebuild_grid() -> void:
-	# Recreate the grid rows for the new generation filter.
-	for i in _gen_buttons.size():
-		_gen_buttons[i].disabled = (_gen != i + 1)
-	var left := _title.get_parent()
-	for child in left.get_children():
-		if child is ScrollContainer:
-			child.queue_free()
-	var sc := UI.scroll()
-	sc.custom_minimum_size = Vector2(430, 520)
-	left.add_child(sc)
-	var grid := UI.grid(5, 6)
-	sc.add_child(grid)
+	# Repopulate the grid for the new generation filter.
+	for c in _grid.get_children():
+		c.queue_free()
 	for id in _ids():
-		grid.add_child(_cell(id))
+		_grid.add_child(_cell(id))
 
 
 func _cell(species_id: int) -> Button:
