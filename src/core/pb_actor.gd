@@ -46,6 +46,9 @@ static func create(species_id: int, lab_deltas: Dictionary = {}, level: int = 1)
 		"mods": [],
 		"lab_deltas": lab_deltas,
 		"dead": false,
+		# Revivir Máximo charges (bundle Ob.revives @835451); the lab "revive"
+		# upgrade grants the starting count, consumed on a lethal hit.
+		"revives": int(lab_deltas.get("revive", lab_deltas.get("revives", 0))),
 		"stats": {},
 		"x": 0.0,
 		"z": 0.0,

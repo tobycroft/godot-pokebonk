@@ -568,6 +568,12 @@ func sync(state: Dictionary, dt: float) -> void:
 	# hpbar with red lag + shield overlay
 	_sync_hp(player, stats, dt)
 
+	# .tl-lives: Revivir Máximo charges (bundle @2150311), hidden at zero
+	var lives := _els["lives"] as Label
+	var revives := int(player.get("revives", 0))
+	lives.visible = revives > 0
+	lives.text = "♥ ×%d" % revives
+
 	# danger meter
 	_sync_danger(state)
 

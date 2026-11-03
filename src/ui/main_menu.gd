@@ -100,13 +100,14 @@ func _actions_card() -> Control:
 	box.add_child(UI.subtitle("开始你的对局"))
 	box.add_child(UI.button("开始对局", _start_run, true, "yellow"))
 
+	# .mm-nav: the secondary destinations as web .mm-item tiles.
 	var nav := UI.grid(1, 8)
 	nav.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(nav)
-	nav.add_child(UI.button("图鉴", func(): App.goto("dex"), false, "blue"))
-	nav.add_child(UI.button("研究所", func(): App.goto("lab"), false, "green"))
-	nav.add_child(UI.button("融合机器", func(): App.goto("fusion"), false, "purple"))
-	nav.add_child(UI.button("存档管理", func(): App.goto("save"), false, "orange"))
+	nav.add_child(UI.mm_tile("globe", "图鉴", "151 只宝可梦与实时公式", PbTheme.accent_color("blue", "c"), func(): App.goto("dex")))
+	nav.add_child(UI.mm_tile("stardust", "研究所", "永久强化", PbTheme.accent_color("green", "c"), func(): App.goto("lab")))
+	nav.add_child(UI.mm_tile("rotate", "融合机器", "招式合成配方", PbTheme.accent_color("purple", "c"), func(): App.goto("fusion")))
+	nav.add_child(UI.mm_tile("lock", "存档管理", "导出 / 导入 / 备份", PbTheme.accent_color("orange", "c"), func(): App.goto("save")))
 
 	box.add_child(HSeparator.new())
 	var swap := UI.hbox(6)

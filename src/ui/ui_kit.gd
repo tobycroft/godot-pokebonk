@@ -570,6 +570,55 @@ static func fmt_clock_t(total: float) -> String:
 	return "%d:%04.1f" % [m, t - float(m) * 60.0]
 
 
+## .mm-item: a nav tile (icon square + title/subtitle column + a coloured 4px
+## bottom edge). Matches the web main-menu navigation (diff-list #5).
+static func mm_tile(icon_name: String, title_text: String, sub_text: String,
+		accent: Color, on_click: Callable, big: bool = false) -> Control:
+	var tile := Button.new()
+	tile.flat = true
+	tile.focus_mode = Control.FOCUS_NONE
+	tile.custom_minimum_size = Vector2(0, 66 if not big else 84)
+	var s := PbTheme.stylebox(".mm-item", {"--c": "#" + accent.to_html(false)})
+	s.content_margin_left = 10
+	s.content_margin_right = 14
+	s.content_margin_top = 8
+	s.content_margin_bottom = 8
+	tile.add_theme_stylebox_override("normal", s)
+	tile.add_theme_stylebox_override("hover", s)
+	tile.add_theme_stylebox_override("pressed", s)
+	tile.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var row := hbox(10)
+	row.add_theme_constant_override("separation", 10)
+	tile.add_child(row)
+	var ic := PanelContainer.new()
+	var ic_s := PbTheme.stylebox(".mm-ic", {"--c": "#" + accent.to_html(false)})
+	ic.add_theme_stylebox_override("panel", ic_s)
+	ic.custom_minimum_size = Vector2(48, 48) if not big else Vector2(56, 56)
+	ic.add_child(icon_rect(icon_name, 36 if not big else 42))
+	row.add_child(ic)
+	var tx := vbox(0)
+	tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(tx)
+	var b := label(title_text, 19 if not big else 22, PbTheme.ink())
+	b.add_theme_font_override("font", PbTheme.font("title"))
+	tx.add_child(b)
+	if not sub_text.is_empty():
+		var sm := label(sub_text, 12, PbTheme.ink_muted())
+		sm.add_theme_font_override("font", PbTheme.font("body"))
+		tx.add_child(sm)
+	if on_click.is_valid():
+		tile.pressed.connect(on_click)
+	tile.mouse_entered.connect(func():
+		tile.pivot_offset = tile.size * 0.5
+		var tw := tile.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(tile, "scale", Vector2(1.03, 1.03), 0.12)
+		Audio.sfx("ui", 1.6))
+	tile.mouse_exited.connect(func():
+		var tw := tile.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(tile, "scale", Vector2.ONE, 0.12))
+	return tile
+
+
 ## .card.offer: the level-up card (top band with rarity gradient + badges, body
 ## with title/sub/lines, key chip, hover lift like .card:hover, offerIn entry).
 ## `data` = {rc: Color, rar_text, kind_text, icon_name, title, sub, lines, mods,

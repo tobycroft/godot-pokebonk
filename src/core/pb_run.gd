@@ -96,8 +96,13 @@ static func tick(state: Dictionary, dt: float) -> void:
 			_on_kill_info(state, PbJson.as_dict(k))
 		state["enemies"]["dot_kills"] = []
 	if float(player.get("hp", 0.0)) <= 0.0 or bool(player.get("dead", false)):
-		state["state"] = "over"
-		state["endHow"] = "defeat"
+		# Web death order (bundle @848700): a Revivir Máximo charge restores 60%
+		# HP with 3s of i-frames before the run actually ends.
+		if _try_revive(state):
+			pass
+		else:
+			state["state"] = "over"
+			state["endHow"] = "defeat"
 	elif int(state["stage"]) > STAGES:
 		state["state"] = "over"
 		state["endHow"] = "victory"
@@ -154,6 +159,18 @@ static func _tick_director(state: Dictionary, dt: float) -> void:
 		state["bossIndex"] = -1
 		state["stageCleared"] = false
 		_message(state, "stage %d" % int(state["stage"]))
+
+
+static func _try_revive(state: Dictionary) -> bool:
+	var player: Dictionary = state["player"]
+	if int(player.get("revives", 0)) <= 0:
+		return false
+	player["revives"] = int(player.get("revives", 0)) - 1
+	player["hp"] = float(player.get("maxHp", 100.0)) * 0.6
+	player["dead"] = false
+	player["iframes"] = 3.0
+	_message(state, "¡Revivir Máximo! Vuelves con el 60% de PS")
+	return true
 
 
 static func player_x(state: Dictionary) -> float:
