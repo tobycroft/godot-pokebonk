@@ -123,6 +123,15 @@ func _buy(id: String) -> void:
 				UI.toast(self, "星尘不足")
 	else:
 		Audio.sfx("level")
+		# CSS @keyframes bought: scale .92 -> 1.06 -> 1.
+		var entry := PbJson.as_dict(_rows.get(id, {}))
+		var panel := entry.get("panel") as Control
+		if panel != null:
+			panel.pivot_offset = panel.size * 0.5
+			var tw := panel.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			panel.scale = Vector2(0.92, 0.92)
+			tw.tween_property(panel, "scale", Vector2(1.06, 1.06), 0.12)
+			tw.tween_property(panel, "scale", Vector2.ONE, 0.12)
 	refresh()
 
 

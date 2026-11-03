@@ -13,6 +13,7 @@ var _log: Label
 var _exported_path: String = ""
 var _backup_count := 0
 var _pending_reset: Variant = null
+var _pending_restore := ""
 
 
 func _ready() -> void:
@@ -161,8 +162,24 @@ func refresh() -> void:
 		var label := UI.dim("%s · %s · 星尘 %d" % [String(b.get("time", "?")),
 			String(sum.get("name", "?")), int(sum.get("stardust", 0))])
 		_backups.add_child(label)
-		_backups.add_child(UI.button("恢复这份", func(): _do(_restore(String(b.get("id", "")))), false))
+		var bid := String(b.get("id", ""))
+		var restore_btn := UI.button("恢复这份", func(): _confirm_restore(bid), false, "blue")
+		if _pending_restore == bid:
+			restore_btn.text = "再次点击确认恢复"
+		_backups.add_child(restore_btn)
 	_backup_count = backups.size()
+
+
+## Two-step confirm before overwriting the live save with a backup.
+func _confirm_restore(id: String) -> void:
+	if _pending_restore == id:
+		_pending_restore = ""
+		_do(_restore(id))
+		return
+	_pending_restore = id
+	Audio.sfx("deny")
+	UI.toast(self, "再次点击「恢复这份」以确认（当前存档会先自动备份）")
+	refresh()
 
 
 func _restore(id: String) -> String:

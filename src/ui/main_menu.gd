@@ -48,6 +48,9 @@ func _ready() -> void:
 	refresh()
 	if "--pb-debug" in OS.get_cmdline_user_args():
 		_debug_layout.call_deferred()
+	# QA hook for screenshots: open the starter picker immediately.
+	if "--pb-starter-demo" in OS.get_cmdline_user_args():
+		_open_starter_picker.call_deferred()
 
 
 func _debug_layout() -> void:
@@ -110,11 +113,8 @@ func _actions_card() -> Control:
 	nav.add_child(UI.mm_tile("lock", "存档管理", "导出 / 导入 / 备份", PbTheme.accent_color("orange", "c"), func(): App.goto("save")))
 
 	box.add_child(HSeparator.new())
-	var swap := UI.hbox(6)
-	box.add_child(swap)
-	swap.add_child(UI.button("◀", func(): _cycle_starter(-1), false, "blue"))
-	swap.add_child(UI.button("▶", func(): _cycle_starter(1), false, "blue"))
-	swap.add_child(UI.button("满解锁档", func(): _reset_full(), false, "red"))
+	# Starter selection (web `sp` screen @1951000): a 3-way pick, not a ◀▶ cycle.
+	box.add_child(UI.button("选择初始伙伴", _open_starter_picker, false, "purple"))
 
 	box.add_child(HSeparator.new())
 	box.add_child(UI.dim("最近对局（profile.runs，结算后写入）"))
@@ -318,16 +318,166 @@ func _cycle_starter(delta: int) -> void:
 	if index < 0:
 		index = 0
 	index = posmod(index + delta, unlocked.size())
-	var pick := int(unlocked[index])
+	_set_starter(int(unlocked[index]))
+
+
+func _set_starter(pick: int) -> void:
 	Save.handle("POST", "/profile/starter", {}, {"id": pick})
 	Audio.sfx("ui")
 	refresh()
 
 
-func _reset_full() -> void:
-	Save.auto_backup()
-	Save.reset(true)
-	refresh()
+# ------------------------------------------------------- starter picker (sp-*)
+## The web `sp` screen (bundle @1951000): three .sp-card candidates, hover
+## previews the cry, click opens the "¿Elegir a X?" confirm modal, and the pick
+## lands a ls-stamp pop. Replaces the old ◀▶ cycle.
+var _picker: Control = null
+
+
+func _starter_candidates() -> Array:
+	var profile: Dictionary = Save.load_profile()
+	# JSON stores dex ids as floats, so compare numerically (not Array.has(int)).
+	var unlocked_ints := []
+	for u in PbJson.as_array(profile.get("unlocked", [])):
+		unlocked_ints.append(int(u))
+	# The classic Kanto trio, filtered to what the profile has unlocked.
+	var trio := [1, 4, 7]
+	if unlocked_ints.is_empty():
+		return trio
+	var out := []
+	for id in trio:
+		if unlocked_ints.has(id):
+			out.append(id)
+	if out.is_empty():
+		return [unlocked_ints[0]]
+	return out
+
+
+func _open_starter_picker() -> void:
+	if _picker != null and is_instance_valid(_picker):
+		_picker.queue_free()
+	var scrim := PanelContainer.new()
+	scrim.name = "StarterPicker"
+	scrim.add_theme_stylebox_override("panel", PbTheme.modal_scrim())
+	UI.fill(scrim)
+	add_child(scrim)
+	UI.fill(scrim)
+	_picker = scrim
+	var col := UI.vbox(16)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	scrim.add_child(col)
+	col.add_child(UI.modal_title("选择你的初始伙伴", false))
+	col.add_child(UI.paragraph("它将是你 Liga 的第一位成员；确认后不可更改。", 14, Color.WHITE, 1))
+	var cards := UI.hbox(22)
+	cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(cards)
+	for id in _starter_candidates():
+		cards.add_child(_sp_card(int(id)))
+	var foot := UI.hbox(8)
+	foot.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(foot)
+	foot.add_child(UI.button("返回", func():
+		if _picker != null and is_instance_valid(_picker):
+			_picker.queue_free()
+		_picker = null, false, "ghost"))
+	Audio.sfx("ui")
+
+
+## One .sp-card: the PMD showcase (with the ls-stamp overlay) + passive/first-move info.
+func _sp_card(species_id: int) -> Control:
+	var species := PbData.species(species_id)
+	var card := Button.new()
+	card.name = "SpCard%d" % species_id
+	card.flat = true
+	card.focus_mode = Control.FOCUS_NONE
+	card.custom_minimum_size = Vector2(240, 320)
+	var s := PbTheme.stylebox(".card", {"rc": "#" + PbTheme.type_color(
+		String(PbJson.as_array(species.get("types", ["normal"]))[0])).to_html(false)})
+	card.add_theme_stylebox_override("normal", s)
+	card.add_theme_stylebox_override("hover", s)
+	card.add_theme_stylebox_override("pressed", s)
+	card.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var box := UI.vbox(0)
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	card.add_child(box)
+
+	# ls-show: the animated showcase with the "¡Te elijo a ti!" stamp.
+	var show := Control.new()
+	show.name = "LsShow"
+	show.custom_minimum_size = Vector2(0, 200)
+	var rc := PbTheme.type_color(String(PbJson.as_array(species.get("types", ["normal"]))[0]))
+	var band := PbWidgets.GradRect.new()
+	band.set_anchors_preset(Control.PRESET_FULL_RECT)
+	band.setup({"type": "linear", "angle": 135.0, "stops": [
+		{"color": PbTheme.mix(rc, Color.WHITE, 0.55), "pos": 0.0}, {"color": rc, "pos": 100.0}]}, null, true)
+	show.add_child(band)
+	var sprite := PmdSprite.new()
+	sprite.setup(species_id, "idle", 2.0)
+	sprite.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	show.add_child(sprite)
+	var stamp := UI.chip("就选你了！", PbTheme.accent_color("red", "c"))
+	stamp.name = "LsStamp"
+	stamp.visible = false
+	stamp.position = Vector2(24, 150)
+	show.add_child(stamp)
+	box.add_child(show)
+
+	# sp-info: passive + starter move.
+	var info := UI.vbox(6)
+	var margins := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_bottom"]:
+		margins.add_theme_constant_override(side, 14)
+	margins.add_child(info)
+	box.add_child(margins)
+	var name_l := UI.title("%d. %s" % [species_id, String(species.get("name", "?"))], 20)
+	info.add_child(name_l)
+	var types := UI.hbox(4)
+	info.add_child(types)
+	for t in PbJson.as_array(species.get("types", [])):
+		types.add_child(UI.type_chip(String(t)))
+	var first := ""
+	var moves: Array = PbJson.as_array(PbActor.create(species_id).get("moves", []))
+	for raw in moves:
+		if raw != null:
+			first = String(PbJson.as_dict(PbJson.as_dict(raw).get("def", {})).get("name", ""))
+			break
+	if not first.is_empty():
+		info.add_child(UI.dim("初始招式：%s" % first))
+	card.mouse_entered.connect(func(): Audio.play_cry(species_id, 0.5))
+	card.pressed.connect(func(): _confirm_starter(species_id, stamp))
+	UI.anim_in_simple(card, "popIn", 0)
+	return card
+
+
+## The "¿Elegir a X?" confirm modal (web @1951000): ghost 返回重选 / red 确认.
+func _confirm_starter(species_id: int, stamp: Control) -> void:
+	# ls-stamp pop on the chosen card.
+	if stamp != null and is_instance_valid(stamp):
+		stamp.visible = true
+		stamp.pivot_offset = stamp.size * 0.5
+		stamp.scale = Vector2(0.2, 0.2)
+		var tw := stamp.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(stamp, "scale", Vector2.ONE, 0.35)
+	var species := PbData.species(species_id)
+	var nm := String(species.get("name", "?"))
+	Audio.play_cry(species_id, 0.9)
+	var modal := UI.modal_shell("选择 %s？" % nm, true)
+	var scrim: PanelContainer = modal["scrim"]
+	var body: VBoxContainer = modal["body"]
+	add_child(scrim)
+	UI.fill(scrim)
+	body.add_child(UI.paragraph("它将成为你的初始伙伴，之后不可更换。", 14, Color.WHITE, 1))
+	var row := UI.hbox(10)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	body.add_child(row)
+	row.add_child(UI.button("返回重选", func():
+		scrim.queue_free(), false, "ghost"))
+	row.add_child(UI.button("确认选择 %s" % nm, func():
+		_set_starter(species_id)
+		scrim.queue_free()
+		if _picker != null and is_instance_valid(_picker):
+			_picker.queue_free()
+		_picker = null, false, "red"))
 
 
 func _persist(key: String, value) -> void:
