@@ -902,6 +902,31 @@ static func slider_knob() -> StyleBoxFlat:
 	return s
 
 
+## The filled portion of an HSlider (left of the knob), in the accent colour.
+static func slider_grabber_area(color: Color = Color(0, 0, 0, 0)) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = color if color.a > 0.0 else accent_color("yellow", "c")
+	s.set_corner_radius_all(999)
+	s.corner_detail = 8
+	s.content_margin_top = 5
+	s.content_margin_bottom = 5
+	return s
+
+
+## Apply the three token-driven HSlider parts to one slider (track / fill / knob).
+static func paint_slider(slider: Range, accent: String = "yellow") -> void:
+	var track := StyleBoxFlat.new()
+	track.bg_color = mix(paper(1.0), ink(), 0.10)
+	track.set_corner_radius_all(999)
+	track.corner_detail = 8
+	track.content_margin_top = 5
+	track.content_margin_bottom = 5
+	slider.add_theme_stylebox_override("background", track)
+	slider.add_theme_stylebox_override("grabber_area", slider_grabber_area(accent_color(accent, "c")))
+	slider.add_theme_stylebox_override("grabber_area_highlight", slider_grabber_area(accent_color(accent, "cd")))
+	slider.add_theme_stylebox_override("slider", slider_knob())
+
+
 ## ---- semantic wrappers over the extracted component rules ------------------
 ## Each one folds the CSS double-declarations (colour layer + gradient layer)
 ## into the closest StyleBoxFlat approximation; see the gradient/stripe notes

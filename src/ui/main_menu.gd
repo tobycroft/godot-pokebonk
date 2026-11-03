@@ -219,6 +219,7 @@ func _slider_row(caption: String, value: float, on_change: Callable) -> Control:
 	slider.value = clampf(value, 0.0, 1.0)
 	slider.custom_minimum_size = Vector2(0, 22)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	PbTheme.paint_slider(slider)
 	slider.value_changed.connect(on_change)
 	box.add_child(slider)
 	return box
