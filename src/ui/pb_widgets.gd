@@ -60,11 +60,25 @@ class GradRect:
 		var cap := minf(maxf(radius, 0.0), minf(size.x, size.y) * 0.5)
 		var pts := _rounded_pts(size, cap)
 		if gradient.get("type", "") == "linear":
-			var tex := _gradient_texture()
-			if tex != null:
-				draw_colored_polygon(pts, Color.WHITE, _gradient_uvs(pts), tex)
+			# Per-vertex colour interpolation along the CSS gradient direction:
+			# no texture sampling, so it is deterministic on the first frame.
+			var angle := deg_to_rad(float(gradient.get("angle", 180.0)))
+			var dir := Vector2(sin(angle), -cos(angle))
+			var proj := []
+			var lo := INF
+			var hi := -INF
+			for p in pts:
+				var t := (p - size * 0.5).dot(dir)
+				proj.append(t)
+				lo = minf(lo, t)
+				hi = maxf(hi, t)
+			var span := maxf(hi - lo, 0.001)
+			var cols := PackedColorArray()
+			for t in proj:
+				var u := clampf((t - lo) / span, 0.0, 1.0)
+				cols.append(_sample_gradient(u))
+			draw_polygon(pts, cols)
 		elif not gradient.is_empty():
-			# radial/conic: sample the rule's solid layer as the fallback body.
 			if style != null:
 				draw_colored_polygon(pts, style.bg_color)
 		if overlay_stripes:
@@ -74,6 +88,27 @@ class GradRect:
 			for p in pts:
 				uvs.append(p / period)
 			draw_colored_polygon(pts, Color.WHITE, uvs, PbWidgets.stripes_texture())
+
+
+	## Sample the gradient stops at t in [0,1] (offsets normalised 0..1).
+	func _sample_gradient(t: float) -> Color:
+		var stops: Array = gradient.get("stops", [])
+		if stops.is_empty():
+			return Color.WHITE
+		var offs := []
+		for i in stops.size():
+			var pos := float(stops[i]["pos"])
+			if pos < 0.0:
+				pos = float(i) / maxf(1.0, float(stops.size() - 1)) * 100.0
+			offs.append(clampf(pos / 100.0, 0.0, 1.0))
+		if t <= float(offs[0]):
+			return stops[0]["color"]
+		for i in range(1, stops.size()):
+			if t <= float(offs[i]):
+				var s2 := maxf(float(offs[i]) - float(offs[i - 1]), 0.0001)
+				var f := clampf((t - float(offs[i - 1])) / s2, 0.0, 1.0)
+				return (stops[i - 1]["color"] as Color).lerp(stops[i]["color"], f)
+		return stops[stops.size() - 1]["color"]
 
 
 	## Corners rounded like border-radius: one arc of N points per corner
@@ -101,48 +136,6 @@ class GradRect:
 				var ang := lerpf(a0, a1, float(i) / float(steps))
 				pts.append(center + Vector2(cos(ang), sin(ang)) * r)
 		return pts
-
-	func _gradient_texture() -> GradientTexture2D:
-		var stops: Array = gradient.get("stops", [])
-		if stops.is_empty():
-			return null
-		var grad := Gradient.new()
-		var colors := PackedColorArray()
-		var offsets := PackedFloat32Array()
-		for i in stops.size():
-			colors.append(stops[i]["color"])
-			var pos := float(stops[i]["pos"])
-			if pos < 0.0:
-				pos = float(i) / maxf(1.0, float(stops.size() - 1)) * 100.0
-			offsets.append(clampf(pos / 100.0, 0.0, 1.0))
-		# Gradient needs strictly increasing offsets; CSS allows plateaus.
-		for i in range(1, offsets.size()):
-			if offsets[i] <= offsets[i - 1]:
-				offsets[i] = minf(offsets[i - 1] + 0.001, 1.0)
-		grad.colors = colors
-		grad.offsets = offsets
-		var tex := GradientTexture2D.new()
-		tex.gradient = grad
-		tex.width = 8
-		tex.height = 256
-		return tex
-
-	func _gradient_uvs(pts: PackedVector2Array) -> PackedVector2Array:
-		var angle := deg_to_rad(float(gradient.get("angle", 180.0)))
-		var dir := Vector2(sin(angle), -cos(angle))  # CSS 0deg = up, 180deg = down
-		var uvs := PackedVector2Array()
-		var proj := []
-		var lo := INF
-		var hi := -INF
-		for p in pts:
-			var t := (p - size * 0.5).dot(dir)
-			proj.append(t)
-			lo = minf(lo, t)
-			hi = maxf(hi, t)
-		var span := maxf(hi - lo, 0.001)
-		for t in proj:
-			uvs.append(Vector2((t - lo) / span, 0.5))
-		return uvs
 
 
 ## .ult-ring: conic cooldown. CSS paints conic-gradient(var(--c) p%, #3a3456 0);

@@ -21,6 +21,8 @@ const ACCENTS := {
 	"green": {"c": "--green", "cd": "--green-d"},
 	"purple": {"c": "--purple", "cd": "--purple-d"},
 	"orange": {"c": "--orange", "cd": "--yellow-d"},
+	# .btn.ghost: {--c:var(--paper);--cd:var(--paper-3);--tc:var(--ink)}
+	"ghost": {"c": "--paper", "cd": "--paper-3"},
 }
 
 const FONT_TITLE := "res://assets/fonts/MPLUSRounded-900.ttf"
@@ -307,7 +309,7 @@ static func _substitute(value: String, vars_for: Dictionary) -> String:
 		if idx < 0:
 			break
 		var close := _func_end(out, idx)
-		var inner := out.substr(idx + 4, close - idx - 5)
+		var inner := out.substr(idx + 4, close - idx - 4)
 		var comma := _top_level_comma(inner)
 		var token := (inner if comma < 0 else inner.substr(0, comma)).strip_edges()
 		var replacement: Variant = null

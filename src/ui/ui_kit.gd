@@ -21,7 +21,9 @@ static func fill(node: Control) -> void:
 	node.offset_right = 0.0
 	node.offset_bottom = 0.0
 	var parent := node.get_parent()
-	if parent == null or parent is Viewport:
+	# A root Control (no parent, or under a CanvasLayer/Viewport) is not resized
+	# by the container system, so give it the viewport rect explicitly.
+	if parent == null or not (parent is Control):
 		var viewport := node.get_viewport()
 		if viewport != null:
 			node.size = viewport.get_visible_rect().size
@@ -95,17 +97,20 @@ static func _btn_hover_sound(b: Button) -> void:
 		Audio.sfx("ui", 1.6)
 
 
-## Icon from the migrated sprite set (assets/ui/icons/<name>.png), pixel-crisp
-## like the web's <img class="pix">; silently skips unknown names.
+## Icon lookup: the migrated sprite set (assets/ui/icons), then the item art
+## (poke-ball, nugget, ... live under assets/items on the web too). Pixel-crisp
+## like the site's <img class="pix">; unknown names render nothing.
 static func icon_rect(name: String, px: int = 22) -> TextureRect:
 	var t := TextureRect.new()
 	t.custom_minimum_size = Vector2(px, px)
 	t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	t.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	var path := "res://assets/ui/icons/%s.png" % name
-	if ResourceLoader.exists(path):
-		t.texture = load(path)
+	for base in PackedStringArray(["res://assets/ui/icons/", "res://assets/items/"]):
+		var path := base + name + ".png"
+		if ResourceLoader.exists(path):
+			t.texture = load(path)
+			break
 	return t
 
 
@@ -342,9 +347,13 @@ static func screen_head(title_text: String, sub_text: String, on_back: Callable)
 		texts.add_child(s)
 	plate.add_child(texts)
 	# CSS: transform:skew(-8deg) on the plate, +8deg on the children.
-	plate.transform = Transform2D(deg_to_rad(-8.0), Vector2.ZERO)
+	# CSS transform:skew(-8deg)/children +8deg -- Godot Controls cannot
+	# shear their canvas transform, so the plate tilts and the text counter-
+	# rotates (documented approximation, same visual energy, see PORT_STATUS).
+	plate.pivot_offset = Vector2(0, plate.custom_minimum_size.y * 0.5)
+	plate.rotation = deg_to_rad(-8.0)
 	texts.pivot_offset = texts.size * 0.5
-	texts.transform = Transform2D(deg_to_rad(8.0), Vector2.ZERO)
+	texts.rotation = deg_to_rad(8.0)
 	row.add_child(plate)
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return row
@@ -466,7 +475,8 @@ static func banner(host: Control, text: String, sub_text: String = "", accent_ra
 	h.set_anchors_preset(Control.PRESET_FULL_RECT)
 	h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	plate.add_child(h)
-	plate.transform = Transform2D(deg_to_rad(-8.0), Vector2.ZERO)
+	plate.pivot_offset = Vector2(0, plate.custom_minimum_size.y * 0.5)
+	plate.rotation = deg_to_rad(-8.0)
 	layer.add_child(plate)
 	if not sub_text.is_empty():
 		var pill := PanelContainer.new()
@@ -501,32 +511,27 @@ static func anim_in(node: Control, kind: String, stagger: int = 0) -> void:
 	anim_in_simple(node, kind, stagger)
 
 
-## Simplified entrance: slide+fade+scale from the CSS frame values.
+## Simplified entrance: fade+scale from the CSS frame values. Position is left
+## to the container (tweening it would fight the layout), so we slide via the
+## pivot-scaled transform + a brief modulate fade, matching cardIn/offerIn/popIn.
 static func anim_in_simple(node: Control, kind: String, stagger: int = 0) -> void:
 	var frames := PbTheme.keyframe_frames(kind)
 	if frames.is_empty() or not is_instance_valid(node):
 		return
 	var from := PbJson.as_dict(frames[0])
-	var move := Vector2.ZERO
 	var scale := 1.0
 	var tr := String(from.get("transform", ""))
-	var ty := RegEx.create_from_string("translateY\\((-?[\\d.]+)px\\)").search(tr)
-	if ty != null:
-		move = Vector2(0, ty.get_string(1).to_float())
 	var sc := RegEx.create_from_string(r"scale\(([.\d]+)\)").search(tr)
 	if sc != null:
 		scale = sc.get_string(1).to_float()
-	var base := node.position
 	node.modulate.a = float(String(from.get("opacity", "1")).to_float())
 	node.pivot_offset = node.get_combined_minimum_size() * 0.5
 	node.scale = Vector2(scale, scale)
-	node.position = base + move
 	var tw := node.create_tween()
 	tw.set_ease(Tween.EASE_OUT)
 	if stagger > 0:
 		tw.tween_interval(float(stagger) * 0.06)
-	tw.tween_property(node, "position", base, 0.3)
-	tw.parallel().tween_property(node, "modulate:a", 1.0, 0.3)
+	tw.tween_property(node, "modulate:a", 1.0, 0.3)
 	tw.parallel().tween_property(node, "scale", Vector2.ONE, 0.3)
 
 
@@ -568,20 +573,17 @@ static func fmt_clock_t(total: float) -> String:
 ## .card.offer: the level-up card (top band with rarity gradient + badges, body
 ## with title/sub/lines, key chip, hover lift like .card:hover, offerIn entry).
 ## `data` = {rc: Color, rar_text, kind_text, icon_name, title, sub, lines, mods,
-## key, shine}. Returns the card PanelContainer; press/click via on_pick.
+## key, shine}. Root is a PanelContainer (a real container, so its column lays
+## out); a transparent Button overlay handles press/hover. Returns the root.
 static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> Control:
 	var rc: Color = data.get("rc", PbTheme.rarity_color(0))
-	var card := Button.new()
+	var card := PanelContainer.new()
 	card.name = "OfferCard%d" % index
 	card.custom_minimum_size = Vector2(236, 300)
-	card.focus_mode = Control.FOCUS_NONE
-	card.flat = true
-	card.add_theme_stylebox_override("normal", PbTheme.stylebox(".card", {"rc": "#" + rc.to_html(false)}))
-	card.add_theme_stylebox_override("hover", PbTheme.stylebox(".card", {"rc": "#" + rc.to_html(false)}))
-	card.add_theme_stylebox_override("pressed", PbTheme.stylebox(".card", {"rc": "#" + rc.to_html(false)}))
-	card.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	card.add_theme_stylebox_override("disabled", StyleBoxEmpty.new())
-	card.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	card.add_theme_stylebox_override("panel", PbTheme.stylebox(".card", {"rc": "#" + rc.to_html(false)}))
+	card.clip_contents = true
 
 	var box := vbox(0)
 	box.name = "Body"
@@ -653,6 +655,7 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 	for line in lines:
 		var li := label("· " + String(line), 15, PbTheme.ink())
 		li.add_theme_font_override("font", PbTheme.font("body"))
+		li.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		bd.add_child(li)
 	var affects := String(data.get("affects", ""))
 	if not affects.is_empty():
@@ -673,15 +676,26 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 		key_badge.size_flags_horizontal = Control.SIZE_SHRINK_END
 		bd.add_child(key_badge)
 
-	# -- interactions: hover lift (.card:hover) + click -------------------------
+	# -- click overlay + hover lift (.card:hover) ------------------------------
+	var click := Button.new()
+	click.name = "Click"
+	click.flat = true
+	click.focus_mode = Control.FOCUS_NONE
+	click.set_anchors_preset(Control.PRESET_FULL_RECT)
+	click.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	click.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	click.add_theme_stylebox_override("hover", StyleBoxEmpty.new())
+	click.add_theme_stylebox_override("pressed", StyleBoxEmpty.new())
+	click.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	card.add_child(click)
 	if on_pick.is_valid():
-		card.pressed.connect(on_pick)
-	card.mouse_entered.connect(func():
+		click.pressed.connect(on_pick)
+	click.mouse_entered.connect(func():
 		Audio.sfx("ui", 1.6)
 		card.pivot_offset = card.size * 0.5
 		var tw := card.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tw.tween_property(card, "scale", Vector2(1.05, 1.05), 0.12))
-	card.mouse_exited.connect(func():
+	click.mouse_exited.connect(func():
 		var tw := card.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tw.tween_property(card, "scale", Vector2.ONE, 0.12))
 	anim_in_simple(card, "offerIn", index)
@@ -735,7 +749,8 @@ static func modal_title(text: String, small: bool = false) -> Control:
 	h.set_anchors_preset(Control.PRESET_FULL_RECT)
 	h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	plate.add_child(h)
-	plate.transform = Transform2D(deg_to_rad(-8.0), Vector2.ZERO)
+	plate.pivot_offset = Vector2(0, plate.custom_minimum_size.y * 0.5)
+	plate.rotation = deg_to_rad(-8.0)
 	return plate
 
 

@@ -7,6 +7,10 @@ extends Node3D
 ## places the two real .glb props that pokebonk-web does ship, so both asset
 ## paths are exercised. Camera pitch/distance come from the recovered run class
 ## defaults (camPitch .45, camDist 9, offset 1506673).
+##
+## The HUD is the web DOM rebuilt node-for-node (RunHud, diff-list #1); the
+## level-up modal uses the real .card.offer cards (diff-list #2) with the
+## reroll/skip/banish flow of showLevelUp() (bundle @2172425).
 
 const ARENA_SIZE := 140.0
 const ENEMY_POOL := 64
@@ -16,26 +20,36 @@ var _player_node: Node3D
 var _camera: Camera3D
 var _enemy_nodes: Array[MeshInstance3D] = []
 var _orb_nodes: Array[MeshInstance3D] = []
-var _hp_bar: ProgressBar
-var _xp_bar: ProgressBar
-var _stats_label: Label
-var _moves_label: Label
-var _log_label: Label
-var _modal: VBoxContainer
-var _modal_box: PanelContainer
-var _settle: VBoxContainer
-var _settle_box: PanelContainer
+var _hud: RunHud
+var _layer: CanvasLayer
+var _modal_scrim: PanelContainer
+var _modal_cards: HBoxContainer
+var _modal_actions: HBoxContainer
+var _modal_mini: HBoxContainer
+var _modal_state := ""
+var _banish_mode := false
+var _banish_pick := -1
+var _settle_scrim: PanelContainer
+var _settle_body: VBoxContainer
 var _time := 0.0
 var _paused := false
 var _trauma := 0.0
 var _last_damage_taken := 0.0
 var _shake_scale := 1.0
+var _msg_seen := 0
+var _stage_seen := 1
+var _boss_seen := false
 
 
 func _ready() -> void:
 	_build_world()
 	_build_hud()
 	_start_run()
+	# QA hook (like --pb-shot): render the level-up modal immediately for screenshots.
+	if "--pb-offer-demo" in OS.get_cmdline_user_args():
+		_run["pendingLevels"] = 1
+		PbRun.open_offers(_run)
+		_update_modal()
 
 
 # ------------------------------------------------------------------ world
@@ -125,53 +139,61 @@ func _build_world() -> void:
 
 # ------------------------------------------------------------------ hud
 func _build_hud() -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	var hud := Control.new()
-	hud.name = "Hud"
-	UI.fill(hud)
-	UI.themify(hud)
-	layer.add_child(hud)
-	var top := UI.vbox(4)
-	top.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	top.position = Vector2(16, 12)
-	top.custom_minimum_size = Vector2(380, 0)
-	hud.add_child(top)
-	_stats_label = UI.label("", 16)
-	top.add_child(_stats_label)
-	_hp_bar = UI.progress("red", 18)
-	top.add_child(_hp_bar)
-	_xp_bar = UI.progress("blue", 10)
-	top.add_child(_xp_bar)
-	_moves_label = UI.dim("")
-	top.add_child(_moves_label)
+	_layer = CanvasLayer.new()
+	add_child(_layer)
+	_hud = RunHud.new()
+	_hud.name = "RunHud"
+	_layer.add_child(_hud)
+	UI.fill(_hud)
 
-	var bottom := UI.vbox(4)
-	bottom.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	bottom.position = Vector2(16, -110)
-	bottom.custom_minimum_size = Vector2(600, 100)
-	hud.add_child(bottom)
-	_log_label = UI.dim("")
-	bottom.add_child(_log_label)
-	var controls := UI.hbox(6)
-	bottom.add_child(controls)
-	controls.add_child(UI.button("融合 (F)", func(): _try_fusion()))
-	controls.add_child(UI.button("暂停 (P)", func(): _paused = not _paused))
-	controls.add_child(UI.button("结束本局", func(): _finish("exit")))
+	# .modal shells (CSS .modal: radial scrim, h1 plate, centred column).
+	var level := UI.modal_shell("升级！选择强化")
+	_modal_scrim = level["scrim"]
+	var body: VBoxContainer = level["body"]
+	_modal_scrim.visible = false
+	_layer.add_child(_modal_scrim)
+	UI.fill(_modal_scrim)
+	body.add_theme_constant_override("separation", 16)
+	_modal_cards = UI.hbox(16)
+	_modal_cards.name = "Cards"
+	_modal_cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	body.add_child(_modal_cards)
+	_modal_actions = UI.hbox(12)
+	_modal_actions.name = "Actions"
+	body.add_child(_modal_actions)
+	_modal_mini = UI.hbox(6)
+	_modal_mini.name = "BuildMini"
+	body.add_child(_modal_mini)
 
-	_modal_box = UI.panel(18)
-	_modal_box.set_anchors_preset(Control.PRESET_CENTER)
-	_modal_box.visible = false
-	hud.add_child(_modal_box)
-	_modal = UI.vbox(8)
-	_modal_box.add_child(_modal)
+	var settle := UI.modal_shell("本局结算", true)
+	_settle_scrim = settle["scrim"]
+	_settle_body = settle["body"]
+	_settle_scrim.visible = false
+	_layer.add_child(_settle_scrim)
+	UI.fill(_settle_scrim)
 
-	_settle_box = UI.panel(18)
-	_settle_box.set_anchors_preset(Control.PRESET_CENTER)
-	_settle_box.visible = false
-	hud.add_child(_settle_box)
-	_settle = UI.vbox(8)
-	_settle_box.add_child(_settle)
+	var pause := UI.modal_shell("已暂停", true)
+	var pause_scrim: PanelContainer = pause["scrim"]
+	var pause_body: VBoxContainer = pause["body"]
+	var prow := UI.hbox(8)
+	prow.alignment = BoxContainer.ALIGNMENT_CENTER
+	prow.add_child(UI.button("继续", func(): _toggle_pause()))
+	prow.add_child(UI.button("结束本局", func():
+		_toggle_pause()
+		_finish("exit"), false, "red"))
+	pause_body.add_child(prow)
+	pause_scrim.visible = false
+	pause_scrim.set_meta("is_pause", true)
+	_layer.add_child(pause_scrim)
+	UI.fill(pause_scrim)
+
+
+func _toggle_pause() -> void:
+	_paused = not _paused
+	for c in _layer.get_children():
+		if c.get_meta("is_pause", false) == true:
+			c.visible = _paused
+	Audio.sfx("ui")
 
 
 # ------------------------------------------------------------------ run flow
@@ -193,11 +215,17 @@ func _start_run() -> void:
 	_time = 0.0
 	_last_damage_taken = 0.0
 	_trauma = 0.0
-	_settle_box.visible = false
-	_modal_box.visible = false
+	_msg_seen = 0
+	_stage_seen = int(_run.get("stage", 1))
+	_boss_seen = false
+	_modal_state = ""
+	_banish_mode = false
+	_banish_pick = -1
+	_settle_scrim.visible = false
+	_modal_scrim.visible = false
+	_hud.build(_run)
 	Audio.play_music("menu")
 	Audio.play_cry(species)
-	_log(_message_tail())
 
 
 func _process(delta: float) -> void:
@@ -207,18 +235,23 @@ func _process(delta: float) -> void:
 	var dt := minf(delta, 1.0 / 15.0)
 	if String(_run.get("state", "play")) == "over":
 		_render(dt)
+		_hud.sync(_run, dt)
 		_show_settle_once()
 		return
-	if _paused or String(_run.get("state", "play")) == "modal":
+	if _paused:
+		_render(dt)
+		return
+	if String(_run.get("state", "play")) == "modal":
 		_render(dt)
 		_update_modal()
 		return
 	_move_input(dt)
 	PbRun.tick(_run, dt)
 	_render(dt)
+	_hud.sync(_run, dt)
+	_pump_events()
 	if String(_run.get("state", "play")) == "modal":
 		Audio.sfx("level")
-	_update_hud()
 
 
 func _move_input(dt: float) -> void:
@@ -244,17 +277,58 @@ func _move_input(dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed:
-		match event.keycode:
-			KEY_F:
+	if not (event is InputEventKey) or not event.pressed:
+		return
+	var modal := String(_run.get("state", "")) == "modal" and _modal_scrim.visible
+	match event.keycode:
+		KEY_F:
+			if not modal and not _paused:
 				_try_fusion()
-			KEY_P:
-				_paused = not _paused
-			KEY_ESCAPE:
-				if String(_run.get("state", "")) == "over":
-					App.back_to_menu()
-				else:
-					_finish("exit")
+		KEY_P:
+			if String(_run.get("state", "play")) != "over":
+				_toggle_pause()
+		KEY_ESCAPE:
+			if String(_run.get("state", "")) == "over":
+				App.back_to_menu()
+			elif modal:
+				pass # the web blocks dismissal mid-choice
+			else:
+				_toggle_pause()
+		KEY_1, KEY_KP_1:
+			if modal:
+				_offer_key(0)
+		KEY_2, KEY_KP_2:
+			if modal:
+				_offer_key(1)
+		KEY_3, KEY_KP_3:
+			if modal:
+				_offer_key(2)
+
+
+# ------------------------------------------------------------------ events
+## Route new PbRun messages the way the web routes them: stage-ups and boss
+## spawns become banners (.banner), everything else a toast (.toast).
+func _pump_events() -> void:
+	var msgs: Array = PbJson.as_array(_run.get("messages", []))
+	while _msg_seen < msgs.size():
+		var text := String(msgs[_msg_seen])
+		_msg_seen += 1
+		if text.begins_with("stage"):
+			var n := int(text.get_slice(" ", 1))
+			_hud.show_banner("第 %d 阶段" % n, "击杀首领才能进入下一阶段", "#ff5a5f")
+			Audio.sfx("level")
+		elif text.begins_with("boss!"):
+			_hud.show_banner("首领出现了！", text.trim_prefix("boss!"), "#e82a5a", true)
+			Audio.sfx("boss")
+		elif text.begins_with("fused"):
+			_hud.show_banner("融合成功！", text.trim_prefix("fused "), "#8a5cff")
+		else:
+			_hud.notify(text)
+	var stage := int(_run.get("stage", 1))
+	if stage != _stage_seen:
+		_stage_seen = stage
+	if bool(_run.get("bossSpawned", false)) and not _boss_seen:
+		_boss_seen = true
 
 
 # ------------------------------------------------------------------ render
@@ -332,106 +406,221 @@ func _render(dt: float) -> void:
 		_orb_nodes[i].visible = false
 
 
-func _update_hud() -> void:
-	var player: Dictionary = _run["player"]
-	var stats := PbJson.as_dict(player.get("stats", {}))
-	var run_stats: Dictionary = _run["stats"]
-	var first_move := ""
-	for raw in PbJson.as_array(player.get("moves", [])):
-		if raw != null:
-			var inst := PbJson.as_dict(raw)
-			var built := PbJson.as_dict(inst.get("computed", {}))
-			first_move = "%s cd %.2fs dps %.0f" % [String(PbJson.as_dict(inst.get("def", {})).get("name", "?")),
-				float(built.get("cd", 0)), float(built.get("dps", 0))]
-			break
-	_stats_label.text = "第 %d/%d 阶段  %.0fs  击杀 %d  伤害 %.0f  金币 %.0f  闪避 %d  暴击 %d\n%s" % [
-		int(_run["stage"]), PbRun.STAGES, float(_run["time"]),
-		int(run_stats.get("kills", 0)), float(run_stats.get("damage", 0.0)),
-		float(_run.get("gold", 0)), int(run_stats.get("dodges", 0)), int(run_stats.get("crits", 0)),
-		String(player.get("name", "?")),
-	]
-	_hp_bar.max_value = maxf(1.0, float(player.get("maxHp", 100)))
-	_hp_bar.value = float(player.get("hp", 0))
-	_xp_bar.max_value = maxf(1.0, float(player.get("xpNext", 1)))
-	_xp_bar.value = float(player.get("xp", 0))
-	_moves_label.text = "Lv%d  HP %.0f/%.0f  x%.2f dmg  护甲 %.1f(减伤 %.0f%%)  %s" % [
-		int(player.get("level", 1)), float(player.get("hp", 0)), float(player.get("maxHp", 0)),
-		float(stats.get("damage", 1)), float(stats.get("armor", 0)),
-		PbStats.armor_mitigation(float(stats.get("armor", 0))) * 100.0, first_move]
-
-
-func _message_tail() -> String:
-	var msgs: Array = PbJson.as_array(_run.get("messages", []))
-	return "\n".join(msgs.slice(-4)) if not msgs.is_empty() else "准备战斗…"
-
-
-func _log(text: String) -> void:
-	_log_label.text = text
-
-
 # ------------------------------------------------------------------ modals
+## showLevelUp() parity (bundle @2173200): h1 + .cards of .card.offer + the
+## reroll/skip/banish actions + buildMini current-move row.
 func _update_modal() -> void:
 	if String(_run.get("state", "play")) != "modal":
-		_modal_box.visible = false
+		_modal_scrim.visible = false
 		return
-	if _modal.get_child_count() > 0 and String(_modal.get_meta("state", "")) == "offers:%d" % int(_run["pendingLevels"]):
-		_modal_box.visible = true
+	var token := "offers:%d" % int(_run.get("pendingLevels", 0))
+	if _modal_state == token:
+		_modal_scrim.visible = true
 		return
-	_modal_box.visible = true
-	_modal_box.position = Vector2(-260, -180)
-	for c in _modal.get_children():
+	_modal_state = token
+	_modal_scrim.visible = true
+	for c in _modal_cards.get_children():
 		c.queue_free()
-	_modal.add_child(UI.label("升级！选择强化 (1-3)", 20))
+	for c in _modal_actions.get_children():
+		c.queue_free()
+	for c in _modal_mini.get_children():
+		c.queue_free()
 	var offers: Array = PbJson.as_array(_run.get("offers", []))
-	if offers.is_empty():
-		_modal.add_child(UI.dim("（没有可选强化，按任意继续）"))
-		_modal.add_child(UI.button("继续", func(): _resume_without_offer()))
 	for i in offers.size():
 		var card := PbJson.as_dict(offers[i])
-		var mods := UI.hbox(4)
-		var label_text := "%s  ·  %s" % [String(card.get("kind", "?")), String(card.get("label", ""))]
-		var b := UI.button(label_text, func(): _pick(i))
-		b.custom_minimum_size = Vector2(420, 40)
-		_modal.add_child(b)
-		_modal.add_child(mods)
-		for raw in PbJson.as_array(card.get("mods", [])):
-			var mod := PbJson.as_dict(raw)
-			mods.add_child(UI.dim("[%s %s]" % [String(mod.get("stat", "")),
-				"add %.2f" % float(mod.get("add", 0)) if mod.has("add") else "mul %.2f" % float(mod.get("mul", 1))]))
-	var controls := UI.hbox(6)
-	_modal.add_child(controls)
-	controls.add_child(UI.button("重掷 %d" % int(_run["rerolls"]), func(): _act_reroll()))
-	controls.add_child(UI.button("跳过 %d" % int(_run["skips"]), func(): _act_skip()))
-	controls.add_child(UI.button("禁用 %d" % int(_run["banishes"]), func(): _act_banish()))
-	_modal.set_meta("state", "offers:%d" % int(_run["pendingLevels"]))
+		var data := _offer_card_data(card)
+		_modal_cards.add_child(UI.card_offer(data, func(): _offer_key(i), i))
+	# .actions: btn blue/ghost/red small with counts + kbd hints, disabled at 0.
+	var reroll := UI.small_button("刷新 (%d)" % int(_run.get("rerolls", 0)), _act_reroll, "blue")
+	reroll.disabled = int(_run.get("rerolls", 0)) <= 0
+	reroll.add_child(_action_icon("reroll"))
+	_modal_actions.add_child(reroll)
+	var skip := UI.small_button("跳过 (%d)" % int(_run.get("skips", 0)), _act_skip, "ghost")
+	skip.disabled = int(_run.get("skips", 0)) <= 0
+	skip.add_child(_action_icon("skip"))
+	_modal_actions.add_child(skip)
+	var banish := UI.small_button("取消" if _banish_mode else "放逐 (%d)" % int(_run.get("banishes", 0)),
+		_act_banish_toggle, "red" if not _banish_mode else "ghost")
+	if not _banish_mode:
+		banish.disabled = int(_run.get("banishes", 0)) <= 0
+	_modal_actions.add_child(banish)
+	# buildMini: current moves as .ult-row style chips.
+	var player: Dictionary = _run.get("player", {})
+	for raw in PbJson.as_array(player.get("moves", [])):
+		if raw == null:
+			continue
+		var inst := PbJson.as_dict(raw)
+		var def := PbJson.as_dict(inst.get("def", {}))
+		if def.is_empty():
+			continue
+		var chip := UI.chip("%s Lv%d" % [String(def.get("name", "?")), int(inst.get("level", 1))],
+			PbTheme.type_color(String(def.get("type", "normal"))))
+		_modal_mini.add_child(chip)
+	if _banish_mode:
+		# CSS .cards.banning: hue-rotate the row, outline the picked card red.
+		_modal_cards.modulate = Color(1.15, 0.9, 0.9)
+		_hud.notify("选择要放逐的卡：再点一次同一张确认")
+	else:
+		_modal_cards.modulate = Color.WHITE
+	Audio.sfx("level")
 
 
-func _pick(index: int) -> void:
+func _action_icon(name: String) -> Control:
+	return UI.icon_rect(name, 18)
+
+
+## .card.offer payload from a PbCards card (structure per offerCard(); amounts
+## untouched). Rarity mapping is estimated -- see PORT_STATUS.
+func _offer_card_data(card: Dictionary) -> Dictionary:
+	var kind := String(card.get("kind", "stat"))
+	var mods: Array = PbJson.as_array(card.get("mods", []))
+	var label_text := String(card.get("label", ""))
+	var out := {"lines": [], "mods": mods}
+	var rc: Color
+	var rar := 0
+	match kind:
+		"new_move":
+			var def := PbMoves.resolve(String(card.get("move_key", "")))
+			var type_name := String(def.get("type", "normal"))
+			rc = PbTheme.type_color(type_name)
+			out["rar_text"] = "招式"
+			out["kind_text"] = "新"
+			out["title"] = String(def.get("name", "?"))
+			out["sub"] = "%s · %s" % ["物理" if String(def.get("cls", "physical")) == "physical" else "特殊",
+				String(def.get("arch", ""))]
+			out["lines"] = [String(def.get("desc", ""))]
+			out["icon_name"] = type_name if ResourceLoader.exists("res://assets/ui/icons/%s.png" % type_name) else "poke-ball"
+			rar = mini(4, int(roundf(float(def.get("dmg", 10.0)) / 12.0)))
+		"move_upgrade":
+			var def2 := _move_def_by_key(String(card.get("move_key", "")))
+			rc = PbTheme.rarity_color(rar)
+			out["rar_text"] = "强化"
+			out["kind_text"] = "升级"
+			out["title"] = String(def2.get("name", card.get("move_key", "?")))
+			out["sub"] = label_text
+			out["lines"] = [_mod_line(PbJson.as_dict(mods[0])) if not mods.is_empty() else label_text]
+			out["icon_name"] = String(def2.get("type", "")) if ResourceLoader.exists("res://assets/ui/icons/%s.png" % String(def2.get("type", ""))) else ""
+		"type":
+			rc = PbTheme.type_color(String(card.get("type", "normal")))
+			out["rar_text"] = "属性"
+			out["kind_text"] = "强化"
+			out["title"] = label_text
+			out["sub"] = "%s 属性加成" % App.t("types", String(card.get("type", "")), String(card.get("type", "")))
+			for raw in mods:
+				out["lines"].append(_mod_line(PbJson.as_dict(raw)))
+			out["icon_name"] = String(card.get("type", "")) if ResourceLoader.exists("res://assets/ui/icons/%s.png" % String(card.get("type", ""))) else ""
+		_:
+			var mod0 := PbJson.as_dict(mods[0]) if not mods.is_empty() else {}
+			# estimated magnitude -> rarity band (0..2), flagged as ours
+			var mag := absf(float(mod0.get("mul", 0)) - 1.0) * 100.0 if mod0.has("mul") else absf(float(mod0.get("add", 0.0))) * 100.0
+			rar = 0 if mag < 10.0 else (1 if mag < 18.0 else 2)
+			rc = PbTheme.rarity_color(rar)
+			out["rar_text"] = _rar_name(rar)
+			out["kind_text"] = "强化"
+			out["title"] = label_text
+			out["sub"] = String(card.get("stat", ""))
+			for raw in mods:
+				out["lines"].append(_mod_line(PbJson.as_dict(raw)))
+	out["rc"] = rc
+	out["shine"] = rar >= 2
+	out["key"] = ""
+	return out
+
+
+func _rar_name(rar: int) -> String:
+	var zh := ["常见", "较少", "稀有", "史诗", "传说"]
+	return String(zh[clampi(rar, 0, zh.size() - 1)])
+
+
+func _mod_line(mod: Dictionary) -> String:
+	if mod.has("add"):
+		var v := float(mod["add"])
+		return "%s +%s" % [String(mod.get("stat", "?")), ("%d%%" % int(roundf(v * 100.0)) if absf(v) < 1.0 else str(v))]
+	return "%s ×%.2f" % [String(mod.get("stat", "?")), float(mod.get("mul", 1.0))]
+
+
+func _move_def_by_key(key: String) -> Dictionary:
+	var player: Dictionary = _run.get("player", {})
+	for raw in PbJson.as_array(player.get("moves", [])):
+		if raw == null:
+			continue
+		var def := PbJson.as_dict(PbJson.as_dict(raw).get("def", {}))
+		if String(def.get("key", "")) == key:
+			return def
+	return PbMoves.resolve(key)
+
+
+## Hotkey/click path, mirroring the web's two-step banish confirm.
+func _offer_key(index: int) -> void:
+	var offers: Array = PbJson.as_array(_run.get("offers", []))
+	if index < 0 or index >= offers.size():
+		return
+	if _banish_mode:
+		if _banish_pick == index:
+			_do_banish(index)
+		else:
+			_banish_pick = index
+			_outline_picked(index)
+			_hud.notify("再按一次确认放逐「%s」" % String(PbJson.as_dict(offers[index]).get("label", "?")))
+			Audio.sfx("ui")
+		return
 	if PbRun.choose_offer(_run, index):
 		Audio.sfx("ui")
-	_modal.set_meta("state", "")
+		_modal_state = ""
+		_banish_mode = false
+		_banish_pick = -1
 
 
-func _resume_without_offer() -> void:
-	_run["pendingLevels"] = 0
-	_run["offers"] = []
-	_run["state"] = "play"
-	_modal.set_meta("state", "")
+func _outline_picked(index: int) -> void:
+	for i in _modal_cards.get_child_count():
+		var card := _modal_cards.get_child(i) as PanelContainer
+		var rc: Color = card.get_meta("rc", PbTheme.rarity_color(0))
+		var base := PbTheme.stylebox(".card", {"rc": "#" + rc.to_html(false)})
+		if i == index:
+			# CSS .card offer banish outline: 4px solid #ff4a4a.
+			base.set_border_width_all(4)
+			base.border_color = PbTheme.css_color("#ff4a4a", Color("#ff4a4a"))
+		card.add_theme_stylebox_override("panel", base)
 
 
 func _act_reroll() -> void:
+	if int(_run.get("rerolls", 0)) <= 0:
+		Audio.sfx("deny")
+		return
 	PbRun.reroll(_run)
-	_modal.set_meta("state", "")
+	_modal_state = ""
 
 
 func _act_skip() -> void:
+	if int(_run.get("skips", 0)) <= 0:
+		Audio.sfx("deny")
+		return
 	PbRun.skip(_run)
-	_modal.set_meta("state", "")
+	_modal_state = ""
+	_banish_mode = false
+	_banish_pick = -1
 
 
-func _act_banish() -> void:
-	PbRun.banish(_run, 0)
-	_modal.set_meta("state", "")
+func _act_banish_toggle() -> void:
+	if _banish_mode:
+		_banish_mode = false
+		_banish_pick = -1
+	else:
+		if int(_run.get("banishes", 0)) <= 0:
+			Audio.sfx("deny")
+			return
+		_banish_mode = true
+		_banish_pick = -1
+	_modal_state = ""
+
+
+func _do_banish(index: int) -> void:
+	PbRun.banish(_run, index)
+	_banish_mode = false
+	_banish_pick = -1
+	_modal_state = ""
+	Audio.sfx("deny")
+	_hud.notify("已放逐，重新抽卡")
 
 
 # ------------------------------------------------------------------ fusion
@@ -444,15 +633,15 @@ func _try_fusion() -> void:
 			ready.append(offer)
 	if ready.is_empty():
 		Audio.sfx("deny")
-		_log("尚不可融合：需要两个招式都升到 8 级（当前可融合组合 %d）" % offers.size())
+		_hud.notify("尚不可融合：需要两个招式都升到 %d 级" % PbFusion.MOVE_MAX_LEVEL)
 		return
 	var inst := PbRun.fuse(_run, PbJson.as_dict(ready[0]))
 	if not inst.is_empty():
 		Audio.sfx("fusion")
-		_log("融合成功：%s（伤害 %.0f，段数 %.1f）" % [
-			String(PbJson.as_dict(inst.get("def", {})).get("name", "?")),
-			float(PbJson.as_dict(inst.get("def", {})).get("dmg", 0)),
-			float(PbJson.as_dict(inst.get("def", {}).get("fusion", {})).get("hits", 1))])
+		var fdef := PbJson.as_dict(inst.get("def", {}))
+		_hud.show_banner("融合：%s" % String(fdef.get("name", "?")),
+			"伤害 %.0f · 段数 %.1f" % [float(fdef.get("dmg", 0)),
+				float(PbJson.as_dict(fdef.get("fusion", {})).get("hits", 1))], "#8a5cff")
 
 
 # ------------------------------------------------------------------ settle
@@ -470,33 +659,56 @@ func _finish(how: String) -> void:
 
 
 func _show_settle_once() -> void:
-	if _settle_box.visible:
+	if _settle_scrim.visible:
 		return
 	_finish(String(_run.get("endHow", "exit")))
 
 
+## .modal h1 + detail cards (.card.mini style) + .actions buttons.
 func _show_settle(result: Dictionary, res: Dictionary) -> void:
-	_modal_box.visible = false
-	_settle_box.visible = true
-	_settle_box.position = Vector2(-260, -200)
-	for c in _settle.get_children():
+	_modal_scrim.visible = false
+	_settle_scrim.visible = true
+	for c in _settle_body.get_children():
 		c.queue_free()
-	_settle.add_child(UI.title("本局结算"))
 	var reward := PbJson.as_dict(res.get("reward", {}))
 	var record := PbJson.as_dict(res.get("record", {}))
-	var lines := [
-		"结果：%s（%s）" % ["胜利" if bool(result.get("victory", false)) else "失败", String(result.get("endHow", ""))],
-		"阶段 %d · 时长 %.0fs · 击杀 %d · 伤害 %.0f · 等级 %d" % [
-			int(result.get("stage", 0)), float(result.get("time", 0)), int(result.get("kills", 0)),
-			float(result.get("damage", 0)), int(result.get("level", 0))],
-		"融合 %d 次：%s" % [PbJson.as_array(result.get("fusions", [])).size(),
-			", ".join(PbJson.as_array(result.get("fusions", [])))],
-		"星尘 +%d（余额 %d）· 记录 id %s" % [int(reward.get("stardust", 0)),
-			int(Save.store.get("stardust", 0)), String(record.get("id", "?"))],
-	]
-	for line in lines:
-		_settle.add_child(UI.label(line, 15))
-	var row := UI.hbox(8)
-	_settle.add_child(row)
-	row.add_child(UI.button("再来一局", func(): _start_run()))
-	row.add_child(UI.button("返回主菜单", func(): App.back_to_menu()))
+	var row := UI.hbox(12)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_settle_body.add_child(row)
+	row.add_child(_settle_card("结果",
+		"胜利！" if bool(result.get("victory", false)) else "失败",
+		String(result.get("endHow", "")), PbTheme.accent_color("green", "c")))
+	row.add_child(_settle_card("战绩", "%d 阶段 · %s" % [int(result.get("stage", 0)), UI.fmt_clock(float(result.get("time", 0)))],
+		"%d 击杀 · %s 伤害 · Lv%d" % [int(result.get("kills", 0)), UI.fmt_num(float(result.get("damage", 0))),
+			int(result.get("level", 0))], PbTheme.accent_color("blue", "c")))
+	var fusions: Array = PbJson.as_array(result.get("fusions", []))
+	row.add_child(_settle_card("融合", "%d 次" % fusions.size(), ", ".join(fusions),
+		PbTheme.accent_color("purple", "c")))
+	row.add_child(_settle_card("奖励", "+%s 星尘" % UI.fmt_num(int(reward.get("stardust", 0))),
+		"余额 %s · 记录 %s" % [UI.fmt_num(int(Save.store.get("stardust", 0))), String(record.get("id", "?"))],
+		PbTheme.accent_color("yellow", "c")))
+	var actions := UI.hbox(8)
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	_settle_body.add_child(actions)
+	actions.add_child(UI.button("再来一局", func(): _start_run()))
+	actions.add_child(UI.button("返回主菜单", func(): App.back_to_menu(), false, "ghost"))
+
+
+func _settle_card(title_text: String, value_text: String, sub_text: String, rc: Color) -> Control:
+	var panel := PanelContainer.new()
+	var s := PbTheme.card_style()
+	s.content_margin_left = 14
+	s.content_margin_right = 14
+	var body := UI.vbox(2)
+	panel.add_child(body)
+	var head := UI.hbox(6)
+	body.add_child(head)
+	var badge := UI.chip(title_text, rc)
+	head.add_child(badge)
+	var val := UI.title(value_text, 20)
+	val.add_theme_color_override("font_color", PbTheme.ink())
+	body.add_child(val)
+	if not sub_text.is_empty():
+		body.add_child(UI.dim(sub_text))
+	panel.custom_minimum_size = Vector2(200, 0)
+	return panel
