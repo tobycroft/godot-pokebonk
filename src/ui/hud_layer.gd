@@ -32,6 +32,7 @@ func build(state: Dictionary) -> void:
 	_build_tl()
 	_build_tr()
 	_build_bl()
+	_build_br()
 	_build_bossbar()
 
 
@@ -463,6 +464,24 @@ func _build_bl() -> void:
 	_els["kgoal"] = goal
 
 
+## ------------------------------------------------------------------ hud-br
+## .minimap radar (bundle @2125794), bottom-right.
+func _build_br() -> void:
+	var br := Control.new()
+	br.name = "HudBr"
+	br.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(br)
+	br.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	br.offset_left = -164
+	br.offset_right = -14
+	br.offset_top = -164
+	br.offset_bottom = -14
+	var mm := PbWidgets.Minimap.new()
+	mm.set_anchors_preset(Control.PRESET_FULL_RECT)
+	br.add_child(mm)
+	_els["minimap"] = mm
+
+
 ## ------------------------------------------------------------------ bossbar
 func _build_bossbar() -> void:
 	var bar := HBoxContainer.new()
@@ -589,7 +608,38 @@ func sync(state: Dictionary, dt: float) -> void:
 	# pw-row: card buffs summary
 	_sync_pw(player)
 
+	# minimap blips
+	_sync_minimap(state, player)
+
 	# streak (hud-tr) stays empty until lives port
+
+
+## Feed the radar: enemies as type-coloured dots, xp candies yellow.
+func _sync_minimap(state: Dictionary, player: Dictionary) -> void:
+	var minimap := _els.get("minimap") as PbWidgets.Minimap
+	if minimap == null:
+		return
+	minimap.player_pos = Vector2(float(player.get("x", 0.0)), float(player.get("z", 0.0)))
+	var blips := []
+	var pool := PbRun.pool_of(state)
+	for entry in PbEnemies.live_indices(pool):
+		var i := int(entry)
+		if not PbEnemies.is_alive(pool, i):
+			continue
+		var types: Array = PbEnemies.types_of(pool, i)
+		var col := PbTheme.type_color(String(types[0])) if not types.is_empty() else PbTheme.type_color("normal")
+		var is_boss := PbEnemies.is_boss(pool, i)
+		blips.append({
+			"x": float(PbEnemies.get_field(pool, "x", i)),
+			"z": float(PbEnemies.get_field(pool, "z", i)),
+			"color": col,
+			"r": 5.0 if is_boss else 3.0,
+		})
+	for raw in PbJson.as_array(state.get("orbs", [])):
+		var orb := PbJson.as_dict(raw)
+		blips.append({"x": float(orb.get("x", 0.0)), "z": float(orb.get("z", 0.0)),
+			"color": PbTheme.accent_color("yellow", "c"), "r": 2.0})
+	minimap.blips = blips
 
 
 func _biome_name(id: String) -> String:

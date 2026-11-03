@@ -257,3 +257,40 @@ class XpRing:
 		if _portrait != null:
 			var inner := (r - 7.0) * 2.0
 			_portrait.position = center - _portrait.size * 0.5
+
+
+## .minimap: the round radar (bundle @2125794 canvas). CSS gives it a paper+red
+## double ring and a translucent ink face; we draw the player centred with
+## enemy/orb/item blips mapped from world space into the disc.
+class Minimap:
+	extends Control
+	var world_radius := 30.0        # metres from the player that fit in the disc
+	var player_pos := Vector2.ZERO
+	var blips: Array = []           # [{"x","z","color","r"}]
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(150, 150)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _process(_dt: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		var center := size * 0.5
+		var rad := minf(size.x, size.y) * 0.5
+		# face: background #2a244073
+		draw_circle(center, rad, PbTheme.css_color("#2a244073", Color(0.16, 0.14, 0.25, 0.45)))
+		# blips (clip to the disc)
+		for b in blips:
+			var off := Vector2(float(b["x"]) - player_pos.x, float(b["z"]) - player_pos.y)
+			if off.length() > world_radius:
+				continue
+			var p := center + off / world_radius * (rad - 4.0)
+			draw_circle(p, float(b.get("r", 3.0)), b["color"])
+		# player marker at the centre
+		draw_circle(center, 4.5, Color.WHITE)
+		draw_circle(center, 2.5, PbTheme.accent_color("blue", "c"))
+		# rings: box-shadow 0 0 0 4px paper, 0 0 0 7px red
+		draw_arc(center, rad - 2.0, 0.0, TAU, 64, PbTheme.paper(), 4.0)
+		draw_arc(center, rad + 2.0, 0.0, TAU, 64, PbTheme.accent_color("red", "c"), 3.0)
+
