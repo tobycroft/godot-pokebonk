@@ -148,13 +148,8 @@ func refresh() -> void:
 			continue
 		shown += 1
 		var names: Array = PbJson.as_array(offer.get("names", []))
-		var b := UI.button("%s  ←  %s + %s  [%s]" % [
-			String(recipe.get("name", "?")), String(names[0]) if names.size() > 0 else "?",
-			String(names[1]) if names.size() > 1 else "?", String(recipe.get("kind", "?"))],
-			func(): _preview_recipe(recipe))
-		b.custom_minimum_size = Vector2(320, 34)
-		b.disabled = not bool(offer.get("ready", false))
-		_list.add_child(b)
+		_list.add_child(_recipe_card(recipe, names, func(): _preview_recipe(recipe),
+			bool(offer.get("ready", false))))
 		var need: Array = PbJson.as_array(offer.get("need", []))
 		if not need.is_empty():
 			_list.add_child(UI.dim("   需要：" + ", ".join(need)))
@@ -164,13 +159,58 @@ func refresh() -> void:
 		for entry in _catalogue:
 			if _filter != "all" and String(entry.get("kind", "")) != _filter:
 				continue
-			var b2 := UI.button("目录：%s [%s]" % [String(entry.get("name", "?")), String(entry.get("kind", ""))],
-				func(): _preview_recipe(entry))
-			b2.custom_minimum_size = Vector2(320, 30)
-			_list.add_child(b2)
+			_list.add_child(_recipe_card(entry, PbJson.as_array(entry.get("moves", [])),
+				func(): _preview_recipe(entry), true))
 			if _list.get_child_count() > 200:
 				break
 	_preview_recipe(PbJson.as_dict(PbFusion.by_key("fu-1")))
+
+
+## One .fu-cards list entry: input moves -> output + a kind chip; a compact card
+## that previews the recipe when clicked.
+func _recipe_card(recipe: Dictionary, names: Array, on_click: Callable, ready: bool) -> Control:
+	var card := Button.new()
+	card.flat = true
+	card.focus_mode = Control.FOCUS_NONE
+	card.custom_minimum_size = Vector2(0, 44)
+	var s := PbTheme.stylebox(".card.mini")
+	s.content_margin_left = 10
+	s.content_margin_right = 10
+	s.content_margin_top = 5
+	s.content_margin_bottom = 5
+	if not ready:
+		s.bg_color = PbTheme.css_color(PbTheme.v("--k-e6e9f2", "#e6e9f2"), Color("#e6e9f2"))
+	card.add_theme_stylebox_override("normal", s)
+	card.add_theme_stylebox_override("hover", s)
+	card.add_theme_stylebox_override("pressed", s)
+	card.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	card.add_theme_stylebox_override("disabled", s)
+	var row := UI.hbox(6)
+	card.add_child(row)
+	for i in names.size():
+		if i > 0:
+			var plus := UI.label("+", 13, PbTheme.ink_muted())
+			plus.add_theme_font_override("font", PbTheme.font("title"))
+			row.add_child(plus)
+		var nm := UI.label(String(names[i]), 12, PbTheme.ink())
+		nm.autowrap_mode = TextServer.AUTOWRAP_OFF
+		row.add_child(nm)
+	var arrow := UI.label("→", 14, PbTheme.ink())
+	arrow.add_theme_font_override("font", PbTheme.font("title"))
+	row.add_child(arrow)
+	var out := UI.label(String(recipe.get("name", "?")), 13, PbTheme.accent_color("purple", "cd"))
+	out.add_theme_font_override("font", PbTheme.font("title"))
+	out.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(out)
+	row.add_child(UI.chip(_kind_label(String(recipe.get("kind", "?"))), _kind_color(String(recipe.get("kind", "")))))
+	if on_click.is_valid():
+		card.pressed.connect(on_click)
+	return card
+
+
+func _kind_color(kind: String) -> Color:
+	var m := {"signature": "purple", "type": "green", "reaction": "orange", "glitch": "red"}
+	return PbTheme.accent_color(String(m.get(kind, "blue")), "c")
 
 
 func _preview_recipe(recipe: Dictionary) -> void:
@@ -180,13 +220,36 @@ func _preview_recipe(recipe: Dictionary) -> void:
 		_preview.add_child(UI.dim("无配方"))
 		return
 	var fused := PbFusion.fused_def(recipe)
-	_preview.add_child(UI.label("★ %s" % String(fused.get("name", "?")), 20))
-	var types := UI.hbox(6)
-	_preview.add_child(types)
-	types.add_child(UI.type_chip(String(fused.get("type", ""))))
+	# .fu-pair: the two input moves -> the fused result (web @1608119).
+	var pair := UI.hbox(6)
+	pair.name = "FuPair"
+	pair.add_theme_constant_override("separation", 6)
+	_preview.add_child(pair)
+	var names: Array = PbJson.as_array(recipe.get("moves", []))
+	for i in names.size():
+		if i > 0:
+			var arrow := UI.label("+", 16, PbTheme.ink_muted())
+			arrow.add_theme_font_override("font", PbTheme.font("title"))
+			pair.add_child(arrow)
+		pair.add_child(UI.chip(String(names[i]), PbTheme.accent_color("blue", "c")))
+	var to := UI.label("→", 18, PbTheme.ink())
+	to.add_theme_font_override("font", PbTheme.font("title"))
+	pair.add_child(to)
+	var out_chip := UI.chip(String(fused.get("name", "?")), PbTheme.accent_color("purple", "c"))
+	pair.add_child(out_chip)
+
+	_preview.add_child(UI.label("★ %s" % String(fused.get("name", "?")), 20, PbTheme.ink()))
+	# .fu-types: the fused move's type chips
+	var ftypes := UI.hbox(4)
+	ftypes.name = "FuTypes"
+	_preview.add_child(ftypes)
+	ftypes.add_child(UI.type_chip(String(fused.get("type", ""))))
 	if fused.get("type2") != null:
-		types.add_child(UI.type_chip(String(fused["type2"])))
-	_preview.add_child(UI.dim(String(fused.get("desc", ""))))
+		ftypes.add_child(UI.type_chip(String(fused["type2"])))
+	# .fu-desc
+	var desc := UI.paragraph(String(fused.get("desc", "")), 12, PbTheme.ink_muted(), 2)
+	desc.name = "FuDesc"
+	_preview.add_child(desc)
 
 	var actor := PbActor.create(int(Save.store.get("starter", 0)) if int(Save.store.get("starter", 0)) > 0 else 1)
 	var built := PbDamage.move_instance(fused, PbActor.actor_for_damage(actor), 1)
