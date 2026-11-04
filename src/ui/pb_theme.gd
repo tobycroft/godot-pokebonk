@@ -563,6 +563,10 @@ static func stylebox(sel: String, vars_for: Dictionary = {}) -> StyleBoxFlat:
 		_warn_once(sel, "pseudo-element rule cannot be a StyleBox; draw it as an "
 			+ "explicit node (see PbTheme.pseudo_rule)")
 		return StyleBoxFlat.new()
+	if d.has("clip-path"):
+		# No StyleBox has a clip shape; callers must paint the silhouette explicitly.
+		_warn_once(sel + "|clip-path", "clip-path has no StyleBox equivalent; build a "
+			+ "Polygon2D / Control._draw mask instead (see main_menu SkewTile)")
 	var s := StyleBoxFlat.new()
 	var bg_raw := str(d.get("background", d.get("background-color", "")))
 	if "gradient(" in bg_raw:
@@ -1062,7 +1066,8 @@ static func button_style(accent: String = "yellow", lighten: float = 0.0, presse
 	s.bg_color = mix(c, Color.WHITE, 0.06) if pressed else mix(c, Color.WHITE, 0.14 + lighten)
 	s.set_corner_radius_all(999)
 	s.corner_detail = 12
-	s.border_width_bottom = 2 if pressed else 6
+	# .btn box-shadow 0 4px 0; :active collapses it to 0 1px 0 (M-02).
+	s.border_width_bottom = 1 if pressed else 4
 	s.border_color = mix(cd, Color.BLACK, 0.25)
 	s.shadow_size = 0 if pressed else 8
 	s.shadow_color = css_color("#1a124626", Color(0.1, 0.07, 0.27, 0.15))
@@ -1127,7 +1132,15 @@ static func bar_fill(color: Color) -> StyleBoxFlat:
 	return s
 
 
-static func slider_knob() -> StyleBoxFlat:
+## M-08: the CSS thumb paints a 28px poké-ball; use the shipped sprite instead
+## of approximating the radial/linear layers. Falls back to the flat disc.
+static func slider_knob() -> StyleBox:
+	var path := "res://assets/items/poke-ball.png"
+	if ResourceLoader.exists(path):
+		var tex := StyleBoxTexture.new()
+		tex.texture = load(path)
+		tex.set_texture_margin_all(0)
+		return tex
 	var s := StyleBoxFlat.new()
 	s.bg_color = Color.WHITE
 	s.set_corner_radius_all(999)
@@ -1146,19 +1159,22 @@ static func slider_grabber_area(color: Color = Color(0, 0, 0, 0)) -> StyleBoxFla
 	s.bg_color = color if color.a > 0.0 else accent_color("yellow", "c")
 	s.set_corner_radius_all(999)
 	s.corner_detail = 8
-	s.content_margin_top = 5
-	s.content_margin_bottom = 5
+	s.content_margin_top = 6
+	s.content_margin_bottom = 6
 	return s
 
 
 ## Apply the three token-driven HSlider parts to one slider (track / fill / knob).
 static func paint_slider(slider: Range, accent: String = "yellow") -> void:
+	# `.st-range{height:12px;background:linear-gradient(90deg, var(--c) var(--p),
+	# var(--line) var(--p));inset 0 2px 3px #00000026}` -- the unfilled half is
+	# the --line track, the grabber_area stylebox supplies the accent half.
 	var track := StyleBoxFlat.new()
-	track.bg_color = mix(paper(1.0), ink(), 0.10)
-	track.set_corner_radius_all(999)
+	track.bg_color = line()
+	track.set_corner_radius_all(99)
 	track.corner_detail = 8
-	track.content_margin_top = 5
-	track.content_margin_bottom = 5
+	track.content_margin_top = 6
+	track.content_margin_bottom = 6
 	slider.add_theme_stylebox_override("background", track)
 	slider.add_theme_stylebox_override("grabber_area", slider_grabber_area(accent_color(accent, "c")))
 	slider.add_theme_stylebox_override("grabber_area_highlight", slider_grabber_area(accent_color(accent, "cd")))
@@ -1277,6 +1293,10 @@ static func pill_seg_style(on: bool) -> StyleBoxFlat:
 				s.shadow_size = int(layer["blur"] * 0.7)
 				s.shadow_color = layer["color"]
 				s.shadow_offset = Vector2(layer["x"], layer["y"])
+		# M-09: `inset 0 -2px` approximation when the rule has no hard edge.
+		if s.border_width_bottom == 0:
+			s.border_width_bottom = 2
+			s.border_color = mix(ink(), Color.BLACK, 0.15)
 	return s
 
 
@@ -1287,7 +1307,8 @@ static func seg_track_style() -> StyleBoxFlat:
 ## .switch off/on: 58x32 track; the knob is a child Control painted by UI.switch.
 static func switch_track_style(on: bool, accent: Color = Color(0, 0, 0, 0)) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
-	s.bg_color = css_color("#d4cfe6", Color("#d4cfe6")) if not on else (
+	# M-07: off state uses --paper-3 so it no longer reads as pale purple.
+	s.bg_color = paper(2.0) if not on else (
 		accent if accent.a > 0.0 else accent_color("green", "c"))
 	s.set_corner_radius_all(99)
 	s.corner_detail = 10
@@ -1344,16 +1365,25 @@ static func wallet_gold() -> Color:
 	return css_color("#b8860b", Color("#b8860b"))
 
 
-## hpbar fill states (CSS .hpbar>i / .mid / .low gradients): the port samples
-## the vertical gradient into {top,base} so the bar can fake it with two tones.
+## HP fill gradient straight from the active HUD skin rule
+## (`.under .hpbar>i` / `.mid>i` / `.low>i`), not the legacy unqualified rule.
+static func hpbar_gradient(band: String) -> Dictionary:
+	var sel := ".under .hpbar>i"
+	if band == "mid":
+		sel = ".under .hpbar.mid>i"
+	elif band == "low":
+		sel = ".under .hpbar.low>i"
+	return gradient(str(decls(sel).get("background", "")))
+
+
 static func hpbar_colors() -> Dictionary:
 	var out := {}
-	for pair in [["high", ".hpbar>i"], ["mid", ".hpbar.mid>i"], ["low", ".hpbar.low>i"]]:
-		var g := gradient(str(decls(str(pair[1])).get("background", "")))
+	for band in ["high", "mid", "low"]:
+		var g := hpbar_gradient(str(band))
 		var stops: Array = g.get("stops", [])
 		var top: Color = stops[0]["color"] if stops.size() > 0 else accent_color("green", "c")
 		var base: Color = stops[stops.size() - 1]["color"] if stops.size() > 1 else top
-		out[str(pair[0])] = {"top": top, "base": base}
+		out[str(band)] = {"top": top, "base": base}
 	return out
 
 
@@ -1417,7 +1447,43 @@ static func paint(button: Button, accent: String = "yellow", big: bool = false, 
 	hover.content_margin_bottom = pad_v
 	button.add_theme_stylebox_override("hover", hover)
 	button.focus_mode = Control.FOCUS_NONE
+	_wire_button_motion(button)
 	return button
+
+
+## M-02: `.btn:hover{transform:translateY(-2px)scale(1.02)}` and
+## `:active{transform:translateY(2px)}` (a 4px drop from the hover pose).
+## Containers own the layout position, so the offset is applied on top of the
+## resting y captured at hover time and reverted on exit.
+static func _wire_button_motion(button: Button) -> void:
+	if button.has_meta("pb_motion"):
+		return
+	button.set_meta("pb_motion", true)
+	button.mouse_entered.connect(func():
+		if button.disabled:
+			return
+		button.set_meta("pb_rest_y", button.position.y)
+		_button_motion(button, -2.0, 1.02))
+	button.mouse_exited.connect(func(): _button_motion(button, 0.0, 1.0))
+	button.button_down.connect(func(): _button_motion(button, 2.0, 1.0))
+	button.button_up.connect(func(): _button_motion(button, -2.0, 1.02))
+
+
+static func _button_motion(button: Button, dy: float, sc: float) -> void:
+	if not is_instance_valid(button):
+		return
+	if button.has_meta("pb_motion_tw"):
+		var old: Tween = button.get_meta("pb_motion_tw")
+		if old.is_valid():
+			old.kill()
+	var rest := button.position.y
+	if button.has_meta("pb_rest_y"):
+		rest = float(button.get_meta("pb_rest_y"))
+	button.pivot_offset = button.size * 0.5
+	var tw := button.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(button, "position:y", rest + dy, 0.12)
+	tw.tween_property(button, "scale", Vector2(sc, sc), 0.12)
+	button.set_meta("pb_motion_tw", tw)
 
 
 ## Re-paint a panel as a .card (or a .lab-card tile with an accent ring).

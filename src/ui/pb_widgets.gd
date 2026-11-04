@@ -8,6 +8,48 @@ extends RefCounted
 ## #ffffff24 0 10px, transparent 10px 20px). Rendered once per (colour,period).
 static var _stripe_tex := {}
 
+## Colour of a gradient stop list at t in [0,1] (offsets normalised, negatives
+## spread evenly). Shared by GradRect and the hand-built tiles (SkewTile).
+static func stops_color(stops: Array, t: float) -> Color:
+	if stops.is_empty():
+		return Color.WHITE
+	var offs := []
+	for i in stops.size():
+		var pos := float(stops[i]["pos"])
+		if pos < 0.0:
+			pos = float(i) / maxf(1.0, float(stops.size() - 1)) * 100.0
+		offs.append(clampf(pos / 100.0, 0.0, 1.0))
+	if t <= float(offs[0]):
+		return stops[0]["color"]
+	for i in range(1, stops.size()):
+		if t <= float(offs[i]):
+			var span := maxf(float(offs[i]) - float(offs[i - 1]), 0.0001)
+			var f := clampf((t - float(offs[i - 1])) / span, 0.0, 1.0)
+			return (stops[i - 1]["color"] as Color).lerp(stops[i]["color"], f)
+	return stops[stops.size() - 1]["color"]
+
+
+## Per-vertex colours for a CSS linear-gradient over `pts` (projected on the
+## gradient axis). Used by GradRect and SkewTile so both share one interpolation.
+static func linear_colors(pts: PackedVector2Array, g: Dictionary, pivot: Vector2) -> PackedColorArray:
+	var stops: Array = g.get("stops", [])
+	var angle := deg_to_rad(float(g.get("angle", 180.0)))
+	var dir := Vector2(sin(angle), -cos(angle))
+	var lo := INF
+	var hi := -INF
+	var proj := []
+	for p in pts:
+		var t := (p - pivot).dot(dir)
+		proj.append(t)
+		lo = minf(lo, t)
+		hi = maxf(hi, t)
+	var span := maxf(hi - lo, 0.001)
+	var cols := PackedColorArray()
+	for t in proj:
+		cols.append(stops_color(stops, clampf((t - lo) / span, 0.0, 1.0)))
+	return cols
+
+
 static func stripes_texture() -> Texture2D:
 	var st := PbTheme.stripes()
 	var period := int(st["period"])
@@ -62,33 +104,42 @@ class GradRect:
 		if gradient.get("type", "") == "linear":
 			# Per-vertex colour interpolation along the CSS gradient direction:
 			# no texture sampling, so it is deterministic on the first frame.
-			var angle := deg_to_rad(float(gradient.get("angle", 180.0)))
-			var dir := Vector2(sin(angle), -cos(angle))
-			var proj := []
-			var lo := INF
-			var hi := -INF
-			for p in pts:
-				var t := (p - size * 0.5).dot(dir)
-				proj.append(t)
-				lo = minf(lo, t)
-				hi = maxf(hi, t)
-			var span := maxf(hi - lo, 0.001)
-			var cols := PackedColorArray()
-			for t in proj:
-				var u := clampf((t - lo) / span, 0.0, 1.0)
-				cols.append(_sample_gradient(u))
-			draw_polygon(pts, cols)
+			draw_polygon(pts, PbWidgets.linear_colors(pts, gradient, size * 0.5))
 		elif gradient.get("type", "") == "radial":
-			# radial-gradient(circle at X% Y%, centre, rim): a vertex-coloured fan
-			# from the centre to the rounded rim (clipped by the same corner radii).
+			# radial-gradient(circle at X% Y%): one ring per stop pair so three-
+			# stop rules (0% / 42% / 100%, e.g. .ls-show) keep their middle band.
 			var center_uv: Vector2 = gradient.get("center", Vector2(0.5, 0.5))
 			var center := Vector2(center_uv.x * size.x, center_uv.y * size.y)
-			var fan := PackedVector2Array([center])
-			var cols := PackedColorArray([_sample_gradient(0.0)])
-			for p in pts:
-				fan.append(p)
-				cols.append(_sample_gradient(1.0))
-			draw_polygon(fan, cols)
+			var stops: Array = gradient.get("stops", [])
+			if stops.size() < 2:
+				draw_colored_polygon(pts, stops[0]["color"] if stops.size() == 1 else Color.WHITE)
+				return
+			var offs := _stop_offsets(stops)
+			draw_colored_polygon(pts, stops[stops.size() - 1]["color"])
+			for i in range(stops.size() - 1, 0, -1):
+				var outer := _scaled_pts(pts, center, float(offs[i]))
+				var inner := _scaled_pts(pts, center, float(offs[i - 1]))
+				var c_out: Color = stops[i]["color"]
+				var c_in: Color = stops[i - 1]["color"]
+				if float(offs[i - 1]) <= 0.001:
+					# Innermost band: a fan from the gradient centre.
+					var fan := PackedVector2Array([center])
+					var cols := PackedColorArray([c_in])
+					for p in outer:
+						fan.append(p)
+						cols.append(c_out)
+					draw_polygon(fan, cols)
+				else:
+					# Annulus: outer rim forward, then the inner rim reversed.
+					var ring := PackedVector2Array()
+					var cols := PackedColorArray()
+					for p in outer:
+						ring.append(p)
+						cols.append(c_out)
+					for k in range(inner.size() - 1, -1, -1):
+						ring.append(inner[k])
+						cols.append(c_in)
+					draw_polygon(ring, cols)
 		elif not gradient.is_empty():
 			if style != null:
 				draw_colored_polygon(pts, style.bg_color)
@@ -101,25 +152,23 @@ class GradRect:
 			draw_colored_polygon(pts, Color.WHITE, uvs, PbWidgets.stripes_texture())
 
 
-	## Sample the gradient stops at t in [0,1] (offsets normalised 0..1).
-	func _sample_gradient(t: float) -> Color:
-		var stops: Array = gradient.get("stops", [])
-		if stops.is_empty():
-			return Color.WHITE
+	## Normalised 0..1 stop offsets (negative positions spread evenly).
+	func _stop_offsets(stops: Array) -> Array:
 		var offs := []
 		for i in stops.size():
 			var pos := float(stops[i]["pos"])
 			if pos < 0.0:
 				pos = float(i) / maxf(1.0, float(stops.size() - 1)) * 100.0
 			offs.append(clampf(pos / 100.0, 0.0, 1.0))
-		if t <= float(offs[0]):
-			return stops[0]["color"]
-		for i in range(1, stops.size()):
-			if t <= float(offs[i]):
-				var s2 := maxf(float(offs[i]) - float(offs[i - 1]), 0.0001)
-				var f := clampf((t - float(offs[i - 1])) / s2, 0.0, 1.0)
-				return (stops[i - 1]["color"] as Color).lerp(stops[i]["color"], f)
-		return stops[stops.size() - 1]["color"]
+		return offs
+
+
+	## Shrink a rounded polygon towards `center` by `f` (radial-gradient band).
+	func _scaled_pts(pts: PackedVector2Array, center: Vector2, f: float) -> PackedVector2Array:
+		var out := PackedVector2Array()
+		for p in pts:
+			out.append(center + (p - center) * f)
+		return out
 
 
 	## Corners rounded like border-radius: one arc of N points per corner
@@ -304,4 +353,45 @@ class Minimap:
 		# rings: box-shadow 0 0 0 4px paper, 0 0 0 7px red
 		draw_arc(center, rad - 2.0, 0.0, TAU, 64, PbTheme.paper(), 4.0)
 		draw_arc(center, rad + 2.0, 0.0, TAU, 64, PbTheme.accent_color("red", "c"), 3.0)
+
+
+## Custom-drawn inset shadow (CSS `inset 0 0 <blur>px <spread>px <color>`):
+## concentric edge bands, solid out to `spread`, then fading over `blur`.
+## Moved here from hud_fx so every screen can reuse the same effect.
+class InsetGlow:
+	extends Control
+	var color := Color("#ff142866")
+	var blur := 160.0
+	var spread := 50.0
+
+	func setup(what_color: Color, what_blur: float, what_spread: float) -> void:
+		color = what_color
+		blur = what_blur
+		spread = what_spread
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		resized.connect(queue_redraw)
+		queue_redraw()
+
+	func _draw() -> void:
+		if size.x <= 0.0 or size.y <= 0.0:
+			return
+		var reach := blur + spread
+		var limit := minf(reach, minf(size.x, size.y) * 0.5)
+		var steps := 24
+		var step := reach / float(steps)
+		for i in steps:
+			var d0 := step * float(i)
+			if d0 >= limit:
+				break
+			var d1 := minf(step * float(i + 1), limit)
+			var a := 1.0
+			if d0 > spread:
+				a = clampf(1.0 - (d0 - spread) / blur, 0.0, 1.0)
+			var band := color
+			band.a *= a
+			var thickness := d1 - d0
+			draw_rect(Rect2(0.0, d0, size.x, thickness), band)
+			draw_rect(Rect2(0.0, size.y - d1, size.x, thickness), band)
+			draw_rect(Rect2(d0, 0.0, thickness, size.y), band)
+			draw_rect(Rect2(size.x - d1, 0.0, thickness, size.y), band)
 

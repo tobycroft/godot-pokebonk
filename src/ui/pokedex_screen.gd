@@ -38,7 +38,6 @@ var _type_buttons := {}   # type id -> {btn, ring}
 var _cell := 84.0
 var _min_tile := 84.0
 var _gap := 8.0
-var _syncing := false
 
 
 func _ready() -> void:
@@ -311,16 +310,10 @@ func _rebuild_grid() -> void:
 
 
 func _sync_columns() -> void:
-	if _syncing:
-		return
 	var width := _grid.size.x
 	if width <= _min_tile:
 		return
-	var cols := maxi(1, int(floor((width + _gap) / (_min_tile + _gap))))
-	if cols != _grid.columns:
-		_syncing = true
-		_grid.columns = cols
-		_syncing = false
+	var cols := UI.autofill_columns(_grid, _min_tile, _gap)
 	_cell = maxf(1.0, (width - _gap * float(cols - 1)) / float(cols))
 	for entry in _tiles.values():
 		(entry["cell"] as Control).custom_minimum_size = Vector2(_cell, _cell)

@@ -11,22 +11,22 @@ extends Control
 
 const LOW_HP_RATIO := 0.25
 
-var _lowhp: InsetGlow = null
-var _flash: InsetGlow = null
+var _lowhp: PbWidgets.InsetGlow = null
+var _flash: PbWidgets.InsetGlow = null
 var _pulse: Tween = null
 var _flash_tween: Tween = null
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_lowhp = InsetGlow.new()
+	_lowhp = PbWidgets.InsetGlow.new()
 	add_child(_lowhp)
 	_lowhp.setup(Color("#ff142866"), 160.0, 50.0)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_lowhp.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_lowhp.visible = false
 
-	_flash = InsetGlow.new()
+	_flash = PbWidgets.InsetGlow.new()
 	add_child(_flash)
 	_flash.setup(Color("#ff283c8c"), 120.0, 30.0)
 	_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -111,42 +111,3 @@ func spawn_floater(text: String, color: Color, at: Vector2) -> void:
 	, 0.0, 1.0, 1.0)
 	tw.tween_callback(label.queue_free)
 
-
-## Custom-drawn inset shadow (CSS `inset 0 0 <blur>px <spread>px <color>`):
-## concentric edge bands, solid out to `spread`, then fading over `blur`.
-class InsetGlow:
-	extends Control
-	var color := Color("#ff142866")
-	var blur := 160.0
-	var spread := 50.0
-
-	func setup(what_color: Color, what_blur: float, what_spread: float) -> void:
-		color = what_color
-		blur = what_blur
-		spread = what_spread
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		resized.connect(queue_redraw)
-		queue_redraw()
-
-	func _draw() -> void:
-		if size.x <= 0.0 or size.y <= 0.0:
-			return
-		var reach := blur + spread
-		var limit := minf(reach, minf(size.x, size.y) * 0.5)
-		var steps := 24
-		var step := reach / float(steps)
-		for i in steps:
-			var d0 := step * float(i)
-			if d0 >= limit:
-				break
-			var d1 := minf(step * float(i + 1), limit)
-			var a := 1.0
-			if d0 > spread:
-				a = clampf(1.0 - (d0 - spread) / blur, 0.0, 1.0)
-			var band := color
-			band.a *= a
-			var thickness := d1 - d0
-			draw_rect(Rect2(0.0, d0, size.x, thickness), band)
-			draw_rect(Rect2(0.0, size.y - d1, size.x, thickness), band)
-			draw_rect(Rect2(d0, 0.0, thickness, size.y), band)
-			draw_rect(Rect2(size.x - d1, 0.0, thickness, size.y), band)

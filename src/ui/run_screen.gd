@@ -144,7 +144,7 @@ func _build_hud() -> void:
 	UI.fill(_modal_scrim)
 	# H-13: `.modal{align-items:center}` + `h1{padding:6px 34px}` -> the title is a
 	# capsule, not a full-width band.
-	RunHud.fit_capsule(body.get_parent().get_child(0) as Control, 34.0)
+	UI.fit_capsule(body.get_parent().get_child(0) as Control, 34.0)
 	body.add_theme_constant_override("separation", 16)
 	_modal_cards = UI.hbox(16)
 	_modal_cards.name = "Cards"
@@ -163,9 +163,9 @@ func _build_hud() -> void:
 	_settle_scrim.visible = false
 	_layer.add_child(_settle_scrim)
 	UI.fill(_settle_scrim)
-	RunHud.fit_capsule(_settle_body.get_parent().get_child(0) as Control, 34.0)
+	UI.fit_capsule(_settle_body.get_parent().get_child(0) as Control, 34.0)
 
-	var pause := UI.modal_shell(App.ui("En pausa"), true)
+	var pause := UI.modal_shell(App.ui("En pausa"), true, func(): _toggle_pause())
 	var pause_scrim: PanelContainer = pause["scrim"]
 	var pause_body: VBoxContainer = pause["body"]
 	var prow := UI.hbox(8)
@@ -179,7 +179,7 @@ func _build_hud() -> void:
 	pause_scrim.set_meta("is_pause", true)
 	_layer.add_child(pause_scrim)
 	UI.fill(pause_scrim)
-	RunHud.fit_capsule(pause_body.get_parent().get_child(0) as Control, 34.0)
+	UI.fit_capsule(pause_body.get_parent().get_child(0) as Control, 34.0)
 
 
 func _toggle_pause() -> void:
@@ -541,6 +541,8 @@ func _update_modal() -> void:
 	for i in offers.size():
 		var card := PbJson.as_dict(offers[i])
 		var data := _offer_card_data(card)
+		# H-16: `.card .key` shows the 1-4 pick shortcut (matches KEY_1..KEY_4).
+		data["key"] = str(i + 1)
 		_modal_cards.add_child(UI.card_offer(data, func(): _offer_key(i), i))
 	# .actions: btn blue/ghost/red small with counts + kbd hints, disabled at 0.
 	var reroll := UI.small_button("F " + App.ui("Refrescar ({n})", {"n": int(_run.get("rerolls", 0))}), _act_reroll, "blue")

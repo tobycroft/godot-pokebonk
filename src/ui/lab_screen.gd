@@ -215,22 +215,11 @@ func _group(g: Dictionary) -> Control:
 	grid.name = "LabGrid"
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.set_meta("accent", str(g["accent"]))
-	grid.resized.connect(_fit_columns.bind(grid))
+	grid.resized.connect(func(): UI.autofill_columns(grid, MIN_COL, GRID_GAP))
 	box.add_child(head_margin)
 	box.add_child(grid)
 	box.set_meta("grid", grid)
 	return box
-
-
-## CSS `repeat(auto-fill, minmax(230px, 1fr))`: columns = floor((W+gap)/(230+gap)),
-## each card then expands to an equal share of the row (GridContainer EXPAND_FILL).
-func _fit_columns(grid: GridContainer) -> void:
-	var width := grid.size.x
-	if width <= 0.0:
-		return
-	var cols := maxi(1, int(floor((width + GRID_GAP) / (MIN_COL + GRID_GAP))))
-	if grid.columns != cols:
-		grid.columns = cols
 
 
 # ---------------------------------------------------------------- card
@@ -332,7 +321,7 @@ func _card(id: String, max_rank: int, index: int, accent: String) -> Control:
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	desc.custom_minimum_size = Vector2(0, 13 * 1.35 * 2)
 	desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	desc.resized.connect(_fit_label_height.bind(desc))
+	desc.resized.connect(UI.fit_wrapped_height.bind(desc))
 	body.add_child(desc)
 
 	var spacer := Control.new()
@@ -606,14 +595,13 @@ func _clear_hover_deferred(row: Dictionary) -> void:
 func _hover_style(accent_hex: String) -> StyleBoxFlat:
 	if _hover_styles.has(accent_hex):
 		return _hover_styles[accent_hex]
-	var s := PbTheme.stylebox(".lab-card", {"--c": accent_hex})
-	s.content_margin_left = 0
-	s.content_margin_right = 0
-	s.content_margin_top = 0
-	s.content_margin_bottom = 0
-	s.shadow_size = 3
-	s.shadow_offset = Vector2.ZERO
-	s.shadow_color = PbTheme.css_color(accent_hex, PbTheme.accent_color("purple", "c"))
+	var base := PbTheme.stylebox(".lab-card", {"--c": accent_hex})
+	base.content_margin_left = 0
+	base.content_margin_right = 0
+	base.content_margin_top = 0
+	base.content_margin_bottom = 0
+	var s := UI.hover_ring_style(base, PbTheme.css_color(accent_hex,
+		PbTheme.accent_color("purple", "c")), 3)
 	_hover_styles[accent_hex] = s
 	return s
 
@@ -642,19 +630,6 @@ func _buy(id: String) -> void:
 
 
 # ---------------------------------------------------------------- helpers
-## Autowrapped Labels have no intrinsic height; measure at the laid-out width.
-func _fit_label_height(l: Label) -> void:
-	if l.has_meta("fit_busy") or l.size.x < 1.0:
-		return
-	var font := l.get_theme_font("font")
-	var font_size := l.get_theme_font_size("font_size")
-	var h := font.get_multiline_string_size(l.text, HORIZONTAL_ALIGNMENT_CENTER, l.size.x, font_size).y
-	if absf(h - l.custom_minimum_size.y) > 1.0:
-		l.set_meta("fit_busy", true)
-		l.custom_minimum_size.y = h
-		l.call_deferred("remove_meta", "fit_busy")
-
-
 ## Container children would eat the card's mouse_entered; only the buy button
 ## keeps input, and it re-arms hover through the deferred rect check.
 func _ignore_mouse(node: Node) -> void:

@@ -393,15 +393,8 @@ func _build_hpbar() -> Control:
 	return bar
 
 
-## HP fill palettes come from the active HUD skin (`.under .hpbar>i` etc.), not
-## from PbTheme.hpbar_colors() which reads the unqualified legacy rule.
 static func _hp_gradient(band: String) -> Dictionary:
-	var sel := ".under .hpbar>i"
-	if band == "mid":
-		sel = ".under .hpbar.mid>i"
-	elif band == "low":
-		sel = ".under .hpbar.low>i"
-	return PbTheme.gradient(str(PbTheme.decls(sel).get("background", "")))
+	return PbTheme.hpbar_gradient(band)
 
 
 ## ------------------------------------------------------------------ hud-tr
@@ -431,7 +424,7 @@ func _build_bl() -> void:
 	bl.offset_top = -14
 	bl.offset_bottom = -14
 
-	# .ult (adapted): the fusion machine's ring — kbd F, ready when a recipe is.
+	# .ult (adapted): the fusion machine's ring — kbd R (PbRun: KEY_R), ready when a recipe is.
 	var ult := Control.new()
 	ult.name = "FusionUlt"
 	ult.custom_minimum_size = Vector2(74, 74)
@@ -443,7 +436,7 @@ func _build_bl() -> void:
 	kcap.add_theme_stylebox_override("panel", PbTheme.stylebox(".ult kbd"))
 	var krow := UI.hbox(0)
 	kcap.add_child(krow)
-	krow.add_child(UI.label("F", 12, PbTheme.ink()))
+	krow.add_child(UI.label("R", 12, PbTheme.ink()))
 	krow.alignment = BoxContainer.ALIGNMENT_CENTER
 	ult.add_child(kcap)
 	kcap.position = Vector2(58, 60)
@@ -498,9 +491,16 @@ func _build_bl() -> void:
 	gtitle.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.2))
 	gtitle.add_theme_constant_override("shadow_offset_y", 1)
 	ghtrow.add_child(gtitle)
+	# H-14: `.kg-head span{background:var(--paper);color:var(--kc)}` -- the tag is
+	# a paper pill, so the rarity colour stays readable on the purple head.
+	var kc_hex := "#" + PbTheme.rarity_color(3).to_html(false)
+	var gtag_pill := PanelContainer.new()
+	gtag_pill.add_theme_stylebox_override("panel",
+		PbTheme.stylebox(".kg-head span", {"--kc": kc_hex, "--c": kc_hex}))
 	var gtag := UI.label("", 10, PbTheme.rarity_color(3))
 	gtag.add_theme_font_override("font", PbTheme.font("title"))
-	ghtrow.add_child(gtag)
+	gtag_pill.add_child(gtag)
+	ghtrow.add_child(gtag_pill)
 	_els["kg_tag"] = gtag
 	gv.add_child(ghead)
 	var gmain := UI.hbox(8)
@@ -591,8 +591,11 @@ func _build_bossbar() -> void:
 	bar.offset_right = 300
 	bar.offset_top = 96
 	bar.offset_bottom = 160
+	# H-15: .bossbar exposes its accent through `--c`; pass it so the bottom
+	# border and the tag background resolve instead of falling back to paper.
+	var boss_c := "#e82a5a"
 	var body := PanelContainer.new()
-	body.add_theme_stylebox_override("panel", PbTheme.stylebox(".bb-body"))
+	body.add_theme_stylebox_override("panel", PbTheme.stylebox(".bb-body", {"--c": boss_c}))
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(body)
 	var col := UI.vbox(4)
@@ -608,7 +611,7 @@ func _build_bossbar() -> void:
 	head.add_child(bname)
 	_els["bb_name"] = bname
 	var tag := PanelContainer.new()
-	tag.add_theme_stylebox_override("panel", PbTheme.stylebox(".bb-tag"))
+	tag.add_theme_stylebox_override("panel", PbTheme.stylebox(".bb-tag", {"--c": boss_c}))
 	var tag_l := UI.label("BOSS", 10, Color.WHITE)
 	tag_l.add_theme_font_override("font", PbTheme.font("title"))
 	tag.add_child(tag_l)
@@ -616,8 +619,10 @@ func _build_bossbar() -> void:
 	var bar_track := Control.new()
 	bar_track.custom_minimum_size = Vector2(0, 15)
 	bar_track.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var bb_fill := ColorRect.new()
-	bb_fill.color = PbTheme.css_color("#ff4a6e", Color("#ff4a6e"))
+	# H-15: fill is `.bb-bar>i`'s 3-stop token gradient, not a hard-coded #ff4a6e.
+	var bb_fill := PbWidgets.GradRect.new()
+	var bb_grad := PbTheme.gradient(str(PbTheme.decls(".bb-bar>i").get("background", "")))
+	bb_fill.setup(bb_grad, null, false)
 	bb_fill.custom_minimum_size = Vector2(0, 15)
 	bar_track.add_child(bb_fill)
 	var bb_text := UI.label("", 11, Color.WHITE)
@@ -979,8 +984,9 @@ func _sync_boss(state: Dictionary) -> void:
 	(_els["bb_name"] as Label).text = App.t("pokemon", species, "#%d" % species)
 	var hp := float(PbEnemies.get_field(pool, "hp", idx))
 	var mx := maxf(1.0, float(PbEnemies.get_field(pool, "maxHp", idx)))
-	var track := (_els["bb_fill"] as ColorRect).get_parent() as Control
-	(_els["bb_fill"] as ColorRect).size = Vector2(track.size.x * clampf(hp / mx, 0.0, 1.0), 15)
+	var fill := _els["bb_fill"] as Control
+	var track := fill.get_parent() as Control
+	fill.size = Vector2(track.size.x * clampf(hp / mx, 0.0, 1.0), 15)
 	(_els["bb_text"] as Label).text = "%s / %s" % [UI.fmt_num(hp), UI.fmt_num(mx)]
 
 
@@ -1021,20 +1027,7 @@ func show_banner(text: String, sub_text: String = "", accent: String = "", long:
 	# H-13: `.banner h1{display:inline-block;padding:8px 40px}` is a text-hugging
 	# capsule; the shared helper lays the plate out full-width, so re-fit it here.
 	if layer.get_child_count() > 0:
-		fit_capsule(layer.get_child(0) as Control, 40.0)
-
-
-## Shrink a .banner/.modal title plate to the width of its label so it stays a
-## capsule instead of a full-width band (H-13). The title label is child #1, on
-## top of the gradient rect.
-static func fit_capsule(plate: Control, horizontal_padding: float) -> void:
-	if plate == null:
-		return
-	plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	var title := plate.get_child(1) as Label
-	if title == null:
-		return
-	plate.custom_minimum_size.x = title.get_combined_minimum_size().x + horizontal_padding * 2.0
+		UI.fit_capsule(layer.get_child(0) as Control, 40.0)
 
 
 ## H-12: .tl-medal / .tl-ring / .tl-portrait rebuilt at the stylesheet's 108px.

@@ -970,7 +970,7 @@ func _season_card_node() -> PanelContainer:
 		{"id": "clans", "text": App.ui("Clanes")},
 	], "kills", func(_id): _todo_ranking()))
 	box.add_child(UI.mm_tile("globe", App.ui("Global"), "所有地区合计", PbTheme.accent_color("purple", "c"), _todo_ranking))
-	box.add_child(_dim_block("还没有人打过本赛季 —— 开一局就能直接进前 100。"))
+	box.add_child(UI.dim_block("还没有人打过本赛季 —— 开一局就能直接进前 100。"))
 
 	var mine := UI.panel(12)
 	mine.name = "SeasonMine"
@@ -980,7 +980,7 @@ func _season_card_node() -> PanelContainer:
 	mbox.add_child(UI.paragraph("游客不计入排行榜。", 14, PbTheme.ink(), 2))
 	box.add_child(mine)
 
-	box.add_child(_dim_block("奖励：前 100 名获得徽章、边框与星尘"))
+	box.add_child(UI.dim_block("奖励：前 100 名获得徽章、边框与星尘"))
 	# Flow layout: six pill chips would force the card past its 340px minimum width;
 	# wrapping keeps `.mm-season{width:clamp(340,26vw,400)}` honest.
 	var prizes := HFlowContainer.new()
@@ -991,14 +991,6 @@ func _season_card_node() -> PanelContainer:
 	box.add_child(prizes)
 	box.add_child(UI.button(App.ui("Ver clasificación completa"), _todo_ranking, false, "blue"))
 	return _season_card
-
-
-## `UI.dim` has no wrap, so a long CJK line would force the season card wider than its
-## `clamp(340,26vw,400)` width. Wrapping keeps the minimum width at one character.
-func _dim_block(text: String) -> Label:
-	var l := UI.dim(text)
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	return l
 
 
 ## A striped gradient band (the web's `.lab-top` / season header trick): GradRect fills a fixed
@@ -1721,40 +1713,7 @@ class SkewTile:
 
 	func _linear(rect: Rect2, r: float, g: Dictionary) -> void:
 		var pts := _rrect(rect, r)
-		var angle := deg_to_rad(float(g.get("angle", 180.0)))
-		var dir := Vector2(sin(angle), -cos(angle))
-		var proj := []
-		var lo := INF
-		var hi := -INF
-		for p in pts:
-			var t := (p - rect.get_center()).dot(dir)
-			proj.append(t)
-			lo = minf(lo, t)
-			hi = maxf(hi, t)
-		var span := maxf(hi - lo, 0.001)
-		var cols := PackedColorArray()
-		for t in proj:
-			cols.append(_sample(g, clampf((t - lo) / span, 0.0, 1.0)))
-		draw_polygon(pts, cols)
-
-	func _sample(g: Dictionary, t: float) -> Color:
-		var stops: Array = g.get("stops", [])
-		if stops.is_empty():
-			return Color.WHITE
-		var offs := []
-		for i in stops.size():
-			var pos := float(stops[i]["pos"])
-			if pos < 0.0:
-				pos = float(i) / maxf(1.0, float(stops.size() - 1)) * 100.0
-			offs.append(clampf(pos / 100.0, 0.0, 1.0))
-		if t <= float(offs[0]):
-			return stops[0]["color"]
-		for i in range(1, stops.size()):
-			if t <= float(offs[i]):
-				var s2 := maxf(float(offs[i]) - float(offs[i - 1]), 0.0001)
-				var f := clampf((t - float(offs[i - 1])) / s2, 0.0, 1.0)
-				return (stops[i - 1]["color"] as Color).lerp(stops[i]["color"], f)
-		return stops[stops.size() - 1]["color"]
+		draw_polygon(pts, PbWidgets.linear_colors(pts, g, rect.get_center()))
 
 	func _rrect(rect: Rect2, r: float) -> PackedVector2Array:
 		var rr := minf(r, minf(rect.size.x, rect.size.y) * 0.5)

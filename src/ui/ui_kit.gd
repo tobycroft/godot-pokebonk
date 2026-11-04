@@ -82,6 +82,14 @@ static func dim(text: String) -> Label:
 	return label(text, PbTheme.font_size("small"), PbTheme.ink_muted())
 
 
+## Muted body copy that wraps: long CJK lines would otherwise force their
+## container past its CSS min-width. (Moved from main_menu's `_dim_block`.)
+static func dim_block(text: String) -> Label:
+	var l := dim(text)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return l
+
+
 static func button(text: String, callback: Callable, big: bool = false, accent: String = "yellow", small: bool = false) -> Button:
 	var b := Button.new()
 	b.text = text
@@ -239,6 +247,56 @@ static func grid(columns: int, sep: int = 8) -> GridContainer:
 	return g
 
 
+## Approximate CSS `repeat(auto-fill, minmax(min_px, 1fr))`: the column count
+## comes from the laid-out width, and the GridContainer only changes when it
+## differs (avoids a resize loop). Returns the effective column count.
+static func autofill_columns(grid: GridContainer, min_px: float, gap: float) -> int:
+	var width := grid.size.x
+	if width <= 0.0:
+		return grid.columns
+	var cols := maxi(1, int(floor((width + gap) / (min_px + gap))))
+	if grid.columns != cols:
+		grid.columns = cols
+	return cols
+
+
+## Autowrapped Labels have no intrinsic height; measure at the laid-out width.
+## (Moved from lab_screen so pokedex/other grids share the same measurement.)
+static func fit_wrapped_height(l: Label) -> void:
+	if l == null or l.has_meta("fit_busy") or l.size.x < 1.0:
+		return
+	var font := l.get_theme_font("font")
+	var font_size := l.get_theme_font_size("font_size")
+	var h := font.get_multiline_string_size(l.text, HORIZONTAL_ALIGNMENT_CENTER, l.size.x, font_size).y
+	if absf(h - l.custom_minimum_size.y) > 1.0:
+		l.set_meta("fit_busy", true)
+		l.custom_minimum_size.y = h
+		l.call_deferred("remove_meta", "fit_busy")
+
+
+## `.card:hover` / `.lab-card:hover` ring: a 3/4px hard outline drawn by the
+## StyleBox's zero-offset shadow (StyleBoxFlat has no separate outline layer).
+static func hover_ring_style(base: StyleBoxFlat, color: Color, px: int = 4) -> StyleBoxFlat:
+	var s: StyleBoxFlat = base.duplicate()
+	s.shadow_size = px
+	s.shadow_offset = Vector2.ZERO
+	s.shadow_color = color
+	s.anti_aliasing = true
+	return s
+
+
+## H-13: shrink a `.banner` / `.modal h1` plate to the width of its label so it
+## stays a capsule instead of a full-width band. Title label is child #1.
+static func fit_capsule(plate: Control, horizontal_padding: float) -> void:
+	if plate == null:
+		return
+	plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var title := plate.get_child(1) as Label
+	if title == null:
+		return
+	plate.custom_minimum_size.x = title.get_combined_minimum_size().x + horizontal_padding * 2.0
+
+
 static func progress(color: String = "green", height: int = 14) -> ProgressBar:
 	var bar := ProgressBar.new()
 	bar.show_percentage = false
@@ -286,7 +344,11 @@ static func toast(host: Control, text: String, icon: String = "") -> void:
 		host.add_child(stack)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
+	# M-11: `.toasts{align-items:center}` -> the pill keeps its content width,
+	# it does not stretch to the 400px stack.
+	row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	panel.add_theme_stylebox_override("panel", PbTheme.toast_style())
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var contents := hbox(8)
@@ -430,10 +492,11 @@ class Segment:
 		b.add_theme_stylebox_override("normal", PbTheme.pill_seg_style(on))
 		b.add_theme_stylebox_override("hover", PbTheme.pill_seg_style(on))
 		b.add_theme_stylebox_override("pressed", PbTheme.pill_seg_style(true))
+		# M-09: `.pill{font-weight:900;font-size:13px}` in every state.
+		b.add_theme_font_override("font", PbTheme.font("title"))
+		b.add_theme_font_size_override("font_size", 13)
 		b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 		b.add_theme_color_override("font_color", PbTheme.ink() if on else PbTheme.ink_muted())
-		b.add_theme_font_override("font", PbTheme.font("title_bold"))
-		b.add_theme_font_size_override("font_size", 13)
 
 
 static func segment(items: Array, current_id: String, pick: Callable) -> Control:
@@ -645,7 +708,10 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 	card.custom_minimum_size = Vector2(236, 300)
 	card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	card.add_theme_stylebox_override("panel", PbTheme.stylebox(".card", {"rc": "#" + rc.to_html(false)}))
+	# M-03: .card:hover adds `0 0 0 4px var(--rc)` and lifts 4px.
+	var card_style := PbTheme.stylebox(".card", {"rc": "#" + rc.to_html(false)})
+	var card_hover := UI.hover_ring_style(card_style, rc, 4)
+	card.add_theme_stylebox_override("panel", card_style)
 	card.clip_contents = true
 
 	var box := vbox(0)
@@ -735,9 +801,7 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 		bd.add_child(ap)
 	var key_txt := str(data.get("key", ""))
 	if not key_txt.is_empty():
-		var key_badge := _card_pill("[%s]" % key_txt, PbTheme.css_color("#4a4466", Color("#4a4466")), Color.WHITE)
-		key_badge.size_flags_horizontal = Control.SIZE_SHRINK_END
-		bd.add_child(key_badge)
+		bd.add_child(_card_key(key_txt))
 
 	# -- click overlay + hover lift (.card:hover) ------------------------------
 	var click := Button.new()
@@ -755,15 +819,48 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 		click.pressed.connect(on_pick)
 	click.mouse_entered.connect(func():
 		Audio.sfx("ui", 1.6)
+		card.add_theme_stylebox_override("panel", card_hover)
 		card.pivot_offset = card.size * 0.5
+		if not card.has_meta("rest_y"):
+			card.set_meta("rest_y", card.position.y)
+		var rest := float(card.get_meta("rest_y"))
 		var tw := card.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		tw.tween_property(card, "scale", Vector2(1.05, 1.05), 0.12))
+		tw.parallel().tween_property(card, "scale", Vector2(1.05, 1.05), 0.12)
+		tw.parallel().tween_property(card, "position:y", rest - 4.0, 0.12))
 	click.mouse_exited.connect(func():
+		card.add_theme_stylebox_override("panel", card_style)
+		var rest := card.position.y
+		if card.has_meta("rest_y"):
+			rest = float(card.get_meta("rest_y"))
 		var tw := card.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		tw.tween_property(card, "scale", Vector2.ONE, 0.12))
+		tw.parallel().tween_property(card, "scale", Vector2.ONE, 0.12)
+		tw.parallel().tween_property(card, "position:y", rest, 0.12))
 	anim_in_simple(card, "offerIn", index)
 	card.set_meta("rc", rc)
 	return card
+
+
+## `.card .key`: title font, white on --slate, radius 8, padding 1px 8px, 12px/900,
+## right-aligned at the end of the body column.
+static func _card_key(text: String) -> PanelContainer:
+	var p := PanelContainer.new()
+	var s := StyleBoxFlat.new()
+	s.bg_color = PbTheme.css_color(PbTheme.v("--slate", "#4b5679"), Color("#4b5679"))
+	s.set_corner_radius_all(8)
+	s.content_margin_left = 8
+	s.content_margin_right = 8
+	s.content_margin_top = 1
+	s.content_margin_bottom = 1
+	p.add_theme_stylebox_override("panel", s)
+	p.size_flags_horizontal = Control.SIZE_SHRINK_END
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_override("font", PbTheme.font("title"))
+	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_color_override("font_color", Color.WHITE)
+	p.add_child(l)
+	return p
 
 
 static func _card_pill(text: String, bg: Color, fg: Color) -> PanelContainer:
@@ -818,17 +915,43 @@ static func modal_title(text: String, small: bool = false) -> Control:
 
 
 ## .modal scrim panel: dim radial backdrop hosting the popup column.
-static func modal_shell(title_text: String, small_title: bool = false) -> Dictionary:
+## M-10: fade-in (`@keyframes modalIn` opacity 0->1 over .2s), keyboard focus
+## parked on the scrim, and a left click outside the dialog dismisses when
+## `on_dismiss` is supplied.
+static func modal_shell(title_text: String, small_title: bool = false,
+		on_dismiss: Callable = Callable()) -> Dictionary:
 	var scrim := PanelContainer.new()
 	scrim.name = "Modal"
 	scrim.add_theme_stylebox_override("panel", PbTheme.modal_scrim())
 	scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scrim.focus_mode = Control.FOCUS_ALL
 	var col := vbox(18)
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	# PASS so clicks on the empty backdrop still bubble up to the scrim.
+	col.mouse_filter = Control.MOUSE_FILTER_PASS
 	scrim.add_child(col)
 	var head := modal_title(title_text, small_title)
 	col.add_child(head)
 	var body := vbox(10)
 	body.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(body)
+	var fade := func() -> void:
+		if not scrim.is_inside_tree() or not scrim.visible:
+			return
+		scrim.modulate.a = 0.0
+		scrim.grab_focus()
+		var tw := scrim.create_tween()
+		tw.tween_property(scrim, "modulate:a", 1.0, 0.2)
+	scrim.visibility_changed.connect(func():
+		if scrim.visible:
+			fade.call())
+	scrim.ready.connect(fade)
+	scrim.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton:
+			var mb := ev as InputEventMouseButton
+			if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT and on_dismiss.is_valid():
+				if not body.get_global_rect().has_point(mb.global_position) \
+						and not head.get_global_rect().has_point(mb.global_position):
+					on_dismiss.call()
+					scrim.accept_event())
 	return {"scrim": scrim, "body": body}
