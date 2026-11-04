@@ -13,7 +13,7 @@ extends RefCounted
 ## silent guesses.
 
 const KINDS := ["burn", "poison", "paralysis", "freeze", "wet", "sleep",
-	"confusion", "curse", "healblock", "charm", "root", "knock", "stun"]
+	"confusion", "curse", "healblock", "charm", "root", "knock", "stun", "chill"]
 
 ## Verified multipliers found in Wv.strike / the player hurt path.
 const VERIFIED := {
@@ -42,6 +42,7 @@ const DEFAULTS := {
 	"root": {"duration": 4.0, "verified": false},
 	"knock": {"duration": 0.25, "verified": false},
 	"stun": {"duration": 0.8, "verified": false},
+	"chill": {"duration": 2.0, "verified": false},
 }
 
 

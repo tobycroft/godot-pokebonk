@@ -12,11 +12,15 @@ extends RefCounted
 ##
 ## Numbers marked "estimated" are ours; everything else is the recovered formula.
 
-const STAGE_TIME := 60.0            # TODO(reverse): exact stage duration lives in the timer code
+## Web has no fixed stage timer: the guardian is awakened at an altar and the
+## stage ends when the portal is taken (Ab.update @884400). The port keeps a
+## timed guardian to stay playable headlessly -- 待确认.
+const STAGE_TIME := 60.0
 const STAGES := 5
-const MAX_SPAWNS_PER_SEC := 14.0    # e.MAX_SPAWNS_PER_SEC (estimated magnitude)
-const XP_PER_WEIGHT := 3.0          # estimated candy value scaling with tier weight
-const GOLD_PER_KILL := 1.5          # estimated
+const MAX_SPAWNS_PER_SEC := 1800.0  # Ab.MAX_SPAWNS_PER_SEC @876500
+const SPAWN_ALLOWANCE_CAP := 180.0  # 0.1 * MAX_SPAWNS_PER_SEC
+## credit() @765300: goldFrac += .2 * stats.gold * weight
+const GOLD_PER_KILL := 0.2
 
 
 static func create(species_id: int, biome: String = "forest", seed_value: int = 0,
@@ -105,6 +109,30 @@ static func tick(state: Dictionary, dt: float) -> void:
 	var player: Dictionary = state["player"]
 	state["time"] = float(state["time"]) + dt
 	state["stageT"] = float(state["stageT"]) + dt
+	# siegeMult (offset 1399900): after 300s the endless director ramps up damage
+	# while the player stays put -- `v(max(camp, idle))` with grace 20 / ramp 40 /
+	# floor .3. `idle` grows while still; `camp` grows while inside the 12-unit
+	# anchor radius and drops by 15 on leaving it.
+	var moved := absf(float(player.get("x", 0.0)) - float(state.get("lastX", 0.0))) \
+		+ absf(float(player.get("z", 0.0)) - float(state.get("lastZ", 0.0)))
+	state["siegeIdle"] = float(state.get("siegeIdle", 0.0)) + dt if moved < 0.02 else 0.0
+	state["lastX"] = float(player.get("x", 0.0))
+	state["lastZ"] = float(player.get("z", 0.0))
+	if float(state["time"]) >= 300.0:
+		var camp_x := float(state.get("campX", float(player.get("x", 0.0))))
+		var camp_z := float(state.get("campZ", float(player.get("z", 0.0))))
+		var camp := float(state.get("camp", 0.0))
+		var away := Vector2(float(player.get("x", 0.0)) - camp_x,
+			float(player.get("z", 0.0)) - camp_z).length()
+		if away > 12.0:
+			camp_x = float(player.get("x", 0.0))
+			camp_z = float(player.get("z", 0.0))
+			camp = maxf(0.0, camp - 15.0)
+		else:
+			camp += dt
+		state["campX"] = camp_x
+		state["campZ"] = camp_z
+		state["camp"] = camp
 	# Weather moves set a temporary weather (bundle: setWeather); once the timer
 	# runs out the stage's base weather comes back.
 	if float(state.get("weatherT", 0.0)) > 0.0:
@@ -112,6 +140,10 @@ static func tick(state: Dictionary, dt: float) -> void:
 		if float(state["weatherT"]) <= 0.0:
 			state["weather"] = str(state.get("baseWeather", "clear"))
 	_tick_director(state, dt)
+	# Boss.exhaust() fight clock: only ticks while the current boss is alive.
+	if bool(state.get("bossSpawned", false)) \
+			and PbEnemies.is_alive(state["enemies"], int(state.get("bossIndex", -1))):
+		state["bossFightT"] = float(state.get("bossFightT", 0.0)) + dt
 	_tick_player(state, dt)
 	_tick_enemies(state, dt)
 	_tick_orbs(state, dt)
@@ -143,38 +175,46 @@ static func tick(state: Dictionary, dt: float) -> void:
 static func _tick_director(state: Dictionary, dt: float) -> void:
 	var diff: Dictionary = state["diff"]
 	var pool: Dictionary = state["enemies"]
-	var weight_cap := 0.0
-	for entry in PbEnemies.live_indices(pool):
-		weight_cap += float(PbEnemies.get_field(pool, "weight", int(entry)))
-	var rate := 1.0
-	var credits := float(state["credits"]) + weight_cap * rate * dt * float(diff.get("difficulty", 1.0)) \
-		* float(diff.get("enemyAmount", 1.0))
-	credits = minf(credits, weight_cap * 2.0 + 10.0 * maxf(1.0, weight_cap))
+	var stage := int(state["stage"])
+	var stage_t := float(state["stageT"])
+	var stats := PbJson.as_dict(state["player"].get("stats", {}))
+	var difficulty := float(stats.get("difficulty", 1.0)) * float(stats.get("enemyAmount", 1.0))
+	var live_cap := mini(PbEnemies.CAPACITY, PbCombat.enemy_cap(stage, stage_t))
+	var rate := PbCombat.credit_rate(stage, stage_t, difficulty,
+		float(diff.get("enemyAmount", 1.0)))
+	var credits := float(state["credits"]) + rate * dt
+	# Ab.update @884400: credits cap = rate*2 + 10*weight (weight is 1 at 1x population).
+	credits = minf(credits, rate * 2.0 + 10.0)
 	state["credits"] = credits
-	var allowance := minf(MAX_SPAWNS_PER_SEC * 0.1, float(state["spawnAllowance"]) + MAX_SPAWNS_PER_SEC * dt)
+	var allowance := minf(SPAWN_ALLOWANCE_CAP,
+		float(state["spawnAllowance"]) + PbCombat.MAX_SPAWNS_PER_SEC * dt)
 	var alive := PbEnemies.alive_count(pool)
-	var cap := 24 + 8 * int(state["stage"])
-	while allowance >= 1.0 and credits >= 1.0 and alive < cap:
-		allowance -= 1.0
-		var weight := _pick_wild_weight(state)
-		credits -= weight
+	var hp_multiplier := PbCombat.hp_mult(stage, stage_t, diff, difficulty)
+	var dmg_multiplier := PbCombat.dmg_mult(stage, stage_t)
+	while allowance >= 1.0 and alive < live_cap:
 		var species := _pick_wild_species(state)
+		var species_def := PbData.species(species)
+		if species_def.is_empty():
+			break
+		var cost := PbCombat.spawn_cost(float(species_def.get("bst", 300.0)))
+		if credits < cost:
+			break
+		credits -= cost
+		allowance -= 1.0
 		var tier := "wild"
-		if PbRng.chance(0.05 + 0.02 * float(state["stage"])):
+		if PbRng.chance(PbCombat.elite_chance(stage, stage_t,
+				float(stats.get("difficulty", 1.0)), 1.0)):
 			tier = "elite"
-		elif PbRng.chance(0.01):
-			tier = "legendary"
 		var angle := PbRng.randf_range(0.0, TAU)
 		var dist := PbRng.randf_range(14.0, 22.0)
-		var px := Vector3.ZERO
-		var index := PbEnemies.spawn(pool, species, cos(angle) * dist + player_x(state), sin(angle) * dist + player_z(state),
-			int(state["stage"]), diff, tier)
+		var index := PbEnemies.spawn(pool, species,
+			cos(angle) * dist + player_x(state), sin(angle) * dist + player_z(state),
+			stage, diff, tier, hp_multiplier, dmg_multiplier, 1.0, stage_t)
 		if index >= 0:
 			alive += 1
 		state["_last_spawn_species"] = species
 	state["spawnAllowance"] = allowance
-	credits = maxf(0.0, credits)
-	state["credits"] = credits
+	state["credits"] = maxf(0.0, credits)
 
 	if float(state["stageT"]) >= STAGE_TIME and not bool(state["bossSpawned"]):
 		spawn_boss(state)
@@ -226,16 +266,6 @@ static func player_z(state: Dictionary) -> float:
 	return float(PbJson.as_dict(state["player"]).get("z", 0.0))
 
 
-static func _pick_wild_weight(state: Dictionary) -> float:
-	var table := PbJson.as_dict(PbData.const_of("stage_weight_credits", {}))
-	var base := 1.0
-	if PbRng.chance(0.06):
-		base = 6.0
-	elif PbRng.chance(0.04):
-		base = 2.0
-	return base * (1.0 + 0.35 * float(int(state["stage"]) - 1))
-
-
 static func _pick_wild_species(state: Dictionary) -> int:
 	## TODO(port): the web build filters wild spawns by biome and research level;
 	## that table was not recoverable, so gen-1 species are sampled uniformly.
@@ -249,12 +279,19 @@ static func spawn_boss(state: Dictionary) -> void:
 	var pool: Dictionary = state["enemies"]
 	var diff: Dictionary = state["diff"]
 	var legendary := _legendary_for_stage(state)
+	var stage_t := float(state["stageT"])
+	var zone := float(PbCombat.BOSS_ZONE_HP[mini(maxi(int(state["stage"]) - 1, 0),
+		PbCombat.BOSS_ZONE_HP.size() - 1)])
 	var index := PbEnemies.spawn(pool, legendary, player_x(state) + 8.0, player_z(state),
-		int(state["stage"]), diff, "boss")
+		int(state["stage"]), diff, "boss",
+		PbCombat.hp_mult(int(state["stage"]), stage_t, diff,
+			float(PbJson.as_dict(state["player"].get("stats", {})).get("difficulty", 1.0))) \
+			* PbCombat.BOSS_HP_BONUS * zone,
+		PbCombat.dmg_mult(int(state["stage"]), stage_t), 1.0, stage_t)
 	if index >= 0:
 		state["bossSpawned"] = true
 		state["bossIndex"] = index
-		PbEnemies.set_field(pool, "flags", index, int(PbEnemies.get_field(pool, "flags", index)) | int(PbEnemies.Flag["Boss"]))
+		state["bossFightT"] = 0.0
 		_message(state, "boss! species %d" % legendary)
 
 
@@ -307,6 +344,18 @@ static func pool_of(state: Dictionary) -> Dictionary:
 	return PbJson.as_dict(state.get("enemies", {}))
 
 
+## Ob.heal() @843232: in endless the healing rate decays after 30 minutes
+## (news `sn`), and a wound halves it.
+static func _heal_mult(state: Dictionary) -> float:
+	var mult := 1.0
+	if str(state.get("mode", "")) == "endless":
+		var minutes := float(state.get("time", 0.0)) / 60.0
+		mult *= maxf(0.3, 1.0 - 0.025 * maxf(0.0, minutes - 30.0))
+	if bool(PbJson.as_dict(state.get("player", {})).get("wound", false)):
+		mult *= 0.5
+	return mult
+
+
 static func _move_mods(inst: Dictionary, player: Dictionary) -> Dictionary:
 	## vA(level) plus the card mods collected on this move.
 	var level := int(inst.get("level", 1))
@@ -341,17 +390,26 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 			"actor": PbActor.actor_for_damage(player),
 			"def_types": PbEnemies.types_of(pool, target),
 			"weather": str(state.get("weather", "clear")),
+			"flags": PbEnemies.flags(pool, target),
 			"elite": PbEnemies.is_elite(pool, target),
 			"boss": PbEnemies.is_boss(pool, target),
-			"exhaust": 1.0,
-			"curse": 0,
-			"veil": 0,
+			"exhaust": PbCombat.boss_exhaust(float(state.get("bossFightT", 0.0))) \
+				if target == int(state.get("bossIndex", -1)) else 1.0,
+			"curse": int(PbEnemies.get_field(pool, "curse", target) > 0.0),
+			"veil": int(PbEnemies.get_field(pool, "confusion", target) > 0.0),
 			"frozen": int(PbEnemies.get_field(pool, "freeze", target) > 0.0),
 			"paralysed": int(PbEnemies.get_field(pool, "paralysis", target) > 0.0),
 			"asleep": int(PbEnemies.get_field(pool, "sleep", target) > 0.0),
+			"poison_stacks": int(PbEnemies.get_field(pool, "poisonStacks", target)),
 			"shield": 0.0,
 			"scope": 1.0,
 			"status_count": 0,
+			# Ob.bonusDamageMult() @841430 / siegeMult @749555.
+			"bonusDamage": PbCombat.bonus_damage_mult(player, state, str(state.get("weather", "clear"))),
+			"ice_heal": str(player.get("ability", "")) == "ice-heal",
+			"siege": PbCombat.siege_mult(maxf(float(state.get("camp", 0.0)),
+				float(state.get("siegeIdle", 0.0))),
+				float(state.get("time", 0.0)), str(state.get("mode", "")) == "endless"),
 		}
 		var out := PbDamage.strike(ctx)
 		var dmg := float(out["damage"])
@@ -366,13 +424,14 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 		if bool(out["mega"]):
 			state["stats"]["megaCrits"] = int(state["stats"].get("megaCrits", 0)) + 1
 		if out["status"] != null and PbStatus.roll(out["status"], float(out["statusChance"])):
-			PbEnemies.apply_status(pool, target, str(out["status"]))
+			PbEnemies.apply_status(pool, target, str(out["status"]),
+				float(stats.get("duration", 1.0)), dealt, float(stats.get("statusDamage", 1.0)))
 		var drain := float(out["drain"])
 		if drain > 0.0:
-			PbActor.heal(player, dealt * drain)
+			PbActor.heal(player, dealt * drain, _heal_mult(state))
 		var lifesteal := float(stats.get("lifesteal", 0.0))
 		if lifesteal > 0.0:
-			PbActor.heal(player, dealt * lifesteal)
+			PbActor.heal(player, dealt * lifesteal, _heal_mult(state))
 		if bool(hit_res["died"]):
 			_on_kill_info(state, PbJson.as_dict(hit_res["info"]))
 			if hit + 1 < count:
@@ -398,7 +457,9 @@ static func _on_kill_info(state: Dictionary, info: Dictionary) -> void:
 		stats["legendaries"] = int(stats["legendaries"]) + 1
 	var gold_mult := float(PbJson.as_dict(state["player"].get("stats", {})).get("gold", 1.0))
 	state["gold"] = float(state["gold"]) + GOLD_PER_KILL * weight * gold_mult
-	_drop_orb(state, weight, float(info["x"]), float(info["z"]))
+	# credit() @765300: the orb carries the enemy's own xp value; run.diff.xpMul
+	# is applied again when the orb is collected (addXp @843900).
+	_drop_orb(state, float(info.get("xp", 1.0)), float(info["x"]), float(info["z"]))
 	var captures: Array = stats.get("captures", [])
 	if not captures.has(species):
 		captures.append(species)
@@ -411,8 +472,8 @@ static func _on_kill_info(state: Dictionary, info: Dictionary) -> void:
 
 ## XP candies: the web build drops collectible orbs; the run simulates them as
 ## pending XP that is collected when the player is close enough.
-static func _drop_orb(state: Dictionary, weight: float, x: float, z: float) -> void:
-	var value := maxf(1.0, roundf(weight * XP_PER_WEIGHT * (1.0 + 0.25 * float(int(state["stage"]) - 1))))
+static func _drop_orb(state: Dictionary, xp_value: float, x: float, z: float) -> void:
+	var value := maxf(0.1, xp_value)
 	state["orbs"].append({
 		"x": x,
 		"z": z,
@@ -541,6 +602,10 @@ static func _tick_enemies(state: Dictionary, dt: float) -> void:
 		var dist := sqrt(dx * dx + dz * dz)
 		if dist > 0.0001:
 			var speed := float(PbEnemies.get_field(pool, "speed", i))
+			# Ob.tick @758500: chilled enemies lose 35% speed, paralysis halves it,
+			# sleep/freeze stop it entirely.
+			if PbEnemies.get_field(pool, "chill", i) > 0.0:
+				speed *= 0.65
 			if PbEnemies.get_field(pool, "paralysis", i) > 0.0:
 				speed *= 0.5
 			if PbEnemies.get_field(pool, "sleep", i) > 0.0 or PbEnemies.get_field(pool, "freeze", i) > 0.0:
@@ -555,18 +620,26 @@ static func _tick_enemies(state: Dictionary, dt: float) -> void:
 				# horde from deleting the player in one overlap cluster.
 				if float(player.get("iframes", 0.0)) > 0.0:
 					continue
-				var raw := float(PbEnemies.get_field(pool, "dmg", i))
-				var types: Array = [str(PbEnemies.get_field(pool, "typeA", i))]
-				var taken := PbDamage.incoming_to_player(raw, types[0],
-					PbJson.as_array(player.get("types", [])), stats, false, str(player.get("ability", "")))
-				# evasion
+				# Ob.hurt() @846019 rolls evasion before any mitigation.
 				if PbRng.chance(float(stats.get("evasion", 0.0))):
 					state["stats"]["dodges"] = int(state["stats"].get("dodges", 0)) + 1
 					continue
+				var raw := float(PbEnemies.get_field(pool, "dmg", i))
+				var types: Array = [str(PbEnemies.get_field(pool, "typeA", i))]
+				var taken := PbDamage.incoming_to_player(raw, types[0],
+					PbJson.as_array(player.get("types", [])), stats, false,
+					str(player.get("ability", "")), int(player.get("level", 1)))
 				taken = maxf(0.0, taken * float(state["diff"].get("enemyDamage", 1.0)))
+				# Contact hits carry no floor/cap config in the web build; the
+				# pipeline is wired for hazard/projectile overrides.
+				taken = PbDamage.apply_incoming_floor_cap(taken, raw, float(player.get("maxHp", 1.0)), 0.0, 0.0)
 				var applied := PbActor.damage(player, taken)
 				player["iframes"] = 0.45
 				state["stats"]["damageTaken"] = float(state["stats"]["damageTaken"]) + applied
+				# Ob.hurt() thorns: stats.thorns * (1+level*.05), fixed steel hit.
+				var thorns := float(stats.get("thorns", 0.0))
+				if thorns > 0.0 and not bool(player.get("dead", false)):
+					PbEnemies.damage(pool, i, thorns * (1.0 + float(player.get("level", 1)) * 0.05))
 			else:
 				PbEnemies.set_field(pool, "cd", i, cd)
 

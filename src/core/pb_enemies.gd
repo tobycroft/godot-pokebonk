@@ -2,44 +2,39 @@ class_name PbEnemies
 extends RefCounted
 ## Enemy pool, structure-of-arrays style like the web build.
 ##
-## The layout mirrors the bundle's typed arrays (offset 346928): positions, hp,
-## per-status channels and a flag word per slot. Scaling uses the recovered
-## stage factor `(1 + (stage-1)*0.35) * difficulty * enemyAmount` and the tier
-## weight chain `f?60 : p?35 : d?25 : m?20 : u?6 : 1` (offset 346928/350290).
+## Layout mirrors the bundle's typed arrays (offset 346928). Spawn numbers come
+## from `spawn()` (offset 346928) with the director multipliers from class `Ab`
+## (offset 878271).
 ##
-## Which flag each letter stands for was not fully resolvable from the minified
-## source; the mapping below is the one consistent with the run stats
-## (legendaries / alphas / elites / totems / summoners) and is marked TODO.
+## Flag bits are the recovered ones (offset 346928): Elite=1, Alpha=2, Boss=4,
+## Capture=128, Totem=4096, Summoner=8192, Treasure=16384. The port adds an
+## internal Alive bit well outside that range.
 
 const CAPACITY := 96
 
 const Flag := {
-	"Alive": 1,
-	"Boss": 2,
-	"Elite": 4,
-	"Legendary": 8,
-	"Alpha": 16,
-	"Totem": 32,
-	"Summoner": 64,
-	"Remote": 128,
-	"Parked": 256,
+	"Alive": 1 << 20,
+	"Boss": 4,
+	"Elite": 1,
+	"Alpha": 2,
+	"Totem": 4096,
+	"Summoner": 8192,
+	"Treasure": 16384,
+	"Capture": 128,
 }
 
-## Tier -> weight used by the spawn director's credit pool.
+## Credit pool weight of a spawn card (offset 346928: `o`), 1 for singles.
 const TIER_WEIGHT := {
-	"boss": 12.0,       # tier multiplier applied by spawn(); also the credit weight
-	"legendary": 60.0,   # TODO(verify): letter->tier mapping from the minified chain
-	"alpha": 35.0,
-	"elite": 25.0,
-	"totem": 20.0,
-	"summoner": 6.0,
-	"wild": 1.0,
+	"wild": 1.0, "elite": 1.0, "alpha": 1.0, "boss": 1.0,
+	"legendary": 1.0, "totem": 1.0, "summoner": 1.0, "treasure": 1.0,
 }
 
 
 static func create_pool() -> Dictionary:
 	var pool := {}
-	for key in ["x", "z", "y", "hp", "maxHp", "dmg", "speed", "weight", "scale", "anim", "cd"]:
+	var floats := ["x", "z", "y", "hp", "maxHp", "dmg", "speed", "weight", "scale", "anim", "cd",
+		"xp", "burnDps", "poisonDps"]
+	for key in floats:
 		pool[key] = []
 	for key in ["species", "tier", "flags", "typeA", "typeB"]:
 		pool[key] = []
@@ -53,7 +48,7 @@ static func create_pool() -> Dictionary:
 		for key in pool.keys():
 			if key == "count" or key == "free" or key == "live":
 				continue
-			pool[key].append(0.0 if key in ["x", "z", "y", "hp", "maxHp", "dmg", "speed", "weight", "scale", "anim", "cd"] else 0)
+			pool[key].append(0.0 if key in floats else 0)
 		pool["free"].append(i)
 	return pool
 
@@ -83,8 +78,13 @@ static func is_alive(pool: Dictionary, index: int) -> bool:
 
 
 ## Spawn one enemy of `species_id` at (x,z). Returns the slot or -1 when full.
+##
+## hp_mult / dmg_mult are the director multipliers (PbCombat.hp_mult/dmg_mult).
+## When omitted they fall back to the stage-only curve, which keeps every legacy
+## call site working.
 static func spawn(pool: Dictionary, species_id: int, x: float, z: float, stage: int,
-		diff: Dictionary, tier: String = "wild") -> int:
+		diff: Dictionary, tier: String = "wild", hp_mult: float = -1.0,
+		dmg_mult: float = -1.0, weight: float = 1.0, stage_t: float = 0.0) -> int:
 	if PbJson.as_array(pool["free"]).is_empty():
 		return -1
 	var index: int = PbJson.as_array(pool["free"]).pop_back()
@@ -92,54 +92,35 @@ static func spawn(pool: Dictionary, species_id: int, x: float, z: float, stage: 
 	if species.is_empty():
 		PbJson.as_array(pool["free"]).append(index)
 		return -1
-	var difficulty := float(diff.get("enemyHp", 1.0))
-	var amount := float(diff.get("enemyAmount", 1.0))
-	## The web client scales wild HP through its own enemy tables (ft()/an()), which
-	## live inside closures and could not be recovered as data. This substitute keys
-	## off the species' base-stat total so tougher species stay tougher; the stage
-	## factor itself is the recovered one. TODO(reverse): swap in the real table.
-	var stats := PbStats.stats_from_species(species, 0.0)
-	var bst := float(species.get("bst", 300))
-	var stage_factor := 1.0 + float(stage - 1) * 0.35
-	var hp := (8.0 + bst * 0.06) * stage_factor * difficulty * amount
-	var tier_mult := 1.0
-	match tier:
-		"elite":
-			tier_mult = 2.5
-		"alpha":
-			tier_mult = 3.5
-		"legendary":
-			tier_mult = 6.0
-		"boss":
-			tier_mult = 12.0
-	hp *= tier_mult
+	if hp_mult < 0.0:
+		hp_mult = PbCombat.hp_mult(stage, stage_t, diff)
+	if dmg_mult < 0.0:
+		dmg_mult = PbCombat.dmg_mult(stage, stage_t)
+	var tough := PbCombat.toughness(PbCombat.eff_time(stage, stage_t))
+	var numbers := PbCombat.enemy_numbers(species, tier, hp_mult, dmg_mult,
+		weight, tough, PbCombat.speed_mult(stage, stage_t))
 	set_field(pool, "x", index, x)
 	set_field(pool, "z", index, z)
 	set_field(pool, "y", index, 0.0)
-	set_field(pool, "hp", index, hp)
-	set_field(pool, "maxHp", index, hp)
-	set_field(pool, "dmg", index, (6.0 + 2.0 * float(stage)) * float(diff.get("enemyDamage", 1.0)))
-	set_field(pool, "speed", index, float(stats.get("moveSpeed", 1.0)) * float(diff.get("enemySpeed", 1.0)))
-	set_field(pool, "weight", index, float(TIER_WEIGHT.get(tier, 1.0)))
+	set_field(pool, "hp", index, float(numbers["hp"]))
+	set_field(pool, "maxHp", index, float(numbers["hp"]))
+	set_field(pool, "dmg", index, float(numbers["dmg"]) * float(diff.get("enemyDamage", 1.0)))
+	set_field(pool, "speed", index, float(numbers["speed"]) * float(diff.get("enemySpeed", 1.0)))
+	set_field(pool, "weight", index, weight)
+	set_field(pool, "xp", index, float(numbers["xp"]))
 	set_field(pool, "scale", index, clampf(float(species.get("height", 10)) / 10.0, 0.6, 3.0))
 	set_field(pool, "cd", index, 0.0)
 	set_field(pool, "species", index, species_id)
-	var flags := int(Flag["Alive"])
-	if tier == "boss":
-		flags |= int(Flag["Boss"])
-	elif tier == "elite":
-		flags |= int(Flag["Elite"])
-	elif tier == "legendary":
-		flags |= int(Flag["Legendary"])
-	elif tier == "alpha":
-		flags |= int(Flag["Alpha"])
-	set_field(pool, "flags", index, flags)
+	set_field(pool, "tier", index, tier)
+	set_field(pool, "flags", index, int(Flag["Alive"]) | int(numbers["flags"]))
 	var types: Array = PbJson.as_array(species.get("types", ["normal"]))
 	set_field(pool, "typeA", index, types[0] if types.size() > 0 else "normal")
 	set_field(pool, "typeB", index, types[1] if types.size() > 1 else types[0] if types.size() > 0 else "normal")
 	for kind in PbStatus.KINDS:
 		set_field(pool, kind, index, 0.0)
 	set_field(pool, "poisonStacks", index, 0)
+	set_field(pool, "burnDps", index, 0.0)
+	set_field(pool, "poisonDps", index, 0.0)
 	pool["count"] = int(pool.get("count", 0)) + 1
 	PbJson.as_array(pool["live"]).append(index)
 	return index
@@ -155,8 +136,10 @@ static func kill(pool: Dictionary, index: int) -> Variant:
 	var pos_x := float(get_field(pool, "x", index))
 	var pos_z := float(get_field(pool, "z", index))
 	var was_boss := is_boss(pool, index)
-	var was_legendary := (int(get_field(pool, "flags", index)) & int(Flag["Legendary"])) != 0
+	var tier_name := str(get_field(pool, "tier", index))
+	var was_legendary := tier_name == "legendary"
 	var was_elite := is_elite(pool, index)
+	var xp := float(get_field(pool, "xp", index))
 	set_field(pool, "flags", index, 0)
 	set_field(pool, "hp", index, 0.0)
 	PbJson.as_array(pool["free"]).append(index)
@@ -167,7 +150,7 @@ static func kill(pool: Dictionary, index: int) -> Variant:
 	pool["count"] = maxi(0, int(pool.get("count", 0)) - 1)
 	return {"species": species, "weight": tier_weight, "hp": hp, "maxHp": maxhp,
 		"x": pos_x, "z": pos_z, "boss": was_boss, "elite": was_elite,
-		"legendary": was_legendary}
+		"legendary": was_legendary, "tier": tier_name, "xp": xp}
 
 
 ## Apply damage; when HP reaches 0 the slot is released and the kill payload is
@@ -214,12 +197,28 @@ static func within(pool: Dictionary, x: float, z: float, radius: float) -> Array
 	return out
 
 
-static func apply_status(pool: Dictionary, index: int, kind: String) -> void:
+## Apply one status exactly like Wv.strike's status block (offset 746900).
+## `duration_stat` is the attacker's stats.duration; `hit` is the damage of the
+## hit that applied it (burn/poison DoT scale with that, not with maxHp).
+static func apply_status(pool: Dictionary, index: int, kind: String, duration_stat: float = 1.0,
+		hit: float = 0.0, status_damage: float = 1.0) -> void:
 	if kind.is_empty() or not PbStatus.exists(kind):
 		return
-	set_field(pool, kind, index, PbStatus.duration(kind))
+	var resist := PbCombat.status_resist(flags(pool, index))
+	var seconds := PbCombat.status_seconds(kind, duration_stat, resist, false)
+	set_field(pool, kind, index, maxf(float(get_field(pool, kind, index)), seconds))
 	if kind == "poison":
-		set_field(pool, "poisonStacks", index, mini(5, int(get_field(pool, "poisonStacks", index)) + 1))
+		set_field(pool, "poisonStacks", index,
+			mini(PbCombat.POISON_STACK_CAP, int(get_field(pool, "poisonStacks", index)) + 1))
+		set_field(pool, "poisonDps", index,
+			maxf(float(get_field(pool, "poisonDps", index)),
+				hit * PbCombat.POISON_DPS_RATIO * status_damage))
+		set_field(pool, "healblock", index,
+			maxf(float(get_field(pool, "healblock", index)), 5.0 * duration_stat))
+	elif kind == "burn":
+		set_field(pool, "burnDps", index,
+			maxf(float(get_field(pool, "burnDps", index)),
+				hit * PbCombat.BURN_DPS_RATIO * status_damage))
 
 
 ## Status upkeep for every live slot; returns total damage dealt by DoTs.
@@ -236,15 +235,21 @@ static func tick_statuses(pool: Dictionary, dt: float) -> float:
 			if t <= 0.0:
 				continue
 			set_field(pool, kind, i, maxf(0.0, t - dt))
-			var ratio := PbStatus.dps_ratio(kind)
-			if ratio > 0.0:
-				var stacks := 1.0
-				if kind == "poison":
-					stacks = maxf(1.0, float(get_field(pool, "poisonStacks", i)))
-				var res := damage(pool, i, float(get_field(pool, "maxHp", i)) * ratio * dt * stacks)
-				total += float(res["dealt"])
-				if bool(res["died"]):
-					pool["dot_kills"] = PbJson.as_array(pool.get("dot_kills", [])) + [res["info"]]
+		# Ob.tick @758500: burn ticks flat, poison scales with its stack count.
+		var burn := float(get_field(pool, "burnDps", i))
+		if burn > 0.0:
+			var burn_res := damage(pool, i, burn * dt)
+			total += float(burn_res["dealt"])
+			if bool(burn_res["died"]):
+				pool["dot_kills"] = PbJson.as_array(pool.get("dot_kills", [])) + [burn_res["info"]]
+				continue
+		var poison := float(get_field(pool, "poisonDps", i))
+		if poison > 0.0:
+			var stacks := maxf(1.0, float(get_field(pool, "poisonStacks", i)))
+			var poison_res := damage(pool, i, poison * (0.6 + 0.2 * stacks) * dt)
+			total += float(poison_res["dealt"])
+			if bool(poison_res["died"]):
+				pool["dot_kills"] = PbJson.as_array(pool.get("dot_kills", [])) + [poison_res["info"]]
 	return total
 
 

@@ -11,14 +11,13 @@ static func need(level: int) -> int:
 	return int(round(8.0 + l * 5.5 + pow(l, 1.8)))
 
 
-## Endless mode uses a second curve (Pn) that was not recoverable as data;
-## until it is, the standard curve is reused and the flag marks the difference.
-## TODO(reverse): Pn lives next to Cb in the bundle; confirm its formula.
+## xpFor() @843305: `Math.round(Cb(level) * (run.endless ? Pn(level) : 1))`.
+## Pn is the news-chunk `mr` = `e => 1.008 ** Math.max(0, e - 60)` @news:104131.
 static func need_for_mode(level: int, endless: bool = false) -> int:
+	var base := float(need(level))
 	if endless:
-		# Placeholder: endless scaling grows the requirement a little each level.
-		return int(round(need(level) * (1.0 + 0.06 * float(level))))
-	return need(level)
+		base *= PbCombat.endless_xp_mult(level)
+	return int(round(base))
 
 
 ## addXp(): returns the number of levels gained.

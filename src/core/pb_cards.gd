@@ -22,12 +22,13 @@ const STAT_POOL := [
 	"powerup", "eliteSpawn", "slam",
 ]
 
-## Estimated tiers; TODO(reverse): confirm against the offer-rolling code.
-const TIERS := [
-	{"mul": 1.08, "add_scale": 1.0, "weight": 3.0},
-	{"mul": 1.15, "add_scale": 1.6, "weight": 2.0},
-	{"mul": 1.25, "add_scale": 2.5, "weight": 1.0},
-]
+## Card rarity (5 tiers): offer roll `GS` @1096835 and its multiplier table
+## news `ie` (exported as `er`) = [1, 1.2, 1.45, 1.75, 2.1].
+## The kind weights mirror the web offer composition in `KS` @1079932:
+## new moves are pushed 3x, owned-move upgrades 2x, owned-vitamin upgrades 2x
+## and brand-new vitamins get a .45 chance. The port's "stat"/"type" cards are
+## its stand-ins for vitamin upgrades, so they inherit 2.0 / .45.
+const RARITY_MULT := [1.0, 1.2, 1.45, 1.75, 2.1]
 
 ## Stats whose card form is additive rather than multiplicative.
 const ADDITIVE_STATS := {
@@ -37,11 +38,12 @@ const ADDITIVE_STATS := {
 	"overheal": 1, "megaCrit": 1,
 }
 
+## Move-upgrade amounts: web `Ey(e,t)` @794294, where t is RARITY_MULT[r].
 const ARCH_STAT_AMOUNTS := {
-	"dmg": {"mul": 1.12}, "cd": {"mul": 0.92}, "count": {"add": 1},
-	"area": {"mul": 1.1}, "speed": {"mul": 1.1}, "dur": {"mul": 1.12},
-	"pierce": {"add": 1}, "crit": {"add": 0.04}, "status": {"mul": 1.15},
-	"bounce": {"add": 1},
+	"dmg": {"base": 0.22}, "cd": {"base": 0.08}, "count": {"base": 1},
+	"area": {"base": 0.15}, "speed": {"base": 0.15}, "dur": {"base": 0.2},
+	"pierce": {"base": 1}, "crit": {"base": 0.05}, "status": {"base": 0.25},
+	"bounce": {"base": 1},
 }
 
 
@@ -52,7 +54,8 @@ static func type_cards() -> Dictionary:
 ## One random card from the pool; exclude keys lets the caller avoid duplicates
 ## and the run's banished set.
 static func roll(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
-	var kind := PbRng.weighted([[3.0, "stat"], [1.4, "type"], [2.4, "move_upgrade"], [1.2, "new_move"]])
+	var kind := PbRng.weighted([[2.0, "stat"], [0.45, "type"], [2.0, "move_upgrade"],
+		[3.0, "new_move"]])
 	match str(kind):
 		"type":
 			return roll_type_card(exclude)
@@ -64,25 +67,54 @@ static func roll(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
 			var nm := roll_new_move(actor, exclude)
 			if not nm.is_empty():
 				return nm
-	return roll_stat_card(exclude)
+	return roll_stat_card(exclude, actor)
 
 
-static func roll_stat_card(exclude: Dictionary = {}) -> Dictionary:
+static func roll_stat_card(exclude: Dictionary = {}, actor: Dictionary = {}) -> Dictionary:
 	var stat := str(PbRng.pick(STAT_POOL))
-	var tier := PbRng.weighted(TIERS.map(func(t): return [float(t["weight"]), t]))
+	var rarity := _roll_rarity(actor)
+	var mult := float(RARITY_MULT[rarity])
 	var mod := {}
 	if ADDITIVE_STATS.has(stat):
-		var base := _add_base(stat)
-		mod = {"stat": stat, "add": float(base) * float(tier["add_scale"])}
+		mod = {"stat": stat, "add": _add_base(stat) * mult}
 	else:
-		mod = {"stat": stat, "mul": float(tier["mul"])}
+		# Multiplicative vitamins are "1 + per*rarity": the port keeps its base
+		# +8% as the rarity-0 anchor until the vitamin `per` table is located.
+		mod = {"stat": stat, "mul": 1.0 + 0.08 * mult}
 	return {
 		"kind": "stat",
 		"stat": stat,
+		"rarity": rarity,
 		"mods": [mod],
 		"label": "%s %s" % [_label(stat), _fmt(mod)],
 		"estimated": true,
 	}
+
+
+## `GS(e,t,n,r)` @1096835: a = luck/100, o = level + luck/8 + (stage-1)*12,
+## weights = [70/(1+a), 24*(1+.5a), 5*(1+a)^2*c3, .9*(1+a)^3*c8, .12*(1+a)^4*c14]
+## where cX = clamp((o-X)/(2X-? )) -- see clamps below (3..10, 8..18, 14..26).
+static func _roll_rarity(actor: Dictionary, stage: int = 1) -> int:
+	var stats := PbJson.as_dict(actor.get("stats", {}))
+	var luck := maxf(0.0, float(stats.get("luck", 0.0)))
+	var a := luck / 100.0
+	var o := float(actor.get("level", 1)) + luck / 8.0 + float(stage - 1) * 12.0
+	var weights := [
+		70.0 / (1.0 + a),
+		24.0 * (1.0 + 0.5 * a),
+		5.0 * pow(1.0 + a, 2.0) * clampf((o - 3.0) / 7.0, 0.0, 1.0),
+		0.9 * pow(1.0 + a, 3.0) * clampf((o - 8.0) / 10.0, 0.0, 1.0),
+		0.12 * pow(1.0 + a, 4.0) * clampf((o - 14.0) / 12.0, 0.0, 1.0),
+	]
+	var total := 0.0
+	for w in weights:
+		total += float(w)
+	var roll := PbRng.randf_range(0.0, total)
+	for i in weights.size():
+		roll -= float(weights[i])
+		if roll <= 0.0:
+			return i
+	return 0
 
 
 static func roll_type_card(exclude: Dictionary = {}) -> Dictionary:
@@ -112,19 +144,30 @@ static func roll_move_upgrade(actor: Dictionary, exclude: Dictionary = {}) -> Di
 	if stats.is_empty():
 		return {}
 	var stat := str(PbRng.pick(stats))
-	var amount := PbJson.as_dict(ARCH_STAT_AMOUNTS.get(stat, {"mul": 1.1}))
-	var mod := amount.duplicate(true)
-	mod["stat"] = stat
-	if stat == "count" or stat == "pierce" or stat == "bounce":
-		mod["add"] = 1
+	var rarity := _roll_rarity(actor)
+	var mult := float(RARITY_MULT[rarity])
+	var base := float(PbJson.as_dict(ARCH_STAT_AMOUNTS.get(stat, {"base": 0.1}))["base"])
+	var mod := {"stat": stat}
+	match stat:
+		"count":
+			mod["add"] = 2 if mult >= 1.6 else 1
+		"pierce", "bounce":
+			mod["add"] = maxi(1, int(round(mult)))
+		"cd":
+			mod["mul"] = 1.0 - minf(0.25, base * mult)
+		"crit":
+			mod["add"] = base * mult
+		_:
+			mod["mul"] = 1.0 + base * mult
 	return {
 		"kind": "move_upgrade",
 		"move_key": str(slot["key"]),
 		"slot": int(slot["slot"]),
 		"stat": stat,
+		"rarity": rarity,
 		"mods": [mod],
 		"label": "%s · %s" % [str(slot.get("name", "")), stat],
-		"estimated": true,
+		"estimated": false,
 	}
 
 

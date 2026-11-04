@@ -191,7 +191,14 @@ static func strike(ctx: Dictionary) -> Dictionary:
 			dmg *= WEATHER_BOOST
 		if w.nerfs.has(str(movedef.get("type", ""))):
 			dmg *= WEATHER_NERF
-		if bool(ctx.get("elite", false)) or bool(ctx.get("boss", false)):
+		# Ob.bonusDamageMult() (offset 841430) sits right after the weather layer.
+		dmg *= float(ctx.get("bonusDamage", 1.0))
+		# Flags: Elite | 12290 (Alpha|Totem|Summoner) | Boss all take eliteDamage.
+		var flags := int(ctx.get("flags", 0))
+		if flags != 0:
+			if flags & (PbCombat.FLAG_ELITE | PbCombat.ELITE_FAMILY | PbCombat.FLAG_BOSS) != 0:
+				dmg *= float(stats.get("eliteDamage", 1.0))
+		elif bool(ctx.get("elite", false)) or bool(ctx.get("boss", false)):
 			dmg *= float(stats.get("eliteDamage", 1.0))
 		if items.has("binding-band"):
 			var cc := int(ctx.get("stunned", 0)) + int(ctx.get("rooted", 0)) + int(ctx.get("paralysed", 0)) \
@@ -201,12 +208,15 @@ static func strike(ctx: Dictionary) -> Dictionary:
 		if items.has("full-heal"):
 			dmg *= 1.0 + minf(0.3, 0.06 * int(ctx.get("status_count", 0))) * float(items["full-heal"])
 		dmg *= float(ctx.get("scope", 1.0))
+		# Av(ability).hitMul (offset 743016): ability-specific multipliers.
+		dmg *= PbCombat.ability_hit_mul(str(actor.get("ability", "")), movedef, actor, flags)
 
 		# Crit roll: critChance + megaCrit + move critBonus + pickup's gold synergy.
 		var pickup_bonus := minf(0.15, float(stats.get("gold", 0.0)) / 10000.0) \
 			if str(actor.get("ability", "")) == "pickup" else 0.0
 		var chance := float(stats.get("critChance", 0.0)) + float(stats.get("megaCrit", 0.0)) \
-			+ float(movedef.get("critBonus", 0.0)) + pickup_bonus + float(inst.get("critBonusOnly", 0.0))
+			+ float(movedef.get("critBonus", 0.0)) + pickup_bonus + float(inst.get("critBonusOnly", 0.0)) \
+			+ PbCombat.ability_crit_add(str(actor.get("ability", "")), movedef)
 		if PbRng.chance(chance):
 			crit = true
 			dmg *= float(stats.get("critDamage", 1.75))
@@ -215,9 +225,15 @@ static func strike(ctx: Dictionary) -> Dictionary:
 				dmg *= 1.0 + MEGA_CRIT_FACTOR * (float(stats.get("critDamage", 1.75)) - 1.0)
 		if items.has("stick") and float(items["stick"]) > 0.0 and PbRng.chance(0.03 * float(items["stick"])):
 			dmg *= 8.0
+		# Endless siege (offset 749555): only while the player camps/idles and the
+		# stage has run for more than 300s.
+		if not bool(ctx.get("boss", false)) and (flags & PbCombat.FLAG_BOSS) == 0:
+			dmg *= float(ctx.get("siege", 1.0))
 
 	if bool(ctx.get("boss", false)):
-		dmg *= float(ctx.get("exhaust", 1.0))
+		var exhaust := float(ctx.get("exhaust", 1.0))
+		if exhaust > 0.0:
+			dmg *= exhaust
 	if int(ctx.get("curse", 0)) > 0:
 		dmg *= float(PbStatus.VERIFIED["curse_damage_taken"])
 	if int(ctx.get("veil", 0)) == 1:
@@ -225,12 +241,27 @@ static func strike(ctx: Dictionary) -> Dictionary:
 	var frozen := int(ctx.get("frozen", 0))
 	if frozen > 0:
 		dmg *= float(PbStatus.VERIFIED["frozen_damage_taken"])
+		# Ice-heal shatter (offset 749118): each extra freeze stack 1.6 + .3*(n-1).
+		if bool(ctx.get("ice_heal", false)):
+			dmg *= 1.6 + 0.3 * float(maxi(0, frozen - 1))
 	if int(ctx.get("paralysed", 0)) > 0 and str(actor.get("ability", "")) == "beacon":
 		dmg *= float(PbStatus.VERIFIED["paralysis_beacon_bonus"])
+	if int(ctx.get("poison_stacks", 0)) > 0 and str(actor.get("ability", "")) == "venom-sting":
+		dmg *= float(PbStatus.VERIFIED["poison_venom_sting"])
+	if str(actor.get("ability", "")) == "effect-spore":
+		dmg *= 1.2
+	if str(actor.get("ability", "")) == "compound-eyes":
+		dmg *= 1.25
+	if str(actor.get("ability", "")) == "carnivore":
+		dmg *= 1.15
 	if int(ctx.get("asleep", 0)) > 0:
 		dmg *= float(PbStatus.VERIFIED["asleep_damage_taken"])
 		if str(movedef.get("type", "")) in ["ghost", "dark"]:
 			dmg *= float(PbStatus.VERIFIED["asleep_ghost_dark_bonus"])
+
+	# Web clamps the hit to 1e30 before shield/HP application (offset 749000).
+	if dmg >= 1.0e30:
+		dmg = 1.0e30
 
 	var absorbed := 0.0
 	var shield := float(ctx.get("shield", 0.0))
@@ -254,18 +285,32 @@ static func strike(ctx: Dictionary) -> Dictionary:
 
 
 ## Player-hurt path (offset 846019): effectiveness clamp, armour, ability branches.
-static func incoming_to_player(raw: float, atk_type: String, def_types: Array, stats: Dictionary, special: bool, ability: String) -> float:
+## `flags` lets the caller add the 12290/boss status resist; `level` feeds the
+## battle-armour hurtMod.
+static func incoming_to_player(raw: float, atk_type: String, def_types: Array, stats: Dictionary, special: bool, ability: String, level: int = 1) -> float:
 	var dmg := raw
 	if dmg != dmg:  # Number.isFinite guard in the web build
 		dmg = 1.0e300
 	dmg *= maxf(INCOMING_EFF_MIN, minf(INCOMING_EFF_MAX, effectiveness(atk_type, def_types)))
 	dmg *= 1.0 - PbStats.armor_mitigation(float(stats.get("armor", 0.0)))
-	# Two ability branches were recoverable as plain numbers from the hurt path
-	# (offset 846019); the rest live in per-ability JS closures that never made it
-	# into a data table, so they are TODO rather than silently missing.
 	if ability == "magic-guard" and special:
 		dmg *= 0.7
 	if ability == "multiscale" and float(stats.get("hp", -1.0)) >= float(stats.get("maxHp", 0.0)) - 0.5:
 		dmg *= 0.5
-	# TODO(port): ab[ability].dmgTaken multipliers.
+	dmg *= PbCombat.dmg_taken(ability)
+	# Av(ability).hurtMod (offset 743016): battle-armor.
+	dmg = PbCombat.ability_hurt_mod(ability, dmg, level)
 	return maxf(0.0, dmg)
+
+
+## Ob.hurt() floor/cap block (offset 846019): applied after all multipliers and
+## before the tm-iron buff / overheal / shield / HP absorption.
+static func apply_incoming_floor_cap(dmg: float, raw: float, max_hp: float, floor: float, cap: float) -> float:
+	var out := dmg
+	if floor > 0.0:
+		# max(dmg, maxHp*floor*(1-.35*(1-min(1,dmg/raw)))
+		var ratio := 1.0 if raw <= 0.0 else minf(1.0, out / raw)
+		out = maxf(out, max_hp * floor * (1.0 - 0.35 * (1.0 - ratio)))
+	if cap > 0.0:
+		out = minf(out, max_hp * cap)
+	return out

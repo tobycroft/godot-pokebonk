@@ -9,11 +9,9 @@ extends RefCounted
 const MAX_MOVES := 4
 const MOVE_MAX_LEVEL := 8
 
-## growth index handed to PbStats.stats_from_species(). The web build recomputes
-## on every level-up; the exact mapping of level -> index is not visible in the
-## recovered code, so level-1 is used (verified formula shape, estimated input).
-## TODO(reverse): confirm against the live game if HP/damage curves drift.
-const GROWTH_PER_LEVEL := 1.0
+## Growth index handed to PbStats.stats_from_species(). Port of checkGrowth()
+## (bundle @836543): the web client recomputes at level 24 and 44, so the index
+## is the number of thresholds passed (0/1/2), not level-1.
 
 
 static func create(species_id: int, lab_deltas: Dictionary = {}, level: int = 1) -> Dictionary:
@@ -54,6 +52,7 @@ static func create(species_id: int, lab_deltas: Dictionary = {}, level: int = 1)
 		"z": 0.0,
 		"facing": 2,
 		"iframes": 0.0,
+		"noHitT": 0.0,
 		"pendingLevels": 0,
 	}
 	for i in MAX_MOVES:
@@ -76,7 +75,7 @@ static func _first_ability(data: Dictionary) -> String:
 ## Full stat block: species base stats * growth + lab + every collected card mod.
 static func recompute(state: Dictionary) -> void:
 	var species := PbJson.as_dict(state.get("data", {}))
-	var growth := float(int(state.get("level", 1)) - 1) * GROWTH_PER_LEVEL
+	var growth := float(PbCombat.growth_index(int(state.get("level", 1))))
 	var lab := PbJson.as_dict(state.get("lab_deltas", {}))
 	var groups: Array = PbJson.as_array(state.get("mods", []))
 	var stats := PbStats.stats_for(species, growth, lab, groups)
@@ -212,31 +211,48 @@ static func add_xp(state: Dictionary, amount: float, endless: bool = false) -> i
 	return gained
 
 
+## Port of Ob.heal() @843232: HP never exceeds maxHp. Any excess only fills the
+## overheal pool, which is capped at maxHp * stats.overheal.
 static func heal(state: Dictionary, amount: float, healing_mult: float = 1.0) -> float:
 	if amount <= 0.0 or bool(state.get("dead", false)):
 		return 0.0
 	var stats := PbJson.as_dict(state.get("stats", {}))
 	var max_hp := float(state.get("maxHp", 1.0))
 	var before := float(state.get("hp", 0.0))
-	var cap := max_hp * (1.0 + float(stats.get("overheal", 0.0)))
-	var next := minf(cap, before + amount * healing_mult * float(stats.get("healing", 1.0)))
+	var healing := amount * healing_mult * float(stats.get("healing", 1.0))
+	var next := minf(max_hp, before + healing)
 	state["hp"] = next
-	if next > max_hp:
-		state["overheal"] = next - max_hp
+	var excess := healing - (next - before)
+	if excess > 0.0 and float(stats.get("overheal", 0.0)) > 0.0:
+		var cap := max_hp * float(stats.get("overheal", 0.0))
+		state["overheal"] = minf(cap, float(state.get("overheal", 0.0)) + excess)
 	return next - before
 
 
+## Port of Ob.hurt() tail @846019: overheal absorbs first, then shield, then HP.
 static func damage(state: Dictionary, amount: float) -> float:
 	if amount <= 0.0 or bool(state.get("dead", false)):
 		return 0.0
-	var hp := float(state.get("hp", 0.0))
-	var applied := amount
-	if hp > 0.0:
-		hp = maxf(0.0, hp - applied)
+	var left := amount
+	var overheal := maxf(0.0, float(state.get("overheal", 0.0)))
+	if overheal > 0.0:
+		var used := minf(overheal, left)
+		state["overheal"] = overheal - used
+		left -= used
+	if left > 0.0:
+		var shield := maxf(0.0, float(state.get("shield", 0.0)))
+		if shield > 0.0:
+			var used := minf(shield, left)
+			state["shield"] = shield - used
+			left -= used
+	if left > 0.0:
+		var hp := float(state.get("hp", 0.0))
+		hp = maxf(0.0, hp - left)
 		state["hp"] = hp
 		if hp <= 0.0:
 			state["dead"] = true
-	return applied
+	state["noHitT"] = 0.0
+	return amount
 
 
 static func item_power(state: Dictionary, key: String) -> float:
@@ -252,9 +268,11 @@ static func apply_status(state: Dictionary, kind: String, amount: float = 0.0) -
 	if kind.is_empty() or not PbStatus.exists(kind):
 		return
 	var table := PbJson.as_dict(state["status"])
-	table[kind] = maxf(float(table.get(kind, 0.0)), PbStatus.duration(kind))
+	var stats := PbJson.as_dict(state.get("stats", {}))
+	var seconds := PbCombat.status_seconds(kind, float(stats.get("duration", 1.0)), 1.0)
+	table[kind] = maxf(float(table.get(kind, 0.0)), seconds)
 	if kind == "poison":
-		table["poisonStacks"] = mini(5, int(table.get("poisonStacks", 0)) + 1)
+		table["poisonStacks"] = mini(PbCombat.POISON_STACK_CAP, int(table.get("poisonStacks", 0)) + 1)
 
 
 static func has_status(state: Dictionary, kind: String) -> bool:
@@ -268,8 +286,18 @@ static func tick(state: Dictionary, dt: float) -> void:
 	var stats := PbJson.as_dict(state.get("stats", {}))
 	var table := PbJson.as_dict(state.get("status", {}))
 	var max_hp := float(state.get("maxHp", 1.0))
-	if not has_status(state, "healblock"):
-		heal(state, float(stats.get("regen", 0.0)) * dt * max_hp * 0.01)
+	var no_hit := float(state.get("noHitT", 0.0))
+	state["noHitT"] = no_hit + dt
+	if not has_status(state, "healblock") and float(state.get("hp", 0.0)) < max_hp:
+		# Ob.tick @865542: regen is HP/second and only runs while below maxHp.
+		heal(state, float(stats.get("regen", 0.0)) * dt)
+	# Ob.tick: overheal drains at 1% of maxHp per second.
+	state["overheal"] = maxf(0.0, minf(max_hp * float(stats.get("overheal", 0.0)),
+		float(state.get("overheal", 0.0)) - max_hp * 0.01 * dt))
+	# Ob.tick: shields refill at 25%/s of shieldMax after 3s without a hit.
+	if float(stats.get("shieldMax", 0.0)) > 0.0 and no_hit > 3.0:
+		state["shield"] = minf(float(stats.get("shieldMax", 0.0)),
+			float(state.get("shield", 0.0)) + float(stats.get("shieldMax", 0.0)) * 0.25 * dt)
 	for kind in PbStatus.KINDS:
 		var t := float(table.get(kind, 0.0))
 		if t <= 0.0:

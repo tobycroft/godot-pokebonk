@@ -310,6 +310,23 @@ static func best_move_for(species_id: int) -> String:
 		if score > best_score:
 			best_score = score
 			best_key = mk
+	if best_key.is_empty():
+		# xy() @792596 fallback: first move of the species' first type that is
+		# not a weather/buff move, otherwise move #33 (Tackle).
+		var primary := PbJson.as_string(types[0] if types.size() > 0 else "", "")
+		for entry in entries:
+			var pair := PbJson.as_array(entry)
+			if pair.size() < 2:
+				continue
+			var move := PbData.move_by_id(int(pair[0]))
+			var mk := PbJson.as_string(move.get("key"), "")
+			var rt := resolve(mk)
+			if rt.is_empty():
+				continue
+			if PbJson.as_string(move.get("type"), "") == primary \
+					and not (str(rt["arch"]) in ["weather", "buff"]):
+				return mk
+		return PbJson.as_string(PbData.move_by_id(33).get("key"), "tackle")
 	return best_key
 
 

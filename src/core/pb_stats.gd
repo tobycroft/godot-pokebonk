@@ -110,7 +110,7 @@ static func finalize(stats: Dictionary) -> void:
 static func armor_mitigation(armor: float) -> float:
 	if armor != armor:  # NaN guard, mirrors the bundle's e===e test
 		return 0.0
-	if armor >= 1.0e17:
+	if armor >= float(0xe8d4a51000):
 		return 0.99999
 	return min(0.99999, armor / (armor + float(_const("armor_mitigation", {}).get("half_point", 45))))
 
