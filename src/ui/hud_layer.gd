@@ -20,6 +20,8 @@ var _last_hp_ratio := 1.0
 var _stage_shown := 0
 var _boss_shown := false
 var _weather_shown := ""
+var _timer_final := false
+var _timer_pulse: Tween = null
 
 
 func build(state: Dictionary) -> void:
@@ -37,6 +39,10 @@ func build(state: Dictionary) -> void:
 
 
 ## ------------------------------------------------------------------ hud-top
+func _fit_centre_slot(slot: Control, centre: Control) -> void:
+	slot.custom_minimum_size.x = centre.get_combined_minimum_size().x
+
+
 func _build_top() -> void:
 	var top := PanelContainer.new()
 	top.name = "HudTop"
@@ -45,7 +51,13 @@ func _build_top() -> void:
 	top.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(top)
-	var grid := UI.hbox(18)
+	# H-10: .hud-top is a 1fr | auto | 1fr grid in the stylesheet. Keeping the
+	# clock in its own middle track is what stops it from covering ht-l / ht-r.
+	var grid := GridContainer.new()
+	grid.name = "HtGrid"
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 0)
 	top.add_child(grid)
 
 	# ht-l: biome + stage pips + zone + weather
@@ -79,20 +91,28 @@ func _build_top() -> void:
 	_els["weather"] = weather
 	_els["weather_label"] = wlabel
 
-	# ht-c: timer + danger + gold wallet. On the web this column hangs below the
-	# panel (margin:-4px 0 -80px); we place it as a sibling so it overlaps the
-	# panel edge the same way.
+	# ht-c: the middle grid track (.ht-c margin:-4px 0 -80px in CSS). The slot is
+	# SIZE_FILL so the column owns its track; the column itself is a plain-Control
+	# child that starts 4px above the panel and hangs below it without growing it.
+	var slot := Control.new()
+	slot.name = "HtCSlot"
+	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	slot.size_flags_horizontal = Control.SIZE_FILL
+	slot.size_flags_vertical = Control.SIZE_FILL
+	grid.add_child(slot)
 	var centre := UI.vbox(6)
 	centre.name = "HtC"
-	centre.alignment = BoxContainer.ALIGNMENT_CENTER
-	add_child(centre)
+	centre.alignment = BoxContainer.ALIGNMENT_BEGIN
+	slot.add_child(centre)
 	centre.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	centre.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	centre.offset_left = 0
-	centre.offset_right = 0
-	centre.offset_top = 20
-	centre.offset_bottom = 20
+	centre.grow_vertical = Control.GROW_DIRECTION_END
+	centre.offset_top = -4
 	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# The slot must reserve the clock column's width so the 1fr tracks can never
+	# be overrun; a plain Control does not inherit its child's minimum size.
+	centre.minimum_size_changed.connect(_fit_centre_slot.bind(slot, centre))
+	_fit_centre_slot(slot, centre)
 	var timer := PanelContainer.new()
 	timer.name = "Timer"
 	timer.add_theme_stylebox_override("panel", PbTheme.timer_style(false))
@@ -137,6 +157,7 @@ func _build_top() -> void:
 	# .ht-l sits at the panel start, .ht-r at the end (justify-self in CSS)
 	left.alignment = BoxContainer.ALIGNMENT_BEGIN
 	right.alignment = BoxContainer.ALIGNMENT_END
+	_fit_centre_slot(slot, centre)
 
 
 ## .danger: paper pill with the 7-segment meter (dH/fH tables @2122027).
@@ -211,7 +232,7 @@ func _build_tl() -> void:
 	tl.custom_minimum_size = Vector2(320, 108)
 	add_child(tl)
 
-	var medal := PbWidgets.XpRing.new()
+	var medal := HudXpRing.new()
 	medal.name = "TlRing"
 	tl.add_child(medal)
 	_els["xp_ring"] = medal
@@ -221,7 +242,11 @@ func _build_tl() -> void:
 	_els["portrait"] = portrait
 	var lvl := PanelContainer.new()
 	lvl.name = "TlLvl"
-	lvl.add_theme_stylebox_override("panel", PbTheme.level_badge_style())
+	var lvl_style := PbTheme.level_badge_style()
+	# .tl-lvl box-shadow: 0 0 0 3px paper -> painted as an inner paper rim.
+	lvl_style.set_border_width_all(3)
+	lvl_style.border_color = PbTheme.paper()
+	lvl.add_theme_stylebox_override("panel", lvl_style)
 	var lvl_row := UI.hbox(2)
 	lvl_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	lvl.add_child(lvl_row)
@@ -233,12 +258,15 @@ func _build_tl() -> void:
 	lvl_row.add_child(lvl_num)
 	_els["level"] = lvl_num
 	medal.add_child(lvl)
-	lvl.position = Vector2(44, 70)
+	# .tl-lvl{bottom:-12px;left:50%;transform:translate(-50%)}: centre it under the
+	# 108px medal, 12px below the rim (H-12).
+	lvl.reset_size()
+	lvl.position = Vector2((108.0 - lvl.size.x) * 0.5, 108.0 + 12.0 - lvl.size.y)
 
 	var plate := PanelContainer.new()
 	plate.name = "TlPlate"
 	plate.custom_minimum_size = Vector2(260, 84)
-	plate.position = Vector2(74, 12) # 108px medal - 34px overlap, scaled to our 84 ring
+	plate.position = Vector2(74, 12) # 108px medal - 34px overlap (.tl-plate margin)
 	plate.z_index = -1 # CSS z-index: medal 2 above plate 1
 	var plate_style := PbTheme.stylebox(".tl-plate")
 	# H-18: the plate fill lives on `.tl-plate:before{background:var(--w97)}` in
@@ -272,44 +300,108 @@ func _build_tl() -> void:
 	_els["pw_row"] = pw
 
 
-## .bar.hpbar: layers i (fill), u (red lag), s (cyan shield), b (9px caption),
-## mirroring the DOM <div class="bar hpbar"><i/><s/><b/><u/><em/>.
+## .under .hpbar: 18px bar with a 2.5px paper border. Layers follow the DOM's
+## z-order: track -> u (red lag, z1) -> i (fill, z2) -> :after shine -> s (shield,
+## z3) -> b (11px caption, z4). H-11 keeps the lag under the fill and wider than
+## it, exactly like the stylesheet, so the trailing sliver stays visible.
+const HP_BAR_H := 18.0
+const HP_INNER_INSET := 3.0
+
 func _build_hpbar() -> Control:
 	var bar := Control.new()
 	bar.name = "HpBar"
-	bar.custom_minimum_size = Vector2(0, 14)
+	bar.custom_minimum_size = Vector2(0, HP_BAR_H)
 	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var track := ColorRect.new()
+	var track := Panel.new()
 	track.name = "track"
-	track.color = Color("#2e2848")
+	var ts := StyleBoxFlat.new()
+	ts.bg_color = PbTheme.css_color("#4a4068", Color("#4a4068"))
+	ts.set_corner_radius_all(999)
+	ts.set_border_width_all(3)
+	ts.border_color = PbTheme.paper()
+	track.add_theme_stylebox_override("panel", ts)
 	track.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bar.add_child(track)
-	var lag := ColorRect.new()
+
+	# Pill interior (the CSS children are absolutely positioned inside the border).
+	var inner := Control.new()
+	inner.name = "HpInner"
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+	inner.offset_left = HP_INNER_INSET
+	inner.offset_right = -HP_INNER_INSET
+	inner.offset_top = HP_INNER_INSET
+	inner.offset_bottom = -HP_INNER_INSET
+	bar.add_child(inner)
+
+	var lag := Panel.new()
 	lag.name = "u"
-	lag.color = PbTheme.css_color("#ff5a6a", Color("#ff5a6a"))
-	lag.custom_minimum_size = Vector2(0, 14)
-	bar.add_child(lag)
-	var fill := ColorRect.new()
+	lag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var lag_style := StyleBoxFlat.new()
+	lag_style.bg_color = PbTheme.css_color("#ff5a6a", Color("#ff5a6a"))
+	lag_style.set_corner_radius_all(999)
+	lag.add_theme_stylebox_override("panel", lag_style)
+	inner.add_child(lag)
+
+	var fill := PbWidgets.GradRect.new()
 	fill.name = "i"
-	fill.custom_minimum_size = Vector2(0, 14)
-	bar.add_child(fill)
-	var shield := ColorRect.new()
+	fill.corner = 999.0
+	fill.setup(_hp_gradient("high"), null, false)
+	inner.add_child(fill)
+
+	var shield := Panel.new()
 	shield.name = "s"
-	shield.color = PbTheme.css_color("#78dcffbf", Color("#78dcff"))
-	shield.custom_minimum_size = Vector2(0, 14)
+	shield.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var shield_style := StyleBoxFlat.new()
+	shield_style.bg_color = PbTheme.css_color("#78dcffbf", Color("#78dcff"))
+	shield_style.set_corner_radius_all(999)
+	shield.add_theme_stylebox_override("panel", shield_style)
 	shield.visible = false
-	bar.add_child(shield)
-	var caption := UI.label("", 9, Color.WHITE)
+	inner.add_child(shield)
+
+	# .under .hpbar:after -- white 35%-height glint inset 4px / 2px from the top.
+	var shine := Panel.new()
+	shine.name = "HpShine"
+	shine.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var shine_style := StyleBoxFlat.new()
+	shine_style.bg_color = PbTheme.css_color("#ffffff59", Color(1, 1, 1, 0.35))
+	shine_style.set_corner_radius_all(99)
+	shine.add_theme_stylebox_override("panel", shine_style)
+	shine.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	shine.offset_left = 4
+	shine.offset_right = -4
+	shine.offset_top = 2
+	shine.offset_bottom = 2 + roundf(HP_BAR_H * 0.35)
+	bar.add_child(shine)
+
+	var caption := UI.label("", 11, Color.WHITE)
 	caption.name = "b"
 	caption.set_anchors_preset(Control.PRESET_FULL_RECT)
+	caption.offset_left = 8
+	caption.add_theme_constant_override("outline_size", 3)
+	caption.add_theme_color_override("font_outline_color", PbTheme.ink())
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	bar.add_child(caption)
+
+	_els["hp_inner"] = inner
 	_els["hp_fill"] = fill
 	_els["hp_lag"] = lag
 	_els["hp_shield"] = shield
 	_els["hp_caption"] = caption
+	_els["hp_band"] = "high"
 	return bar
+
+
+## HP fill palettes come from the active HUD skin (`.under .hpbar>i` etc.), not
+## from PbTheme.hpbar_colors() which reads the unqualified legacy rule.
+static func _hp_gradient(band: String) -> Dictionary:
+	var sel := ".under .hpbar>i"
+	if band == "mid":
+		sel = ".under .hpbar.mid>i"
+	elif band == "low":
+		sel = ".under .hpbar.low>i"
+	return PbTheme.gradient(str(PbTheme.decls(sel).get("background", "")))
 
 
 ## ------------------------------------------------------------------ hud-tr
@@ -402,6 +494,9 @@ func _build_bl() -> void:
 	ghead.add_child(ghtrow)
 	var gtitle := UI.label("目标", 10, Color.WHITE)
 	gtitle.add_theme_font_override("font", PbTheme.font("title"))
+	# .kg-head{text-shadow:0 1px #0003}
+	gtitle.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.2))
+	gtitle.add_theme_constant_override("shadow_offset_y", 1)
 	ghtrow.add_child(gtitle)
 	var gtag := UI.label("", 10, PbTheme.rarity_color(3))
 	gtag.add_theme_font_override("font", PbTheme.font("title"))
@@ -474,9 +569,10 @@ func _build_br() -> void:
 	br.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(br)
 	br.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	br.offset_left = -164
+	# .minimap is 212x212 in the stylesheet (H-12).
+	br.offset_left = -226
 	br.offset_right = -14
-	br.offset_top = -164
+	br.offset_top = -226
 	br.offset_bottom = -14
 	var mm := PbWidgets.Minimap.new()
 	mm.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -558,6 +654,18 @@ func sync(state: Dictionary, dt: float) -> void:
 	(_els["timer_label"] as Label).text = UI.fmt_clock(time)
 	var final_phase := stage >= PbRun.STAGES and bool(state.get("bossSpawned", false))
 	(_els["timer"] as PanelContainer).add_theme_stylebox_override("panel", PbTheme.timer_style(final_phase))
+	if final_phase != _timer_final:
+		_timer_final = final_phase
+		# .timer.final{animation:.4s infinite alternate pulse} -> brightness 1.35
+		var timer := _els["timer"] as PanelContainer
+		if _timer_pulse != null:
+			_timer_pulse.kill()
+			_timer_pulse = null
+		timer.modulate = Color.WHITE
+		if final_phase:
+			_timer_pulse = timer.create_tween().set_loops().set_trans(Tween.TRANS_SINE)
+			_timer_pulse.tween_property(timer, "modulate", Color(1.35, 1.35, 1.35), 0.4)
+			_timer_pulse.tween_property(timer, "modulate", Color.WHITE, 0.4)
 	(_els["clock"] as Label).text = UI.fmt_clock_t(time)
 	(_els["clock_sub"] as Label).text = "第 %d/%d 阶段" % [stage, PbRun.STAGES]
 
@@ -579,9 +687,12 @@ func sync(state: Dictionary, dt: float) -> void:
 	var portrait := _els["portrait"] as PmdSprite
 	if portrait.species_id != species:
 		portrait.setup(species, "idle", 0.7)
-	var ring := _els["xp_ring"] as PbWidgets.XpRing
+	var ring := _els["xp_ring"] as HudXpRing
 	var xp_next := maxf(1.0, float(player.get("xpNext", 1)))
 	ring.progress = clampf(float(player.get("xp", 0)) / xp_next * 100.0, 0.0, 100.0)
+	var types_now := PbJson.as_array(player.get("types", []))
+	var first_type := str(types_now[0]) if not types_now.is_empty() else "normal"
+	ring.accent = PbTheme.type_color(first_type)
 	(_els["level"] as Label).text = str(int(player.get("level", 1)))
 	# zh species title from the mirror's i18n table; the actor's raw name is the fallback.
 	(_els["name"] as Label).text = App.t("pokemon", int(player.get("species_id", 0)),
@@ -711,7 +822,12 @@ func _sync_types(player: Dictionary) -> void:
 func _sync_hp(player: Dictionary, stats: Dictionary, dt: float) -> void:
 	var max_hp := maxf(1.0, float(player.get("maxHp", 1.0)))
 	var ratio := clampf(float(player.get("hp", 0.0)) / max_hp, 0.0, 1.0)
-	var width := (_els["hp_fill"].get_parent() as Control).size.x
+	var inner := _els["hp_inner"] as Control
+	var width := inner.size.x
+	var height := inner.size.y
+	if height <= 0.0:
+		# layout has not run yet on the first frame
+		height = HP_BAR_H - HP_INNER_INSET * 2.0
 	# red lag layer trails the real value (CSS transition on .hpbar>u)
 	if ratio > _last_hp_ratio:
 		_hp_lag = ratio
@@ -721,22 +837,23 @@ func _sync_hp(player: Dictionary, stats: Dictionary, dt: float) -> void:
 			_hp_lag = maxf(ratio, _hp_lag - dt * 0.9)
 	_last_hp_ratio = ratio
 	_hp_lag_hold = maxf(_hp_lag_hold, 0.35 if ratio < _hp_lag else 0.0)
-	var fill := _els["hp_fill"] as ColorRect
-	var lag := _els["hp_lag"] as ColorRect
-	var shield := _els["hp_shield"] as ColorRect
+	var fill := _els["hp_fill"] as PbWidgets.GradRect
+	var lag := _els["hp_lag"] as Panel
+	var shield := _els["hp_shield"] as Panel
 	var caption := _els["hp_caption"] as Label
-	var palette := PbTheme.hpbar_colors()
 	var band := "high"
 	if ratio <= 0.25:
 		band = "low"
 	elif ratio <= 0.55:
 		band = "mid"
-	fill.color = PbJson.as_dict(palette[band])["base"]
-	fill.size = Vector2(width * ratio, 14)
-	lag.size = Vector2(width * maxf(_hp_lag, ratio), 14)
+	if band != str(_els.get("hp_band", "")):
+		_els["hp_band"] = band
+		fill.setup(_hp_gradient(band), null, false)
+	fill.size = Vector2(width * ratio, height)
+	lag.size = Vector2(width * maxf(_hp_lag, ratio), height)
 	var shield_v := clampf(float(player.get("shield", 0.0)) / max_hp, 0.0, 1.0)
 	shield.visible = shield_v > 0.0
-	shield.size = Vector2(width * shield_v, 14)
+	shield.size = Vector2(width * shield_v, height)
 	caption.text = "%s / %s" % [UI.fmt_num(float(player.get("hp", 0.0))), UI.fmt_num(max_hp)]
 	if ratio <= 0.25:
 		# CSS .hpbar.low>i -- .5s infinite alternate pulse
@@ -745,8 +862,11 @@ func _sync_hp(player: Dictionary, stats: Dictionary, dt: float) -> void:
 			var tw := fill.create_tween().set_loops().set_trans(Tween.TRANS_SINE)
 			tw.tween_property(fill, "modulate", Color(1.25, 1.25, 1.25), 0.5)
 			tw.tween_property(fill, "modulate", Color(1, 1, 1), 0.5)
-	else:
+			fill.set_meta("pulse_tw", tw)
+	elif fill.has_meta("pulsing"):
 		fill.remove_meta("pulsing")
+		(fill.get_meta("pulse_tw") as Tween).kill()
+		fill.remove_meta("pulse_tw")
 		fill.modulate = Color.WHITE
 
 
@@ -893,4 +1013,79 @@ func notify(text: String) -> void:
 ## Stage banner (CSS .banner with --c accent; the ported stage system announces
 ## stage-ups and the boss spawn).
 func show_banner(text: String, sub_text: String = "", accent: String = "", long: bool = false) -> void:
+	var before := get_child_count()
 	UI.banner(self, text, sub_text, accent, long)
+	if get_child_count() <= before:
+		return
+	var layer := get_child(get_child_count() - 1)
+	# H-13: `.banner h1{display:inline-block;padding:8px 40px}` is a text-hugging
+	# capsule; the shared helper lays the plate out full-width, so re-fit it here.
+	if layer.get_child_count() > 0:
+		fit_capsule(layer.get_child(0) as Control, 40.0)
+
+
+## Shrink a .banner/.modal title plate to the width of its label so it stays a
+## capsule instead of a full-width band (H-13). The title label is child #1, on
+## top of the gradient rect.
+static func fit_capsule(plate: Control, horizontal_padding: float) -> void:
+	if plate == null:
+		return
+	plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var title := plate.get_child(1) as Label
+	if title == null:
+		return
+	plate.custom_minimum_size.x = title.get_combined_minimum_size().x + horizontal_padding * 2.0
+
+
+## H-12: .tl-medal / .tl-ring / .tl-portrait rebuilt at the stylesheet's 108px.
+## conic-gradient(#3a8cff, #5ad8ff p%, var(--line) 0) is painted as a blue->cyan
+## sweep over the `--line` remainder; the portrait keeps its inset:10px face with
+## the 4px tc border. Local to this HUD file because PbWidgets is frozen for this
+## phase (merge note in the hand-off).
+class HudXpRing:
+	extends Control
+	var progress := 0.0:
+		set(value):
+			if absf(progress - value) > 0.05:
+				progress = value
+				queue_redraw()
+	var accent := Color(0.23, 0.55, 1.0)
+	var _portrait: Control = null
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(108, 108)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		resized.connect(queue_redraw)
+
+	func set_portrait(node: Control) -> void:
+		_portrait = node
+		node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(node)
+		queue_redraw()
+
+	func _draw() -> void:
+		var center := size * 0.5
+		var radius := minf(size.x, size.y) * 0.5
+		var band := 10.0 # .tl-portrait{inset:10px}
+		var frac := clampf(progress / 100.0, 0.0, 1.0)
+		var line_color := PbTheme.css_color(PbTheme.v("--line", "#e4e0f0"), Color("#e4e0f0"))
+		draw_arc(center, radius - band * 0.5, 0.0, TAU, 64, line_color, band)
+		if frac > 0.0:
+			var steps := maxi(8, int(48.0 * frac))
+			for i in steps:
+				var t := (float(i) + 0.5) / float(steps)
+				var color := Color("#3a8cff").lerp(Color("#5ad8ff"), t)
+				draw_arc(center, radius - band * 0.5,
+					-PI * 0.5 + TAU * frac * float(i) / float(steps),
+					-PI * 0.5 + TAU * frac * float(i + 1) / float(steps),
+					6, color, band)
+		# .tl-portrait: radial paper -> 35% tc, 4px tc border
+		var portrait_r := radius - band
+		draw_circle(center, portrait_r, PbTheme.paper().lerp(accent, 0.35))
+		draw_arc(center, portrait_r - 2.0, 0.0, TAU, 64, accent, 4.0)
+		# 3px paper rim (box-shadow: 0 0 0 3px var(--paper))
+		draw_arc(center, radius - 1.5, 0.0, TAU, 64, PbTheme.paper(), 3.0)
+		if _portrait != null:
+			var diameter := portrait_r * 2.0 - 8.0
+			_portrait.size = Vector2(diameter, diameter)
+			_portrait.position = center - _portrait.size * 0.5

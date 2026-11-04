@@ -23,7 +23,10 @@ var _view: PbWorldView
 var _sun: DirectionalLight3D
 var _enemy_nodes: Array[MeshInstance3D] = []
 var _orb_nodes: Array[MeshInstance3D] = []
+const HudFx = preload("res://src/ui/hud_fx.gd")
+
 var _hud: RunHud
+var _fx: HudFx
 var _layer: CanvasLayer
 var _modal_scrim: PanelContainer
 var _modal_cards: HBoxContainer
@@ -125,6 +128,12 @@ func _build_hud() -> void:
 	_hud.name = "RunHud"
 	_layer.add_child(_hud)
 	UI.fill(_hud)
+	# H-17 feedback layer: .lowhp / .flash / .floater sit above the HUD, below
+	# the modals (z-index 60 in the web DOM).
+	_fx = HudFx.new()
+	_fx.name = "HudFx"
+	_layer.add_child(_fx)
+	UI.fill(_fx)
 
 	# .modal shells (CSS .modal: radial scrim, h1 plate, centred column).
 	var level := UI.modal_shell("升级！选择强化")
@@ -133,6 +142,9 @@ func _build_hud() -> void:
 	_modal_scrim.visible = false
 	_layer.add_child(_modal_scrim)
 	UI.fill(_modal_scrim)
+	# H-13: `.modal{align-items:center}` + `h1{padding:6px 34px}` -> the title is a
+	# capsule, not a full-width band.
+	RunHud.fit_capsule(body.get_parent().get_child(0) as Control, 34.0)
 	body.add_theme_constant_override("separation", 16)
 	_modal_cards = UI.hbox(16)
 	_modal_cards.name = "Cards"
@@ -151,6 +163,7 @@ func _build_hud() -> void:
 	_settle_scrim.visible = false
 	_layer.add_child(_settle_scrim)
 	UI.fill(_settle_scrim)
+	RunHud.fit_capsule(_settle_body.get_parent().get_child(0) as Control, 34.0)
 
 	var pause := UI.modal_shell(App.ui("En pausa"), true)
 	var pause_scrim: PanelContainer = pause["scrim"]
@@ -166,6 +179,7 @@ func _build_hud() -> void:
 	pause_scrim.set_meta("is_pause", true)
 	_layer.add_child(pause_scrim)
 	UI.fill(pause_scrim)
+	RunHud.fit_capsule(pause_body.get_parent().get_child(0) as Control, 34.0)
 
 
 func _toggle_pause() -> void:
@@ -214,6 +228,8 @@ func _start_run() -> void:
 	_settle_scrim.visible = false
 	_modal_scrim.visible = false
 	_hud.build(_run)
+	if _fx != null:
+		_fx.set_low_hp(1.0, false)
 	Audio.play_music("menu")
 	Audio.play_cry(species)
 
@@ -388,6 +404,20 @@ func _pump_events() -> void:
 
 
 # ------------------------------------------------------------------ render
+## Screen-space anchor for the .floater: the hit number in the web build is a
+## world-space vfx.number over the damaged actor; we project the player's head.
+func _player_screen_point() -> Vector2:
+	var viewport := get_viewport().get_visible_rect().size
+	var player: Dictionary = _run.get("player", {})
+	var px := float(player.get("x", 0.0))
+	var pz := float(player.get("z", 0.0))
+	var head := Vector3(px, _ground_y(px, pz) + 1.2, pz)
+	if _camera == null or not _camera.is_inside_tree():
+		return viewport * Vector2(0.5, 0.55)
+	var p := _camera.unproject_position(head)
+	return Vector2(clampf(p.x, 40.0, viewport.x - 40.0), clampf(p.y, 60.0, viewport.y - 60.0))
+
+
 func _render(dt: float) -> void:
 	var player: Dictionary = _run.get("player", {})
 	var px := float(player.get("x", 0.0))
@@ -417,9 +447,18 @@ func _render(dt: float) -> void:
 	# Hit feedback: the run class carries a `trauma` value that shake() adds to.
 	var taken_now := float(PbJson.as_dict(_run.get("stats", {})).get("damageTaken", 0.0))
 	if taken_now > _last_damage_taken + 0.001:
+		var dealt := taken_now - _last_damage_taken
 		_trauma = minf(1.0, _trauma + 0.3)
 		_last_damage_taken = taken_now
 		Audio.sfx("hit")
+		# H-17: `.flash` on every player hit + the .floater damage number (the
+		# stylesheet paints it white with a 5px ink stroke).
+		if _fx != null:
+			_fx.flash()
+			_fx.spawn_floater(UI.fmt_num(dealt), Color.WHITE, _player_screen_point())
+	if _fx != null:
+		var hp_ratio := clampf(float(player.get("hp", 0.0)) / maxf(1.0, float(player.get("maxHp", 1.0))), 0.0, 1.0)
+		_fx.set_low_hp(hp_ratio, bool(player.get("dead", false)))
 	_trauma = maxf(0.0, _trauma - dt * 2.5)
 	var shake_amount := _trauma * _trauma * 0.6 * _shake_scale
 	var shake_offset := Vector3(PbRng.randf_range(-shake_amount, shake_amount),
