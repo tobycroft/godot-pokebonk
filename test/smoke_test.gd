@@ -66,6 +66,15 @@ func section(name: String) -> void:
 	print("\n-- %s" % name)
 
 
+## Weight of one card kind in a PbCards.kind_weights() list (0 when absent).
+func _kind_weight(entries: Array, kind: String) -> float:
+	for raw in entries:
+		var pair: Array = raw
+		if str(pair[1]) == kind:
+			return float(pair[0])
+	return 0.0
+
+
 # ------------------------------------------------------------------ 1. data
 func _data_integrity() -> void:
 	section("data integrity")
@@ -441,6 +450,93 @@ func _run_flow() -> void:
 	ok(PbShop.reroll_cost(shop_run) == 60, "next reroll costs 1.5x more")
 	ok(not PbShop.reroll(shop_run), "reroll fails when gold is short")
 
+	# --- vitamins (news chunk `ue`/`de`/`pe` @73720-74110, addVitamin @839647).
+	# Per-level mods are `per*acc` (mul) or `per*acc` (add); the loaded dice rolls
+	# another vitamin's per at 1.5x and merges by stat.
+	var vit_actor := PbActor.create(1, {}, 1)
+	var calcium := PbVitamins.def_of("calcium")
+	ok(float(calcium.get("per", 0.0)) == 0.1 and str(calcium.get("stat", "")) == "special"
+		and str(calcium.get("kind", "")) == "mul", "calcium is +10% special (mul)")
+	var special0 := float(PbJson.as_dict(vit_actor["stats"])["special"])
+	PbVitamins.add(vit_actor, "calcium", 1.0)
+	ok(PbVitamins.level_of(vit_actor, "calcium") == 1, "first vitamin copy grants level 1")
+	ok(absf(float(PbJson.as_dict(vit_actor["stats"])["special"]) - special0 * 1.1) < 1e-4,
+		"calcium per .10 applies 1 + .10*acc to special")
+	# Level cap: the 11th copy overflows into `extra`, level keeps counting.
+	PbVitamins.add(vit_actor, "calcium", 1.0)
+	PbVitamins.add(vit_actor, "calcium", 1.0)
+	for n in 8:
+		PbVitamins.add(vit_actor, "calcium", 1.0)
+	ok(PbVitamins.level_of(vit_actor, "calcium") == 11, "level passes the cap (addVitamin @839647)")
+	var calcium_entry := PbVitamins.entry_of(vit_actor, "calcium")
+	ok(PbJson.as_array(calcium_entry.get("extra", [])).size() == 1,
+		"the copy past level 10 is pushed to extra")
+	ok(PbVitamins.cap_for(vit_actor) == 10, "vitCap is 10 without max-ether")
+	PbActor.give_item(vit_actor, "max-ether", 1.0)
+	ok(PbVitamins.cap_for(vit_actor) == 12, "max-ether raises vitCap to 12 (Ob.vitCap @840393)")
+	PbActor.give_item(vit_actor, "max-ether", 0.0)
+	# Side mods (`extra`) scale with acc, e.g. cursed incense: +6% xp/gold per copy.
+	var cursed_actor := PbActor.create(1, {}, 1)
+	PbVitamins.add(cursed_actor, "cursed", 1.0)
+	var cursed_mods := PbVitamins.mods_for(cursed_actor)
+	var cursed_ok := false
+	for raw in cursed_mods:
+		var mod := PbJson.as_dict(raw)
+		if str(mod.get("stat", "")) == "xpGain" and absf(float(mod.get("mul", 1.0)) - 1.06) < 1e-4:
+			cursed_ok = true
+	ok(cursed_ok, "cursed extra mods apply mul 1 + .06*acc (de @73817)")
+	# Loaded dice: one roll per copy, scaled by 1.5 and merged by stat.
+	var dice_actor := PbActor.create(1, {}, 1)
+	PbVitamins.add(dice_actor, "loaded-dice", 1.0)
+	var dice_entry := PbVitamins.entry_of(dice_actor, "loaded-dice")
+	ok(PbJson.as_array(dice_entry.get("rolls", [])).size() == 1, "loaded dice stores one roll per level")
+	var dice_mods := PbVitamins.mods_for(dice_actor)
+	ok(dice_mods.size() == 1, "dice rolls merge into a single mod")
+	var dice_mod := PbJson.as_dict(dice_mods[0])
+	ok(str(dice_mod.get("stat", "")) not in ["overheal", "powerup", ""],
+		"dice never rolls overheal/powerup (pe @74110)")
+	# Card composition (KS @1098990): new-vit cards only while a slot is free,
+	# up-vit cards only for owned vitamins under vitCap.
+	ok(PbVitamins.can_offer_new(dice_actor), "free vitamin slot offers new vitamins")
+	var new_card := PbCards.roll_vitamin(dice_actor, {}, true)
+	ok(str(new_card.get("kind", "")) == "new_vit" and not str(new_card.get("vit", "")).is_empty(),
+		"new_vit card picks an unowned vitamin")
+	var up_card := PbCards.roll_vitamin(dice_actor, {}, false)
+	ok(str(up_card.get("kind", "")) == "up_vit" and str(up_card.get("vit", "")) == "loaded-dice",
+		"up_vit cards only target owned vitamins")
+	ok(int(up_card.get("next_level", 0)) == 2, "up_vit previews level -> level+1")
+	ok(PbCards.take(dice_actor, up_card) == "vitamin" and PbVitamins.level_of(dice_actor, "loaded-dice") == 2,
+		"taking an up_vit card calls addVitamin")
+	for key in ["calcium", "carbos", "ether"]:
+		if PbVitamins.level_of(dice_actor, key) == 0:
+			PbVitamins.add(dice_actor, key, 1.0)
+	ok(not PbVitamins.can_offer_new(dice_actor), "vitaminSlots (3) blocks new vitamins when full")
+
+	# KS composition weights: 2 upVit candidates per owned vitamin under cap,
+	# .45 per unowned vitamin while a slot is free, 2 upMove per owned move.
+	var w_actor := PbActor.create(1, {}, 1)
+	PbVitamins.add(w_actor, "calcium", 1.0)
+	var weights := PbCards.kind_weights(w_actor, {})
+	close(_kind_weight(weights, "up_vit"), 2.0, "2 candidates per owned vitamin (KS)")
+	close(_kind_weight(weights, "new_vit"), 0.45 * float(PbVitamins.defs().size() - 1),
+		".45 per unowned vitamin while a slot is free (KS)")
+	close(_kind_weight(weights, "move_upgrade"), 2.0 * float(PbActor.move_keys(w_actor).size()),
+		"2 candidates per owned move under cap (KS)")
+	ok(_kind_weight(weights, "new_move") == 0.0, "no new-move cards while every move slot is filled")
+	PbVitamins.add(w_actor, "carbos", 1.0)
+	PbVitamins.add(w_actor, "ether", 1.0)
+	ok(_kind_weight(PbCards.kind_weights(w_actor, {}), "new_vit") == 0.0,
+		"new-vit weight disappears once all vitamin slots are taken")
+	# Offer dedupe/banish keys: `v`+vitamin, so the same card is not repeated in
+	# one level-up and a banished vitamin drops out of the pool (KS `i` set).
+	var free_actor := PbActor.create(1, {}, 1)
+	PbVitamins.add(free_actor, "calcium", 1.0)
+	var card := PbCards.roll_vitamin(free_actor, {}, false)
+	ok(str(card.get("vit", "")) == "calcium" and PbCards._card_key(card, 0) == "vcalcium",
+		"up-vit cards exclude the same vitamin by v+key")
+	ok(PbCards.roll_vitamin(free_actor, {"vcalcium": true}, false).is_empty(),
+		"a taken/banished vitamin leaves the up-vit pool")
+
 
 # ------------------------------------------------------------------ 5. save flow
 func _save_flow() -> void:
@@ -744,6 +840,25 @@ func _terrain_checks() -> void:
 	var palettes := PbJson.as_dict(PbData.world_palettes().get("by_pack"))
 	ok(palettes.size() == 6, "toon palettes for the 6 packs (%d)" % palettes.size())
 	ok(not PbJson.as_dict(PbData.world_fx().get("hazards")).is_empty(), "hostile-terrain table loaded")
+	# data/pb/hazards.json is the flat ingest copy (schema only, no FX yet):
+	# 4 kinds keyed by biome, numeric fields + type/status where the web has them.
+	var hz := PbJson.as_dict(PbData.pb_table("hazards"))
+	var hz_defs := PbJson.as_dict(hz.get("defs"))
+	ok(hz_defs.size() == 4, "hazards.json has the 4 hostile kinds")
+	var hz_fields := ["slow", "pull", "hurt", "bite"]
+	var hz_bad := []
+	for key in hz_defs.keys():
+		for field in hz_fields:
+			if not PbJson.as_dict(hz_defs[key]).has(field):
+				hz_bad.append("%s.%s" % [key, field])
+	ok(hz_bad.is_empty(), "every hazard carries slow/pull/hurt/bite (missing %s)" % str(hz_bad))
+	ok(str(PbJson.as_dict(hz_defs.get("bramble")).get("status")) == "poison"
+		and str(PbJson.as_dict(hz_defs.get("fire")).get("status")) == "burn",
+		"status types come from the web table")
+	var by_biome := PbJson.as_dict(hz.get("byBiome"))
+	ok(PbJson.as_array(by_biome.get("forest")) == ["mud", "bramble"]
+		and PbJson.as_array(by_biome.get("desert")) == ["quicksand", "fire"],
+		"byBiome lists the web's hazard pair per biome")
 
 	# Generator primitives have to be exact, or the map is a different map.
 	var rng := PbJsRng.new(2026)
