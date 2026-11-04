@@ -40,6 +40,7 @@ func _ready() -> void:
 	_ui_build_checks()
 	_terrain_checks()
 	_hazard_checks()
+	_evolution_checks()
 	_locale_checks()
 	report()
 	get_tree().quit(0 if _failures.is_empty() else 1)
@@ -1091,6 +1092,99 @@ func _hazard_checks() -> void:
 	PbHazards.update(state, 1.0)
 	close(float(player["hp"]), hp_intro, "the 2s intro deals no damage")
 	ok(float(fresh["age"]) >= 1.0 and float(fresh["tick"]) > 0.0, "the intro still counts up age")
+
+
+# ------------------------------------------------------------------ evolution
+## §3.2 level formula, §3.4 trigger boundary, §3.5 settlement, §3.6 HP/moves.
+func _evolution_checks() -> void:
+	section("evolution (6e)")
+
+	# runEvolution: next form -> clamp(8+a,16,30); final -> clamp(22+a*.6,36,50).
+	var bulba := PbEvo.run_evolution(1)
+	ok(int(bulba.get("to", 0)) == 2 and int(bulba.get("level", 0)) == 24,
+		"bulbasaur -> ivysaur at 24 (a=16, 8+a)")
+	var ivy := PbEvo.run_evolution(2)
+	ok(int(ivy.get("to", 0)) == 3 and int(ivy.get("level", 0)) == 41,
+		"ivysaur -> venusaur at 41 (a=32, 22+a*.6)")
+	var pidgey := PbEvo.run_evolution(16)
+	ok(int(pidgey.get("to", 0)) == 17 and int(pidgey.get("level", 0)) == 26,
+		"pidgey -> pidgeotto at 26 (a=18, 8+a)")
+	var eevee := PbEvo.run_evolution(133, 134)
+	ok(int(eevee.get("to", 0)) == 134 and int(eevee.get("level", 0)) == 36,
+		"eevee branch (forced vaporeon) at 36 (a=20, final form)")
+	var random_branch := PbEvo.run_evolution(133)
+	ok([134, 135, 136, 196, 197, 470, 471, 700].has(int(random_branch.get("to", 0))),
+		"eevee without a forced target picks one of its forms")
+	ok(int(random_branch.get("level", 0)) == 36, "branch level is still 36")
+
+	# Trigger boundary: one level under -> cards; exact level -> evolving.
+	var run := PbRun.create(1, "forest", 4242)
+	var p: Dictionary = run["player"]
+	ok(int(PbJson.as_dict(run.get("nextEvo", {})).get("level", 0)) == 24,
+		"run seeds nextEvo from plan_evolution")
+	p["level"] = 23
+	run["pendingLevels"] = 1
+	PbRun.open_offers(run)
+	ok(str(run.get("state", "")) == "modal" and not PbJson.as_array(run["offers"]).is_empty(),
+		"level 23 (one short) still opens cards")
+	PbRun.choose_offer(run, 0)
+	p["level"] = 24
+	run["pendingLevels"] = 2
+	run["offers"] = []
+	PbRun.open_offers(run)
+	ok(str(run.get("state", "")) == "evolving", "level 24 starts the evolution")
+	ok(PbJson.as_array(run["offers"]).is_empty(),
+		"the triggering level-up offers no cards (doLevelUp @1541606)")
+	ok(int(run["stats"]["evolutions"]) == 0, "stats only writes on completion")
+	PbRun.tick(run, 3.0)
+	ok(str(run.get("state", "")) == "evolving", "still evolving at 3.0s")
+	PbRun.tick(run, 0.6)
+	ok(int(p.get("species_id", 0)) == 2, "3.6s completion swaps to ivysaur")
+	ok(int(run["stats"].get("evolutions", 0)) == 1, "stats.evolutions++ on completion")
+	ok(int(run.get("pendingLevels", 0)) == 1,
+		"completion consumes one queued level (2 -> 1)")
+	ok(str(run.get("state", "")) == "modal" and not PbJson.as_array(run["offers"]).is_empty(),
+		"remaining pending levels reopen the card modal")
+	ok(int(PbJson.as_dict(run.get("nextEvo", {})).get("to", 0)) == 3
+		and int(PbJson.as_dict(run.get("nextEvo", {})).get("level", 0)) == 41,
+		"nextEvo replanned from level+3")
+	ok(PbJson.as_array(Save.store.get("forms", [])).has(2),
+		"dex form unlock writes the target species id (unlockForm)")
+	ok(int(PbJson.as_dict(Save.store.get("counters", {})).get("evolutions", 0)) >= 1,
+		"account counters.evolutions written")
+	PbRun.choose_offer(run, 0)
+
+	# A second species: pidgey flips from cards to evolving between 25 and 26.
+	var run2 := PbRun.create(16, "forest", 5150)
+	var p2: Dictionary = run2["player"]
+	p2["level"] = 25
+	run2["pendingLevels"] = 1
+	PbRun.open_offers(run2)
+	ok(str(run2.get("state", "")) == "modal", "pidgey at 25 does not evolve yet")
+	PbRun.choose_offer(run2, 0)
+	p2["level"] = 26
+	run2["pendingLevels"] = 1
+	run2["offers"] = []
+	PbRun.open_offers(run2)
+	ok(str(run2.get("state", "")) == "evolving"
+		and int(PbJson.as_dict(run2.get("nextEvo", {})).get("to", 0)) == 17,
+		"pidgey at 26 starts pidgeotto evolution")
+
+	# HP fold + move inheritance (§3.6): 40% -> at least 80% of the new max.
+	var actor := PbActor.create(1, {}, 24)
+	var old_max := float(actor.get("maxHp", 0.0))
+	actor["hp"] = old_max * 0.4
+	var moves_before := PbActor.move_keys(actor)
+	PbEvo.set_species(actor, 2)
+	var new_max := float(actor.get("maxHp", 0.0))
+	close(float(actor.get("hp", 0.0)), new_max * 0.8,
+		"40%% HP folds to 80%% of the new max")
+	ok(PbActor.move_keys(actor) == moves_before,
+		"moves are inherited untouched (no addMove in setSpecies)")
+	ok(int(actor.get("evo_stage", 0)) == 1, "player evo_stage increments")
+	ok(int(actor.get("species_id", 0)) == 2 and not PbJson.as_array(actor.get("types", [])).is_empty(),
+		"species_id/types swap to the new form")
+	ok(new_max > old_max, "ivysaur maxHp is recomputed above bulbasaur's")
 
 
 # ------------------------------------------------------------------ language
