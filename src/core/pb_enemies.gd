@@ -36,7 +36,7 @@ static func create_pool() -> Dictionary:
 		"xp", "burnDps", "poisonDps"]
 	for key in floats:
 		pool[key] = []
-	for key in ["species", "tier", "flags", "typeA", "typeB"]:
+	for key in ["species", "tier", "flags", "typeA", "typeB", "gen"]:
 		pool[key] = []
 	for kind in PbStatus.KINDS:
 		pool[kind] = []
@@ -44,9 +44,12 @@ static func create_pool() -> Dictionary:
 	pool["count"] = 0
 	pool["free"] = []
 	pool["live"] = []
+	pool["serial"] = 0
 	for i in CAPACITY:
 		for key in pool.keys():
 			if key == "count" or key == "free" or key == "live":
+				continue
+			if typeof(pool[key]) != TYPE_ARRAY:
 				continue
 			pool[key].append(0.0 if key in floats else 0)
 		pool["free"].append(i)
@@ -113,6 +116,10 @@ static func spawn(pool: Dictionary, species_id: int, x: float, z: float, stage: 
 	set_field(pool, "species", index, species_id)
 	set_field(pool, "tier", index, tier)
 	set_field(pool, "flags", index, int(Flag["Alive"]) | int(numbers["flags"]))
+	# Spawn generation: the web Alpha keeps capture attempts per `n.gen[e]`
+	# (Cg.throwBall @544603 / breakFree), so every spawn gets a serial.
+	pool["serial"] = int(pool.get("serial", 0)) + 1
+	set_field(pool, "gen", index, int(pool["serial"]))
 	var types: Array = PbJson.as_array(species.get("types", ["normal"]))
 	set_field(pool, "typeA", index, types[0] if types.size() > 0 else "normal")
 	set_field(pool, "typeB", index, types[1] if types.size() > 1 else types[0] if types.size() > 0 else "normal")
@@ -168,6 +175,14 @@ static func damage(pool: Dictionary, index: int, amount: float) -> Dictionary:
 			set_field(pool, "hp", index, floor_hp)
 			return {"dealt": maxf(0.0, before - floor_hp), "died": false, "info": null,
 				"capture": true}
+	# Alpha lethal hits open `Cg.intercept` instead of killing (@544603): HP is
+	# floored at 1 % for the 8 s down window.
+	if flags(pool, index) & int(Flag["Alpha"]) != 0:
+		var alpha_floor := float(get_field(pool, "maxHp", index)) * 0.01
+		if before - amount <= alpha_floor:
+			set_field(pool, "hp", index, alpha_floor)
+			return {"dealt": maxf(0.0, before - alpha_floor), "died": false, "info": null,
+				"alpha": true}
 	var hp := maxf(0.0, before - amount)
 	set_field(pool, "hp", index, hp)
 	if hp <= 0.0:
@@ -255,6 +270,7 @@ static func tick_statuses(pool: Dictionary, dt: float) -> float:
 			if bool(burn_res["died"]):
 				pool["dot_kills"] = PbJson.as_array(pool.get("dot_kills", [])) + [burn_res["info"]]
 				continue
+			_note_floor_hit(pool, i, burn_res)
 		var poison := float(get_field(pool, "poisonDps", i))
 		if poison > 0.0:
 			var stacks := maxf(1.0, float(get_field(pool, "poisonStacks", i)))
@@ -262,7 +278,22 @@ static func tick_statuses(pool: Dictionary, dt: float) -> float:
 			total += float(poison_res["dealt"])
 			if bool(poison_res["died"]):
 				pool["dot_kills"] = PbJson.as_array(pool.get("dot_kills", [])) + [poison_res["info"]]
+				continue
+			_note_floor_hit(pool, i, poison_res)
 	return total
+
+
+## A DoT that lands on the 1 % capture floor still has to open the weak/down
+## window, exactly like a direct hit.
+static func _note_floor_hit(pool: Dictionary, index: int, res: Dictionary) -> void:
+	if bool(res.get("capture", false)):
+		var listed := PbJson.as_array(pool.get("dot_capture", []))
+		if not listed.has(index):
+			pool["dot_capture"] = listed + [index]
+	elif bool(res.get("alpha", false)):
+		var alphas := PbJson.as_array(pool.get("dot_alpha", []))
+		if not alphas.has(index):
+			pool["dot_alpha"] = alphas + [index]
 
 
 static func flags(pool: Dictionary, index: int) -> int:

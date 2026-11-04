@@ -233,6 +233,19 @@ func apply_actions(actions: Array) -> void:
 				store["unlocked"] = _union(store["unlocked"], [int(a.get("id", 0))])
 			"capture":
 				store["captured"] = _union(store["captured"], [int(a.get("id", 0))])
+			"joinLeague":
+				# joinLeague() @1667709: a new family enters the league roster; for
+				# the int-shaped offline profile this is one more selectable starter.
+				var lid := int(a.get("id", 0))
+				if not PbJson.as_array(store.get("captured", [])).has(lid):
+					var lg = store.get("league", 1)
+					if lg is Array:
+						store["league"] = _union(lg, [lid])
+					else:
+						store["league"] = _league_count(lg) + 1
+			"count":
+				var ckey := str(a.get("id", ""))
+				store["counters"][ckey] = int(store["counters"].get(ckey, 0)) + int(a.get("v", 1))
 			"seen":
 				store["seen"] = _union(store["seen"], [int(a.get("id", 0))])
 			"item":

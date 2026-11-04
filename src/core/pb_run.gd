@@ -57,8 +57,8 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"gold": 0.0,
 		"stats": {"kills": 0, "damage": 0.0, "damageTaken": 0.0, "hits": 0,
 			"dodges": 0, "crits": 0, "megaCrits": 0, "bosses": 0, "legendaries": 0,
-			"powerUps": 0, "movesLearned": 0, "evolutions": 0, "captures": [],
-			"newSeen": [], "killsBy": {}, "splits": []},
+			"powerUps": 0, "movesLearned": 0, "evolutions": 0, "captured": [],
+			"allies": [], "newSeen": [], "killsBy": {}, "splits": []},
 		"splits": [],
 		"fusions": [],
 		"banished": {},
@@ -164,6 +164,20 @@ static func tick(state: Dictionary, dt: float) -> void:
 		for k in dot_kills:
 			_on_kill_info(state, PbJson.as_dict(k))
 		state["enemies"]["dot_kills"] = []
+	# DoT damage that lands on the 1 % floor still opens the capture window.
+	var dot_capture: Array = PbJson.as_array(state["enemies"].get("dot_capture", []))
+	if not dot_capture.is_empty():
+		PbCapture.on_defeated(state)
+		state["enemies"]["dot_capture"] = []
+	var dot_alpha: Array = PbJson.as_array(state["enemies"].get("dot_alpha", []))
+	for entry in dot_alpha:
+		var alpha_index := int(entry)
+		if not PbCapture.on_defeated(state, alpha_index):
+			var alpha_info := PbEnemies.kill(state["enemies"], alpha_index)
+			if alpha_info != null:
+				_on_kill_info(state, PbJson.as_dict(alpha_info))
+	if not dot_alpha.is_empty():
+		state["enemies"]["dot_alpha"] = []
 	if float(player.get("hp", 0.0)) <= 0.0 or bool(player.get("dead", false)):
 		# Web death order (bundle @848700): a Revivir Máximo charge restores 60%
 		# HP with 3s of i-frames before the run actually ends.
@@ -220,6 +234,8 @@ static func _tick_director(state: Dictionary, dt: float) -> void:
 			stage, diff, tier, hp_multiplier, dmg_multiplier, 1.0, stage_t)
 		if index >= 0:
 			alive += 1
+			# Dex "seen" is registered when the species appears, not on the kill.
+			_mark_seen(state, species)
 		state["_last_spawn_species"] = species
 	state["spawnAllowance"] = allowance
 	state["credits"] = maxf(0.0, credits)
@@ -300,6 +316,7 @@ static func spawn_boss(state: Dictionary) -> void:
 		state["bossSpawned"] = true
 		state["bossIndex"] = index
 		state["bossFightT"] = 0.0
+		_mark_seen(state, legendary)
 		_message(state, "boss! species %d" % legendary)
 
 
@@ -427,8 +444,15 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 		var hit_res := PbEnemies.damage(pool, target, dmg)
 		var dealt := float(hit_res["dealt"])
 		if bool(hit_res.get("capture", false)):
-			# Lethal hit on the capture encounter: weaken instead of killing.
+			# Lethal hit on the league encounter: weaken instead of killing.
 			PbCapture.on_defeated(state)
+		elif bool(hit_res.get("alpha", false)):
+			# Alpha lethal hit: `Cg.intercept` (@544603) turns it into the
+			# 8-second down window. If another capture owns the state, it dies.
+			if not PbCapture.on_defeated(state, target):
+				var alpha_info := PbEnemies.kill(pool, target)
+				if alpha_info != null:
+					_on_kill_info(state, PbJson.as_dict(alpha_info))
 		state["stats"]["damage"] = float(state["stats"]["damage"]) + dealt
 		state["stats"]["hits"] = int(state["stats"].get("hits", 0)) + 1
 		if bool(out["crit"]):
@@ -452,6 +476,17 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 					return
 
 
+## Dex "seen" is written the moment a species appears in the arena.
+static func _mark_seen(state: Dictionary, species: int) -> void:
+	var stats: Dictionary = state["stats"]
+	var seen: Array = stats.get("newSeen", [])
+	if seen.has(species):
+		return
+	seen.append(species)
+	stats["newSeen"] = seen
+	Save.apply_actions([{"t": "seen", "id": species}])
+
+
 ## Consume a kill payload (from a hit or a damage-over-time tick).
 static func _on_kill_info(state: Dictionary, info: Dictionary) -> void:
 	if info.is_empty():
@@ -472,13 +507,8 @@ static func _on_kill_info(state: Dictionary, info: Dictionary) -> void:
 	# credit() @765300: the orb carries the enemy's own xp value; run.diff.xpMul
 	# is applied again when the orb is collected (addXp @843900).
 	_drop_orb(state, float(info.get("xp", 1.0)), float(info["x"]), float(info["z"]))
-	# A kill only marks the species as seen (bundle @763264); captures are written
+	# No dex write on a kill: `seen` is registered at spawn and `captured`
 	# exclusively by a successful Poké Ball throw in PbCapture.
-	var seen: Array = stats.get("newSeen", [])
-	if not seen.has(species):
-		seen.append(species)
-		stats["newSeen"] = seen
-		Save.apply_actions([{"t": "seen", "id": species}])
 
 
 ## XP candies: the web build drops collectible orbs; the run simulates them as
