@@ -254,7 +254,10 @@ func _run_flow() -> void:
 	ok(not PbJson.as_array(run["offers"]).is_empty() or int(run["pendingLevels"]) == 0,
 		"modal state consistent with pending levels")
 	var result := PbRun.finish(run, "exit")
-	ok(PbJson.as_array(stats.get("captures", [])).size() > 0, "captured species list filled")
+	# Web semantics (bundle @763264): a kill only marks the species as seen. The
+	# capture list is written exclusively by a successful Poké Ball throw.
+	ok(PbJson.as_array(stats.get("captures", [])).size() == 0,
+		"kills do not write captures (ball throw only)")
 	ok(PbJson.as_array(stats.get("newSeen", [])).size() > 0, "seen species list filled")
 	ok(PbJson.as_dict(stats.get("killsBy", {})).size() > 0, "per-species kill counts tracked")
 	ok(result.has("species") and result.has("kills") and result.has("splits"),
@@ -312,6 +315,65 @@ func _run_flow() -> void:
 	PbRun.simulate(manual, 25.0)
 	ok(str(manual.get("aimMode", "")) == "manual", "manual aim mode survives the tick loop")
 	ok(float(manual["time"]) > 20.0, "manual-aim run keeps simulating (t=%.0fs)" % float(manual["time"]))
+
+	# --- capture (bundle class kS @1074615): only a successful ball throw writes
+	# the captures list; a kill just marks the species as seen.
+	var cap_run := PbRun.create(25, "forest", 777, {})
+	ok(cap_run.has("capture"), "capture encounter state created")
+	PbCapture.data_of(cap_run)["spawnAt"] = 0.0
+	PbCapture.tick(cap_run, 0.1)
+	var cap_index := PbCapture.index(cap_run)
+	ok(cap_index >= 0 and PbEnemies.is_alive(cap_run["enemies"], cap_index),
+		"capture encounter spawned (kS.spawnEncounter @1078302)")
+	var cap_pool: Dictionary = cap_run["enemies"]
+	ok(int(PbEnemies.get_field(cap_pool, "flags", cap_index)) & int(PbEnemies.Flag["Capture"]) != 0,
+		"capture encounter carries the R.Capture flag")
+	# Lethal damage weakens instead of killing (kS.onDefeated @1082804).
+	var lethal := PbEnemies.damage(cap_pool, cap_index, 1.0e9)
+	ok(bool(lethal.get("capture", false)) and not bool(lethal.get("died", true)),
+		"lethal damage on the capture target only weakens it")
+	PbCapture.on_defeated(cap_run)
+	ok(PbCapture.is_weakened(cap_run), "capture target enters the weakened window")
+	var cap_hp := float(PbEnemies.get_field(cap_pool, "hp", cap_index))
+	var cap_max := float(PbEnemies.get_field(cap_pool, "maxHp", cap_index))
+	ok(absf(cap_hp - cap_max * 0.01) < 0.01, "weakened target sits at 1% HP")
+	# Chance formula (kS.throwBall @1082671): .55 + rate/255*.35 + attempts*.2.
+	var cap_species := PbCapture.species(cap_run)
+	var cap_rate := float(PbData.species(cap_species).get("captureRate", 0.0))
+	var cap_chance := PbCapture.chance_for(cap_run)
+	var cap_expect := minf(0.97, 0.55 + cap_rate / 255.0 * 0.35)
+	ok(absf(cap_chance - cap_expect) < EPS,
+		"capture chance %.4f matches web %.4f (rate %.0f)" % [cap_chance, cap_expect, cap_rate])
+	# Move inside the 9-unit throw range (kS.tryThrow), then force the catch with
+	# the master ball (kS.throwBall: the item guarantees the hit).
+	PbJson.as_dict(cap_run["player"])["x"] = float(PbEnemies.get_field(cap_pool, "x", cap_index)) + 1.0
+	PbJson.as_dict(cap_run["player"])["z"] = float(PbEnemies.get_field(cap_pool, "z", cap_index))
+	PbActor.give_item(PbJson.as_dict(cap_run["player"]), "master-ball", 1.0)
+	ok(PbCapture.throw_ball(cap_run), "ball throw accepted inside the 9-unit range")
+	PbCapture.tick(cap_run, 1.0)
+	var cap_family := int(PbCapture.data_of(cap_run).get("family", 0))
+	ok(PbJson.as_array(cap_run["stats"].get("captures", [])).has(cap_family),
+		"successful catch records the family in run captures")
+	ok(PbJson.as_array(Save.store.get("captured", [])).has(cap_family)
+		and PbJson.as_array(Save.store.get("unlocked", [])).has(cap_family),
+		"catch writes captures + unlocked to the profile (joinLeague @1667709)")
+
+	# Failed throws: attempts accumulate, the window shrinks to 6s, and the third
+	# miss makes the encounter flee (kS.breakFree @1083400).
+	var miss_run := PbRun.create(6, "forest", 778, {})
+	PbCapture.data_of(miss_run)["spawnAt"] = 0.0
+	PbCapture.tick(miss_run, 0.1)
+	var miss_index := PbCapture.index(miss_run)
+	PbCapture.on_defeated(miss_run)
+	for n in 3:
+		PbCapture.data_of(miss_run)["state"] = "throwing"
+		PbCapture.data_of(miss_run)["outcome"] = false
+		PbCapture.data_of(miss_run)["throwT"] = 0.0
+		PbCapture.tick(miss_run, 0.01)
+	ok(int(PbCapture.data_of(miss_run).get("attempts", 0)) == 3, "failed throws accumulate attempts")
+	ok(str(PbCapture.data_of(miss_run).get("state", "")) == "done"
+		and not PbEnemies.is_alive(miss_run["enemies"], miss_index),
+		"third failed throw makes the encounter flee")
 
 
 # ------------------------------------------------------------------ 5. save flow

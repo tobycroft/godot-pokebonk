@@ -80,6 +80,8 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 	base_weather = _ability_weather(str(actor.get("ability", "")), base_weather)
 	state["baseWeather"] = base_weather
 	state["weather"] = base_weather
+	# kS capture encounter (bundle @1074615): one capturable legendary per stage.
+	PbCapture.create(state)
 	# The run's growth index follows the player's level (estimated mapping).
 	_apply_lab(state, lab_deltas)
 	return state
@@ -145,6 +147,7 @@ static func tick(state: Dictionary, dt: float) -> void:
 			and PbEnemies.is_alive(state["enemies"], int(state.get("bossIndex", -1))):
 		state["bossFightT"] = float(state.get("bossFightT", 0.0)) + dt
 	_tick_player(state, dt)
+	PbCapture.tick(state, dt)
 	_tick_enemies(state, dt)
 	_tick_orbs(state, dt)
 	PbActor.tick(player, dt)
@@ -329,7 +332,8 @@ static func _tick_player(state: Dictionary, dt: float) -> void:
 		# target within reach; 'manual' restricts acquisition to the move's own reach.
 		var radius := maxf(9.0, float(built.get("reach", 0.0))) \
 			if str(state.get("aimMode", "auto")) == "auto" else maxf(1.0, float(built.get("reach", 0.0)))
-		var target := PbEnemies.nearest(pool_of(state), player_x(state), player_z(state), radius)
+		var target := PbEnemies.nearest(pool_of(state), player_x(state), player_z(state), radius,
+			PbCapture.index(state) if PbCapture.is_weakened(state) else -1)
 		if target < 0:
 			inst["cooldown"] = 0.0
 			continue
@@ -417,6 +421,9 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 			continue
 		var hit_res := PbEnemies.damage(pool, target, dmg)
 		var dealt := float(hit_res["dealt"])
+		if bool(hit_res.get("capture", false)):
+			# Lethal hit on the capture encounter: weaken instead of killing.
+			PbCapture.on_defeated(state)
 		state["stats"]["damage"] = float(state["stats"]["damage"]) + dealt
 		state["stats"]["hits"] = int(state["stats"].get("hits", 0)) + 1
 		if bool(out["crit"]):
@@ -460,14 +467,13 @@ static func _on_kill_info(state: Dictionary, info: Dictionary) -> void:
 	# credit() @765300: the orb carries the enemy's own xp value; run.diff.xpMul
 	# is applied again when the orb is collected (addXp @843900).
 	_drop_orb(state, float(info.get("xp", 1.0)), float(info["x"]), float(info["z"]))
-	var captures: Array = stats.get("captures", [])
-	if not captures.has(species):
-		captures.append(species)
-	stats["captures"] = captures
+	# A kill only marks the species as seen (bundle @763264); captures are written
+	# exclusively by a successful Poké Ball throw in PbCapture.
 	var seen: Array = stats.get("newSeen", [])
 	if not seen.has(species):
 		seen.append(species)
-	stats["newSeen"] = seen
+		stats["newSeen"] = seen
+		Save.apply_actions([{"t": "seen", "id": species}])
 
 
 ## XP candies: the web build drops collectible orbs; the run simulates them as
@@ -596,6 +602,10 @@ static func _tick_enemies(state: Dictionary, dt: float) -> void:
 	for entry in PbEnemies.live_indices(pool).duplicate():
 		var i := int(entry)
 		if not PbEnemies.is_alive(pool, i):
+			continue
+		# Capture encounters are passive: the bundle spawns them with R.Capture and
+		# enemy attacks/AI ignore that flag (bundle @551237, @552310).
+		if (int(PbEnemies.get_field(pool, "flags", i)) & int(PbEnemies.Flag["Capture"])) != 0:
 			continue
 		var dx := px - float(PbEnemies.get_field(pool, "x", i))
 		var dz := pz - float(PbEnemies.get_field(pool, "z", i))

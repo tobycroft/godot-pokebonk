@@ -159,7 +159,16 @@ static func kill(pool: Dictionary, index: int) -> Variant:
 static func damage(pool: Dictionary, index: int, amount: float) -> Dictionary:
 	if not is_alive(pool, index):
 		return {"dealt": 0.0, "died": false, "info": null}
-	var hp := maxf(0.0, float(get_field(pool, "hp", index)) - amount)
+	var before := float(get_field(pool, "hp", index))
+	# The active capture encounter is never killed: damage to zero leaves it at
+	# 1 % HP so the player can throw a ball (bundle kS.onDefeated @1082804).
+	if index == int(pool.get("capture_index", -1)):
+		var floor_hp := float(get_field(pool, "maxHp", index)) * 0.01
+		if before - amount <= floor_hp:
+			set_field(pool, "hp", index, floor_hp)
+			return {"dealt": maxf(0.0, before - floor_hp), "died": false, "info": null,
+				"capture": true}
+	var hp := maxf(0.0, before - amount)
 	set_field(pool, "hp", index, hp)
 	if hp <= 0.0:
 		return {"dealt": amount, "died": true, "info": kill(pool, index)}
@@ -174,11 +183,14 @@ static func types_of(pool: Dictionary, index: int) -> Array:
 	return out
 
 
-static func nearest(pool: Dictionary, x: float, z: float, max_dist: float = 1.0e30) -> int:
+static func nearest(pool: Dictionary, x: float, z: float, max_dist: float = 1.0e30,
+		skip_index: int = -1) -> int:
 	var best := -1
 	var best_d := max_dist
 	for entry in live_indices(pool):
 		var i := int(entry)
+		if i == skip_index:
+			continue
 		var d := sqrt(pow(float(get_field(pool, "x", i)) - x, 2.0) + pow(float(get_field(pool, "z", i)) - z, 2.0))
 		if d < best_d:
 			best_d = d

@@ -356,6 +356,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			# re keymap: aim = KeyQ -> toggle runtime aim mode (auto/manual).
 			if not _paused and not over:
 				_toggle_aim()
+		KEY_E:
+			# re keymap: capture throw = KeyE (kS.tryThrow/throwBall @1082671).
+			if not modal and not _paused and not over:
+				if PbCapture.throw_ball(_run):
+					Audio.sfx("ui")
 		KEY_P:
 			if not over:
 				_toggle_pause()
@@ -399,6 +404,12 @@ func _pump_events() -> void:
 			_sync_run_music()
 		elif text.begins_with("fused"):
 			_hud.show_banner("融合成功！", text.trim_prefix("fused "), "#8a5cff")
+		elif text.begins_with("banner|"):
+			# Capture flow (kS @1074615): `banner|title|body|colour[|big]`.
+			var parts := text.split("|")
+			var color := str(parts[3]) if parts.size() > 3 else "#f7c948"
+			var big := parts.size() > 4 and str(parts[4]) == "big"
+			_hud.show_banner(str(parts[1]), str(parts[2]) if parts.size() > 2 else "", color, big)
 		else:
 			_hud.notify(text)
 	var stage := int(_run.get("stage", 1))
