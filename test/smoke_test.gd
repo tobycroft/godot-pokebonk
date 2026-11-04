@@ -375,6 +375,70 @@ func _run_flow() -> void:
 		and not PbEnemies.is_alive(miss_run["enemies"], miss_index),
 		"third failed throw makes the encounter flee")
 
+	# --- shop (nC @1104993 / aC @1105132): rC=[80,130,220,400,750], rT=2.2^(stage-1),
+	# shopHeat iC=[1.15,1.25,1.4,1.6,2] from the 3rd purchase, oC=1-.08*teeth.
+	var shop_run := PbRun.create(4, "forest", 999, {})
+	PbShop.open(shop_run)
+	var shop_rows := PbShop.stock(shop_run)
+	ok(shop_rows.size() == 4, "shop rolls 4 stock rows")
+	var shop_keys := {}
+	for raw in shop_rows:
+		var row := PbJson.as_dict(raw)
+		shop_keys[str(row["key"])] = true
+		ok(int(row["price"]) == PbShop.price_for(shop_run, str(row["key"])),
+			"stock price matches aC for %s" % str(row["key"]))
+	ok(shop_keys.size() == 4, "shop stock keys are distinct")
+	# Price samples at stage 1 (no heat, no discount): 80/130/220/400/750.
+	var sample0 := ""
+	var sample4 := ""
+	for raw in PbJson.as_array(PbData.pb_table("items_game")):
+		var def := PbJson.as_dict(raw)
+		if bool(def.get("premium", false)):
+			continue
+		if int(def.get("rarity", 0)) == 0 and sample0.is_empty():
+			sample0 = str(def.get("key", ""))
+		if int(def.get("rarity", 0)) == 4 and sample4.is_empty():
+			sample4 = str(def.get("key", ""))
+	ok(PbShop.price_for(shop_run, sample0) == 80, "rarity-0 price is 80 (stage 1)")
+	ok(PbShop.price_for(shop_run, sample4) == 750, "rarity-4 price is 750 (stage 1)")
+	# Stage 2 multiplies by 2.2 (rT clamp 1..4).
+	shop_run["stage"] = 2
+	ok(PbShop.price_for(shop_run, sample0) == 176, "stage 2 rarity-0 price is 176")
+	# Every purchase past the first two multiplies heat by iC[rarity].
+	shop_run["shopBuys"] = [0, 0, 0]
+	ok(PbShop.price_for(shop_run, sample0) == int(roundf(80.0 * 2.2 * 1.15)),
+		"the 3rd purchase adds heat (iC[0]=1.15)")
+	shop_run["shopBuys"] = [0, 0, 2]
+	ok(PbShop.price_for(shop_run, sample0) == int(roundf(80.0 * 2.2 * 1.4)),
+		"heat uses the bought rarity's multiplier (iC[2]=1.4)")
+	# oC: 3 gold-teeth = -24%.
+	PbActor.give_item(PbJson.as_dict(shop_run["player"]), "gold-teeth", 3.0)
+	ok(absf(PbShop.discount(shop_run) - 0.76) < EPS, "gold-teeth discount caps at 24%")
+	# Purchase validation: gold, sold flag, stack cap and the item grant.
+	PbActor.give_item(PbJson.as_dict(shop_run["player"]), "gold-teeth", 0.0)
+	shop_run["shopBuys"] = []
+	shop_run["stage"] = 1
+	shop_run["gold"] = 500.0
+	var buy_key := str(PbJson.as_dict(PbShop.stock(shop_run)[0])["key"])
+	ok(PbShop.buy(shop_run, 0), "shop buy succeeds with enough gold")
+	ok(bool(PbJson.as_dict(PbShop.stock(shop_run)[0]).get("sold", false)), "bought row is marked sold")
+	ok(int(shop_run["gold"]) == 500 - PbShop.price_for(shop_run, buy_key),
+		"buy charges the aC price")
+	ok(int(PbActor.item_power(PbJson.as_dict(shop_run["player"]), buy_key)) == 1,
+		"buy grants one copy of the item")
+	ok(not PbShop.buy(shop_run, 0), "sold rows cannot be bought twice")
+	PbActor.give_item(PbJson.as_dict(shop_run["player"]), buy_key, 10.0)
+	ok(not PbShop.can_hold(shop_run, buy_key), "stack cap (max 10) blocks purchases")
+	# Reroll: cost .5*rC[0]*rT*1.5^shopRerolls*oC, new stock each time.
+	shop_run["shopRerolls"] = 0
+	shop_run["gold"] = 50.0
+	ok(PbShop.reroll_cost(shop_run) == 40, "stage-1 reroll costs 40")
+	ok(PbShop.reroll(shop_run), "reroll succeeds with enough gold")
+	ok(int(shop_run["gold"]) == 10 and int(shop_run["shopRerolls"]) == 1,
+		"reroll charges gold and bumps the reroll count")
+	ok(PbShop.reroll_cost(shop_run) == 60, "next reroll costs 1.5x more")
+	ok(not PbShop.reroll(shop_run), "reroll fails when gold is short")
+
 
 # ------------------------------------------------------------------ 5. save flow
 func _save_flow() -> void:

@@ -37,6 +37,11 @@ var _banish_mode := false
 var _banish_pick := -1
 var _settle_scrim: PanelContainer
 var _settle_body: VBoxContainer
+var _shop_scrim: PanelContainer
+var _shop_rows: VBoxContainer
+var _shop_actions: HBoxContainer
+var _shop_info: Label
+var _shop_open := false
 var _time := 0.0
 var _paused := false
 var _trauma := 0.0
@@ -182,6 +187,28 @@ func _build_hud() -> void:
 	UI.fill(pause_scrim)
 	UI.fit_capsule(pause_body.get_parent().get_child(0) as Control, 34.0)
 
+	# Meowth shop (nC/aC @1104993-1105132). The web opens it from the meowth
+	# interactable (@1303449); this port has no interactable layer yet, so the
+	# run screen binds it to KeyM -- 待确认.
+	var shop := UI.modal_shell(App.ui("Meowth: «¿Tienes dinero, miau?»"), true)
+	_shop_scrim = shop["scrim"]
+	var shop_body: VBoxContainer = shop["body"]
+	_shop_scrim.visible = false
+	_layer.add_child(_shop_scrim)
+	UI.fill(_shop_scrim)
+	UI.fit_capsule(shop_body.get_parent().get_child(0) as Control, 34.0)
+	_shop_info = UI.dim("")
+	_shop_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	shop_body.add_child(_shop_info)
+	_shop_rows = UI.vbox(10)
+	_shop_rows.name = "ShopRows"
+	shop_body.add_child(_shop_rows)
+	_shop_actions = UI.hbox(10)
+	_shop_actions.name = "ShopActions"
+	_shop_actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	shop_body.add_child(_shop_actions)
+	shop_body.add_child(UI.dim(App.ui("Si le compras mucho sin abrir Poké Balls, su próxima tienda saldrá más cara.")))
+
 
 func _toggle_pause() -> void:
 	_paused = not _paused
@@ -199,6 +226,87 @@ func _toggle_aim() -> void:
 	_run["aimMode"] = next
 	_hud.notify(App.ui("Apuntado") + ": " + (App.ui("Automático") if next == "auto" else App.ui("Manual")))
 	Audio.sfx("ui")
+
+
+# ------------------------------------------------------------------ shop
+func _open_shop() -> void:
+	PbShop.open(_run)
+	_shop_open = true
+	_shop_scrim.visible = true
+	_render_shop()
+	Audio.sfx("ui")
+
+
+func _close_shop() -> void:
+	_shop_open = false
+	_shop_scrim.visible = false
+	Audio.sfx("ui")
+
+
+func _shop_reroll() -> void:
+	if PbShop.reroll(_run):
+		Audio.sfx("level")
+		_render_shop()
+
+
+func _shop_buy(index: int) -> void:
+	if PbShop.buy(_run, index):
+		Audio.sfx("ui")
+		_render_shop()
+
+
+## Shop rows: item icon + name/desc + price / VENDIDO (showShop @2183004).
+func _render_shop() -> void:
+	for child in _shop_rows.get_children():
+		child.queue_free()
+	for child in _shop_actions.get_children():
+		child.queue_free()
+	_shop_info.text = "%d ₽" % int(_run.get("gold", 0))
+	var rows := PbShop.stock(_run)
+	if rows.is_empty():
+		_shop_rows.add_child(UI.dim(App.ui("«Ya lo tienes todo, miau. Aquí no me queda nada para ti.»")))
+	for i in rows.size():
+		_shop_rows.add_child(_shop_row(i, PbJson.as_dict(rows[i])))
+	var cost := PbShop.reroll_cost(_run)
+	var reroll := UI.button(App.ui("Renovar surtido · {n} ₽", {"n": cost}), _shop_reroll, false, "blue", true)
+	reroll.disabled = int(_run.get("gold", 0)) < cost
+	_shop_actions.add_child(reroll)
+	_shop_actions.add_child(UI.button(App.ui("Salir"), _close_shop, false, "ghost", true))
+
+
+func _shop_row(index: int, entry: Dictionary) -> Control:
+	var key := str(entry.get("key", ""))
+	var def := PbShop.item_def(key)
+	var meta := PbJson.as_dict(PbData.items_map().get(key, {}))
+	var rc := PbTheme.rarity_color(int(def.get("rarity", 0)))
+	var panel := UI.panel(12)
+	panel.add_theme_stylebox_override("panel",
+		PbTheme.stylebox(".card", {"rc": "#" + rc.to_html(false)}))
+	var row := UI.hbox(12)
+	panel.add_child(row)
+	var icon_name := str(meta.get("icon", ""))
+	if not icon_name.is_empty():
+		row.add_child(UI.icon_rect(icon_name, 36))
+	var col := UI.vbox(2)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_child(UI.label(App.t("items", int(meta.get("id", 0)), str(meta.get("name", key))), 18))
+	var desc := str(meta.get("desc", ""))
+	if not desc.is_empty():
+		col.add_child(UI.dim(desc))
+	var player := PbJson.as_dict(_run.get("player", {}))
+	col.add_child(UI.dim(App.ui("Tienes {n}/{max}", {
+		"n": int(PbActor.item_power(player, key)),
+		"max": int(def.get("max", 10))})))
+	row.add_child(col)
+	var sold := bool(entry.get("sold", false))
+	var price := int(entry.get("price", 0))
+	var affordable := int(_run.get("gold", 0)) >= price
+	var label := App.ui("VENDIDO") if sold else "%d ₽" % price
+	var buy := UI.small_button(label, func(): _shop_buy(index),
+		"yellow" if not sold and affordable else "ghost")
+	buy.disabled = sold or not affordable or not PbShop.can_hold(_run, key)
+	row.add_child(buy)
+	return panel
 
 
 # ------------------------------------------------------------------ run flow
@@ -229,6 +337,8 @@ func _start_run() -> void:
 	_banish_pick = -1
 	_settle_scrim.visible = false
 	_modal_scrim.visible = false
+	_shop_open = false
+	_shop_scrim.visible = false
 	_hud.build(_run)
 	if _fx != null:
 		_fx.set_low_hp(1.0, false)
@@ -277,6 +387,9 @@ func _process(delta: float) -> void:
 		_show_settle_once()
 		return
 	if _paused:
+		_render(dt)
+		return
+	if _shop_open:
 		_render(dt)
 		return
 	if str(_run.get("state", "play")) == "modal":
@@ -335,6 +448,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	var modal := str(_run.get("state", "")) == "modal" and _modal_scrim.visible
 	var over := str(_run.get("state", "")) == "over"
+	if _shop_open:
+		if event.keycode == KEY_ESCAPE or event.keycode == KEY_M:
+			_close_shop()
+		return
 	match event.keycode:
 		KEY_R:
 			# re keymap: ult/fusion = KeyR (moved off F to align with re).
@@ -364,6 +481,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_P:
 			if not over:
 				_toggle_pause()
+		KEY_M:
+			# Shop entry: the web opens it from the meowth interactable (@1303449);
+			# this port has no interactable layer yet -- 待确认.
+			if not modal and not _paused and not over:
+				_open_shop()
 		KEY_ESCAPE:
 			if over:
 				App.back_to_menu()

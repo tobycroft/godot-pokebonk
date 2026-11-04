@@ -78,7 +78,28 @@ static func recompute(state: Dictionary) -> void:
 	var growth := float(PbCombat.growth_index(int(state.get("level", 1))))
 	var lab := PbJson.as_dict(state.get("lab_deltas", {}))
 	var groups: Array = PbJson.as_array(state.get("mods", []))
+	# Items add one mod group per copy (bundle recompute @838235:
+	# `for n in count) applyMod(mods)`), and type items bump typeBoost by .3.
+	var items := PbJson.as_dict(state.get("items", {}))
+	for key in items.keys():
+		var def := PbData.item_game(str(key))
+		if def.is_empty():
+			continue
+		var count := int(float(items[key]))
+		var mods := PbJson.as_array(def.get("mods", []))
+		for n in count:
+			groups.append(mods)
 	var stats := PbStats.stats_for(species, growth, lab, groups)
+	for key in items.keys():
+		var def := PbData.item_game(str(key))
+		if def.is_empty():
+			continue
+		var count := int(float(items[key]))
+		for tag in PbJson.as_array(def.get("tags", [])):
+			if str(tag).begins_with("type:"):
+				var element := str(tag).substr(5)
+				stats["typeBoost"][element] = float(
+					PbJson.as_dict(stats["typeBoost"]).get(element, 1.0)) + 0.3 * float(count)
 	var old_max := float(state.get("maxHp", 0.0))
 	var old_hp := float(state.get("hp", 0.0))
 	var new_max := float(stats.get("maxHp", old_max))

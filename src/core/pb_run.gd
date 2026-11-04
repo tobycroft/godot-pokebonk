@@ -67,6 +67,11 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"banishes": 0,
 		"orbs": [],
 		"messages": [],
+		"shop": {},
+		"shopBuys": [],
+		"shopRerolls": 0,
+		"goldSpent": 0.0,
+		"econ": {"shop": 0, "sold": 0},
 	}
 	state["player"]["pendingLevels"] = 0
 	# Bundle @1513275: base weather = F.pick(biome.weather) for regular stages
@@ -694,7 +699,7 @@ static func result(state: Dictionary) -> Dictionary:
 		"mode": str(state.get("mode", "standard")),
 		"bosses": int(stats.get("bosses", 0)),
 		"legendaries": int(stats.get("legendaries", 0)),
-		"econ": {"gold": int(state.get("gold", 0))},
+		"econ": PbJson.as_dict(state.get("econ", {})).merged({"gold": int(state.get("gold", 0))}, true),
 		"fusions": PbJson.as_array(state.get("fusions", [])),
 		"endHow": state.get("endHow"),
 	}

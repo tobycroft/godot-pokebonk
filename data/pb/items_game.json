@@ -1,0 +1,1787 @@
+[
+  {
+    "key": "adamant-orb",
+    "rarity": 4,
+    "max": 1,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+15% daño. Al recibir un golpe detienes el tiempo: los enemigos cercanos se quedan quietos 3 s (cada 20 s).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "adrenaline-orb",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Al recibir un golpe: +20% velocidad y +12% velocidad de ataque durante 3 s.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "air-balloon",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "extraJumps",
+        "add": 1
+      },
+      {
+        "stat": "jumpHeight",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+1 salto extra y +15% altura de salto.",
+    "name": ""
+  },
+  {
+    "key": "amulet-coin",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "gold",
+        "mul": 1.2
+      }
+    ],
+    "desc": "+20% Pokédólares.",
+    "name": ""
+  },
+  {
+    "key": "assault-vest",
+    "rarity": 2,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "armor",
+        "add": 12
+      },
+      {
+        "stat": "maxHp",
+        "mul": 1.12
+      }
+    ],
+    "desc": "+12 armadura y +12% PS máximos.",
+    "name": ""
+  },
+  {
+    "key": "awakening",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Tus golpes tienen un 2.5% de dormir, y los dormidos pueden seguir durmiendo al recibir un golpe.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "berry-juice",
+    "rarity": 0,
+    "max": 8,
+    "tags": [],
+    "mods": [],
+    "desc": "Cada baja tiene un 5% de curarte un 2% de tus PS máximos.",
+    "name": ""
+  },
+  {
+    "key": "bicycle",
+    "rarity": 2,
+    "max": 2,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "moveSpeed",
+        "mul": 1.06
+      }
+    ],
+    "desc": "+6% velocidad. Ganas +1% de daño por cada 2% de velocidad extra (hasta +35%).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "big-nugget",
+    "rarity": 0,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "gold",
+        "mul": 1.05
+      }
+    ],
+    "desc": "Las Poké Balls cuestan un 8% menos (hasta -40%) y +5% Pokédólares.",
+    "name": ""
+  },
+  {
+    "key": "big-root",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "lifesteal",
+        "add": 0.03
+      },
+      {
+        "stat": "healing",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+3% robo de vida y +15% curación.",
+    "name": ""
+  },
+  {
+    "key": "binding-band",
+    "rarity": 1,
+    "max": 5,
+    "tags": [],
+    "mods": [],
+    "desc": "+20% daño a enemigos aturdidos, enraizados, paralizados, congelados o dormidos.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "black-belt",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:fighting"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Lucha y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "black-glasses",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:dark"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Siniestro y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "black-sludge",
+    "rarity": 2,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "regen",
+        "add": 2
+      },
+      {
+        "stat": "statusDamage",
+        "mul": 1.2
+      }
+    ],
+    "desc": "+2 regeneración. Tus venenos duran un 25% más y dañan +20%.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "bright-powder",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "evasion",
+        "add": 0.04
+      }
+    ],
+    "desc": "+4% evasión.",
+    "name": ""
+  },
+  {
+    "key": "burn-heal",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "statusDamage",
+        "mul": 1.05
+      }
+    ],
+    "desc": "Las quemaduras se contagian a los Pokémon que están al lado de un enemigo quemado.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "cell-battery",
+    "rarity": 2,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "+1.5% velocidad de ataque por cada 10 bajas de racha (hasta +25%).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "charcoal",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:fire"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Fuego y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "choice-band",
+    "rarity": 2,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "physical",
+        "mul": 1.35
+      },
+      {
+        "stat": "attackSpeed",
+        "mul": 0.92
+      }
+    ],
+    "desc": "+35% daño físico, -8% velocidad de ataque.",
+    "name": ""
+  },
+  {
+    "key": "choice-scarf",
+    "rarity": 2,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "moveSpeed",
+        "mul": 1.2
+      },
+      {
+        "stat": "attackSpeed",
+        "mul": 1.1
+      }
+    ],
+    "desc": "+20% velocidad y +10% velocidad de ataque.",
+    "name": ""
+  },
+  {
+    "key": "choice-specs",
+    "rarity": 2,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "special",
+        "mul": 1.35
+      },
+      {
+        "stat": "attackSpeed",
+        "mul": 0.92
+      }
+    ],
+    "desc": "+35% daño especial, -8% velocidad de ataque.",
+    "name": ""
+  },
+  {
+    "key": "cleanse-tag",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "eliteDamage",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+15% daño a élites, Alfa y jefes.",
+    "name": ""
+  },
+  {
+    "key": "coin-case",
+    "rarity": 2,
+    "max": 1,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "gold",
+        "mul": 1.1
+      }
+    ],
+    "desc": "+10% Pokédólares. Ganas +1% de daño por cada 300 ₽ que gastes en la partida (hasta +30%).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "comet-shard",
+    "rarity": 3,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "gold",
+        "mul": 1.4
+      },
+      {
+        "stat": "luck",
+        "add": 30
+      }
+    ],
+    "desc": "+40% Pokédólares y +30 suerte.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "dawn-stone",
+    "rarity": 4,
+    "max": 2,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.3
+      },
+      {
+        "stat": "attackSpeed",
+        "mul": 1.2
+      }
+    ],
+    "desc": "+30% a todo el daño y +20% velocidad de ataque.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "dowsing-machine",
+    "rarity": 2,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Desde la zona siguiente, cada zona trae 1 altar Unown y 2 Poké Balls más.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "dragon-fang",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:dragon"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Dragón y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "dusk-stone",
+    "rarity": 3,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "critDamage",
+        "add": 0.4
+      },
+      {
+        "stat": "critChance",
+        "add": 0.08
+      }
+    ],
+    "desc": "+40% daño crítico y +8% crítico.",
+    "name": ""
+  },
+  {
+    "key": "electirizer",
+    "rarity": 3,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Cada 2.5 s cae un rayo sobre 3 enemigos cercanos y los puede paralizar (+1 rayo por unidad).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "eviolite",
+    "rarity": 2,
+    "max": 1,
+    "tags": [],
+    "mods": [],
+    "desc": "Si aún puedes evolucionar: +50% armadura y +25% PS.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "exp-share",
+    "rarity": 2,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "xpGain",
+        "mul": 1.25
+      },
+      {
+        "stat": "pickupRange",
+        "add": 2
+      }
+    ],
+    "desc": "+25% experiencia y +2 rango de recogida.",
+    "name": ""
+  },
+  {
+    "key": "expert-belt",
+    "rarity": 2,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "superEffective",
+        "mul": 1.3
+      }
+    ],
+    "desc": "+30% daño con ataques muy eficaces.",
+    "name": ""
+  },
+  {
+    "key": "fairy-feather",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:fairy"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Hada y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "fire-stone",
+    "rarity": 3,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Los enemigos quemados explotan al morir.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "flame-orb",
+    "rarity": 1,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "statusDamage",
+        "mul": 1.1
+      }
+    ],
+    "desc": "Tus golpes tienen un 5% de quemar y +10% daño de estados.",
+    "name": ""
+  },
+  {
+    "key": "focus-band",
+    "rarity": 2,
+    "max": 4,
+    "tags": [],
+    "mods": [],
+    "desc": "15% de sobrevivir a un golpe letal con 1 PS (una vez cada 20 s).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "focus-sash",
+    "rarity": 3,
+    "max": 1,
+    "tags": [],
+    "mods": [],
+    "desc": "Sobrevives a un golpe letal una vez por fase.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "fresh-water",
+    "rarity": 2,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "healing",
+        "mul": 1.05
+      }
+    ],
+    "desc": "La curación que te sobra con los PS llenos se guarda y sale disparada como un chorro de agua.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "full-heal",
+    "rarity": 2,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "+6% de daño por cada estado distinto que tenga el enemigo (hasta +30%).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "gold-teeth",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Meowth, sus renovaciones y la tragaperras te cobran un 8% menos (hasta -24%).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "grip-claw",
+    "rarity": 0,
+    "max": 5,
+    "tags": [],
+    "mods": [],
+    "desc": "Tus golpes tienen un 4% de enraizar al enemigo.",
+    "name": ""
+  },
+  {
+    "key": "griseous-orb",
+    "rarity": 3,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Cada enemigo derrotado tiene un 12% de dejar una sombra que estalla al momento y maldice a los de alrededor.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "guard-spec",
+    "rarity": 2,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Cada 14 s te protege del siguiente golpe por completo.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "hard-stone",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:rock"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Roca y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "honey",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "pickupRange",
+        "add": 1.5
+      }
+    ],
+    "desc": "+1.5 rango de recogida.",
+    "name": ""
+  },
+  {
+    "key": "ice-heal",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Golpear a un enemigo congelado rompe el hielo: +60% de daño y esquirlas que enfrían a los de alrededor.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "ice-stone",
+    "rarity": 3,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "statusChance",
+        "mul": 1.1
+      }
+    ],
+    "desc": "Los enemigos congelados o enfriados estallan en esquirlas de hielo al morir y enfrían a los de alrededor.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "iron-ball",
+    "rarity": 2,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "armor",
+        "add": 8
+      },
+      {
+        "stat": "moveSpeed",
+        "mul": 0.93
+      }
+    ],
+    "desc": "+8 armadura y -7% velocidad. Al caer de un salto provocas una onda sísmica que crece con tu armadura.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "kings-rock",
+    "rarity": 2,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "flinch",
+        "add": 0.06
+      }
+    ],
+    "desc": "+6% probabilidad de hacer retroceder (aturdir).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "lax-incense",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "armor",
+        "add": 5
+      }
+    ],
+    "desc": "+5 armadura.",
+    "name": ""
+  },
+  {
+    "key": "leaf-stone",
+    "rarity": 3,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Cada baja tiene un 10% de soltar un remolino de hojas que corta a los cercanos y te cura un 1% de PS.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "leftovers",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "regen",
+        "add": 1.2
+      }
+    ],
+    "desc": "+1.2 regeneración de PS por segundo.",
+    "name": ""
+  },
+  {
+    "key": "lemonade",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Tus Alfas de apoyo hacen un 25% más de daño y atacan un 15% más rápido.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "life-orb",
+    "rarity": 2,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.3
+      },
+      {
+        "stat": "maxHp",
+        "mul": 0.9
+      }
+    ],
+    "desc": "+30% daño total, pero -10% PS máximos.",
+    "name": ""
+  },
+  {
+    "key": "light-clay",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "duration",
+        "mul": 1.2
+      }
+    ],
+    "desc": "+20% duración de movimientos y estados.",
+    "name": ""
+  },
+  {
+    "key": "lucky-egg",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "xpGain",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+15% experiencia.",
+    "name": ""
+  },
+  {
+    "key": "lucky-punch",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "luck",
+        "add": 10
+      },
+      {
+        "stat": "critChance",
+        "add": 0.03
+      }
+    ],
+    "desc": "+10 suerte y +3% crítico.",
+    "name": ""
+  },
+  {
+    "key": "lum-berry",
+    "rarity": 2,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "healing",
+        "mul": 1.1
+      }
+    ],
+    "desc": "Cada 30 s, si te falta vida, te cura un 12% de PS. +10% curación recibida.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "lustrous-orb",
+    "rarity": 4,
+    "max": 1,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "area",
+        "mul": 1.2
+      },
+      {
+        "stat": "projectiles",
+        "add": 1
+      }
+    ],
+    "desc": "+20% área y +1 proyectil. Cada 8 s abres una grieta que atrae a los enemigos cercanos y estalla.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "macho-brace",
+    "rarity": 2,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "xpGain",
+        "mul": 1.5
+      },
+      {
+        "stat": "moveSpeed",
+        "mul": 0.9
+      }
+    ],
+    "desc": "+50% experiencia, -10% velocidad.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "magnet",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:electric"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Eléctrico y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "master-ball",
+    "rarity": 4,
+    "max": 1,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.25
+      }
+    ],
+    "desc": "+25% daño a todo. Garantiza la captura en los Encuentros Salvajes.",
+    "name": ""
+  },
+  {
+    "key": "max-elixir",
+    "rarity": 3,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "attackSpeed",
+        "mul": 1.2
+      }
+    ],
+    "desc": "+20% velocidad de ataque.",
+    "name": ""
+  },
+  {
+    "key": "max-ether",
+    "rarity": 3,
+    "max": 1,
+    "tags": [],
+    "mods": [],
+    "desc": "Tus vitaminas pueden subir 2 niveles más (hasta el 12).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "max-revive",
+    "rarity": 4,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Revives una vez con el 60% de PS.",
+    "name": ""
+  },
+  {
+    "key": "metal-coat",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:steel"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Acero y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "metal-powder",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Si te quedas quieto un momento: +30% armadura y +8% velocidad de ataque hasta que te muevas.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "metronome",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [],
+    "desc": "Ganas daño mientras no recibas golpes (hasta +40%).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "miracle-seed",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:grass"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Planta y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "moon-stone",
+    "rarity": 4,
+    "max": 2,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "projectiles",
+        "add": 2
+      },
+      {
+        "stat": "area",
+        "mul": 1.25
+      }
+    ],
+    "desc": "+2 proyectiles y +25% área.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "muscle-band",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "physical",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+15% daño físico.",
+    "name": ""
+  },
+  {
+    "key": "mystic-water",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:water"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Agua y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "never-melt-ice",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:ice"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Hielo y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "old-rod",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [],
+    "desc": "Cada 9 s pescas: un Magikarp salta sobre un enemigo y lo moja. A veces pica un Gyarados...",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "oran-berry",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "maxHp",
+        "add": 15
+      }
+    ],
+    "desc": "+15 PS máximos.",
+    "name": ""
+  },
+  {
+    "key": "poison-barb",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:poison"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Veneno y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "poke-doll",
+    "rarity": 2,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Las pasivas de tus Alfas de apoyo valen un 50% más.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "poke-flute",
+    "rarity": 4,
+    "max": 1,
+    "tags": [],
+    "mods": [],
+    "desc": "Tu Ultimate se carga un 25% más rápido. Al lanzarla, todos tus movimientos se recargan y ganas +30% velocidad de ataque 6 s.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "potion",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "regen",
+        "add": 0.6
+      }
+    ],
+    "desc": "+0.6 regeneración de PS por segundo.",
+    "name": ""
+  },
+  {
+    "key": "power-herb",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "statusDamage",
+        "mul": 1.3
+      }
+    ],
+    "desc": "+30% daño de quemaduras, venenos y similares.",
+    "name": ""
+  },
+  {
+    "key": "pp-max",
+    "rarity": 3,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "projectiles",
+        "add": 1
+      }
+    ],
+    "desc": "+1 proyectil a todos los movimientos.",
+    "name": ""
+  },
+  {
+    "key": "protector",
+    "rarity": 3,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "armor",
+        "add": 20
+      },
+      {
+        "stat": "maxHp",
+        "mul": 1.15
+      },
+      {
+        "stat": "thorns",
+        "add": 40
+      },
+      {
+        "stat": "moveSpeed",
+        "mul": 0.95
+      }
+    ],
+    "desc": "+20 armadura, +15% PS máximos y +40 espinas, pero -5% velocidad.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "quick-claw",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "attackSpeed",
+        "mul": 1.1
+      }
+    ],
+    "desc": "+10% velocidad de ataque.",
+    "name": ""
+  },
+  {
+    "key": "quick-powder",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "moveSpeed",
+        "mul": 1.07
+      }
+    ],
+    "desc": "+7% velocidad de movimiento.",
+    "name": ""
+  },
+  {
+    "key": "rage-candy-bar",
+    "rarity": 3,
+    "max": 1,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "healing",
+        "mul": 0.75
+      }
+    ],
+    "desc": "Cuantos menos PS te quedan, más daño: hasta +60% con un 25% de PS o menos. -25% curación recibida.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "rainbow-wing",
+    "rarity": 4,
+    "max": 1,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "healing",
+        "mul": 1.15
+      }
+    ],
+    "desc": "Una vez por zona, al caer debilitado renaces en llamas con el 50% de PS y abrasas todo a tu alrededor.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "rare-candy",
+    "rarity": 4,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.05
+      }
+    ],
+    "desc": "Subes 2 niveles al instante y +5% daño.",
+    "name": ""
+  },
+  {
+    "key": "razor-claw",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "critDamage",
+        "add": 0.3
+      }
+    ],
+    "desc": "+30% daño crítico.",
+    "name": ""
+  },
+  {
+    "key": "razor-fang",
+    "rarity": 2,
+    "max": 4,
+    "tags": [],
+    "mods": [],
+    "desc": "Rematas al instante a los enemigos (no jefes) por debajo del 8% de PS (+4% por unidad extra).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "reaper-cloth",
+    "rarity": 3,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Cada 100 bajas en la partida: +1% daño (hasta +30%).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "repel",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "enemyAmount",
+        "mul": 0.92
+      },
+      {
+        "stat": "moveSpeed",
+        "mul": 1.06
+      }
+    ],
+    "desc": "-8% enemigos y +6% velocidad. Para cuando la horda aprieta.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "revive",
+    "rarity": 3,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Revives una vez con el 35% de PS.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "rocky-helmet",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "thorns",
+        "add": 25
+      }
+    ],
+    "desc": "Los enemigos que te tocan reciben 25 de daño (espinas).",
+    "name": ""
+  },
+  {
+    "key": "scope-lens",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "critChance",
+        "add": 0.06
+      }
+    ],
+    "desc": "+6% probabilidad de crítico.",
+    "name": ""
+  },
+  {
+    "key": "secret-key",
+    "rarity": 1,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Los altares Unown se cargan un 30% más rápido y se vacían la mitad de rápido al salir.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "sharp-beak",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:flying"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Volador y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "shed-shell",
+    "rarity": 2,
+    "max": 1,
+    "tags": [],
+    "mods": [],
+    "desc": "Eres invulnerable durante el primer tramo del deslizamiento y se recarga un 10% más rápido.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "shell-bell",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [],
+    "desc": "Recuperas un 0.8% del daño que infliges.",
+    "name": ""
+  },
+  {
+    "key": "shiny-stone",
+    "rarity": 3,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.15
+      },
+      {
+        "stat": "area",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+15% daño total y +15% área.",
+    "name": ""
+  },
+  {
+    "key": "silk-scarf",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:normal"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Normal y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "silph-scope",
+    "rarity": 3,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Cada 6 s marca al enemigo más fuerte cercano: recibe un 40% más de daño de todo. Si cae, marcas otro al momento.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "silver-powder",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:bug"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Bicho y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "silver-wing",
+    "rarity": 4,
+    "max": 1,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "extraJumps",
+        "add": 1
+      },
+      {
+        "stat": "moveSpeed",
+        "mul": 1.12
+      }
+    ],
+    "desc": "+1 salto extra y +12% velocidad. Cada 5 s una ráfaga de viento golpea y aparta a los enemigos que te rodean.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "sitrus-berry",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "maxHp",
+        "add": 10
+      }
+    ],
+    "desc": "Al bajar del 30% de PS recuperas un 35% (cada 45 s).",
+    "name": ""
+  },
+  {
+    "key": "smoke-ball",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "evasion",
+        "add": 0.03
+      }
+    ],
+    "desc": "Al recibir daño: 25% de volverte invisible 1.5 s. +3% evasión.",
+    "name": ""
+  },
+  {
+    "key": "smooth-rock",
+    "rarity": 1,
+    "max": 3,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "bounces",
+        "add": 1
+      },
+      {
+        "stat": "projSpeed",
+        "mul": 1.1
+      }
+    ],
+    "desc": "+1 rebote a los proyectiles simples (Proyectil y Ráfaga) y +10% velocidad de proyectil.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "snowball",
+    "rarity": 1,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "armor",
+        "add": 3
+      }
+    ],
+    "desc": "Tus golpes tienen un 6% de enfriar (tres enfriamientos congelan) y +3 armadura.",
+    "name": ""
+  },
+  {
+    "key": "soda-pop",
+    "rarity": 0,
+    "max": 5,
+    "tags": [],
+    "mods": [],
+    "desc": "Al deslizarte estalla una ola de burbujas a tu alrededor que daña y moja.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "soft-sand",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:ground"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Tierra y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "soothe-bell",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "healing",
+        "mul": 1.15
+      },
+      {
+        "stat": "regen",
+        "add": 0.3
+      }
+    ],
+    "desc": "+15% curación recibida y +0.3 regeneración.",
+    "name": ""
+  },
+  {
+    "key": "soul-dew",
+    "rarity": 4,
+    "max": 1,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "special",
+        "mul": 1.2
+      },
+      {
+        "stat": "area",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+20% daño especial y +15% área. Tu Ultimate se carga un 40% más rápido.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "spell-tag",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:ghost"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Fantasma y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "ss-ticket",
+    "rarity": 3,
+    "max": 1,
+    "tags": [],
+    "mods": [],
+    "desc": "+1 hueco para Alfas de apoyo en esta partida.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "star-piece",
+    "rarity": 2,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "luck",
+        "add": 20
+      }
+    ],
+    "desc": "+20 suerte: mejores rarezas y más botín.",
+    "name": ""
+  },
+  {
+    "key": "stick",
+    "rarity": 2,
+    "max": 4,
+    "tags": [],
+    "mods": [],
+    "desc": "3% de probabilidad de que un golpe haga ×8 de daño: ¡Bonk!",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "sun-stone",
+    "rarity": 4,
+    "max": 2,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.1
+      }
+    ],
+    "desc": "+10% daño. Cada 6 s cae un rayo solar sobre el enemigo más fuerte cercano: gran explosión de Fuego que quema.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "thick-club",
+    "rarity": 3,
+    "max": 2,
+    "tags": [],
+    "mods": [],
+    "desc": "Tu daño físico sube un 1% por cada 2 de armadura (hasta +50%).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "thunder-stone",
+    "rarity": 3,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "critChance",
+        "add": 0.04
+      }
+    ],
+    "desc": "Tus golpes críticos lanzan un rayo a un enemigo cercano.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "tm-case",
+    "rarity": 4,
+    "max": 1,
+    "tags": [],
+    "mods": [],
+    "desc": "Tus movimientos pueden subir 2 niveles más (hasta el 10) y las fusiones 1 estrella más (hasta ★6).",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "toxic-orb",
+    "rarity": 1,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "statusChance",
+        "mul": 1.1
+      }
+    ],
+    "desc": "Tus golpes tienen un 6% de envenenar y +10% probabilidad de estados.",
+    "name": ""
+  },
+  {
+    "key": "twisted-spoon",
+    "rarity": 0,
+    "max": 10,
+    "tags": [
+      "type:psychic"
+    ],
+    "mods": [
+      {
+        "stat": "damage",
+        "mul": 1.03
+      }
+    ],
+    "desc": "+30% daño de movimientos tipo Psíquico y +3% daño total.",
+    "name": ""
+  },
+  {
+    "key": "white-flute",
+    "rarity": 1,
+    "max": 5,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "enemyAmount",
+        "mul": 1.12
+      },
+      {
+        "stat": "xpGain",
+        "mul": 1.1
+      },
+      {
+        "stat": "luck",
+        "add": 5
+      }
+    ],
+    "desc": "+12% enemigos, pero +10% experiencia y +5 suerte.",
+    "name": "",
+    "premium": true
+  },
+  {
+    "key": "white-herb",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "statusChance",
+        "mul": 1.25
+      }
+    ],
+    "desc": "+25% probabilidad de estados alterados.",
+    "name": ""
+  },
+  {
+    "key": "wide-lens",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "area",
+        "mul": 1.1
+      }
+    ],
+    "desc": "+10% área de los movimientos.",
+    "name": ""
+  },
+  {
+    "key": "wise-glasses",
+    "rarity": 1,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "special",
+        "mul": 1.15
+      }
+    ],
+    "desc": "+15% daño especial.",
+    "name": ""
+  },
+  {
+    "key": "zoom-lens",
+    "rarity": 0,
+    "max": 10,
+    "tags": [],
+    "mods": [
+      {
+        "stat": "projSpeed",
+        "mul": 1.15
+      },
+      {
+        "stat": "critChance",
+        "add": 0.03
+      }
+    ],
+    "desc": "+15% velocidad de proyectil y +3% crítico.",
+    "name": ""
+  }
+]

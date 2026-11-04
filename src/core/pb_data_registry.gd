@@ -63,6 +63,22 @@ func items_map() -> Dictionary:
 	return _cached_dict("items", "res://data/items.json")
 
 
+## Run items table (web `wt`/`cr`), exported from the bundle's `Yr` array.
+func items_game_map() -> Dictionary:
+	var cache_key := "items_game_by_key"
+	if not _by_key.has(cache_key):
+		var map := {}
+		for raw in PbJson.as_array(pb_table("items_game")):
+			var def := PbJson.as_dict(raw)
+			map[str(def.get("key", ""))] = def
+		_by_key[cache_key] = map
+	return _by_key[cache_key]
+
+
+func item_game(key: String) -> Dictionary:
+	return PbJson.as_dict(items_game_map().get(key, {}))
+
+
 func learnsets_map() -> Dictionary:
 	return _cached_dict("learnsets", "res://data/learnsets.json")
 
