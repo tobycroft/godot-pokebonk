@@ -45,6 +45,7 @@ var _shake_scale := 1.0
 var _msg_seen := 0
 var _stage_seen := 1
 var _boss_seen := false
+var _music_boss := false
 var _last_px := 0.0
 var _last_pz := 0.0
 
@@ -222,6 +223,7 @@ func _start_run() -> void:
 	_msg_seen = 0
 	_stage_seen = int(_run.get("stage", 1))
 	_boss_seen = false
+	_music_boss = false
 	_modal_state = ""
 	_banish_mode = false
 	_banish_pick = -1
@@ -230,7 +232,7 @@ func _start_run() -> void:
 	_hud.build(_run)
 	if _fx != null:
 		_fx.set_low_hp(1.0, false)
-	Audio.play_music("menu")
+	Audio.start_run_music()
 	Audio.play_cry(species)
 
 
@@ -286,6 +288,7 @@ func _process(delta: float) -> void:
 	_render(dt)
 	_hud.sync(_run, dt)
 	_pump_events()
+	_sync_run_music()
 	if str(_run.get("state", "play")) == "modal":
 		Audio.sfx("level")
 
@@ -389,9 +392,11 @@ func _pump_events() -> void:
 			var n := int(text.get_slice(" ", 1))
 			_hud.show_banner(App.ui("Fase {n}", {"n": n}), "击杀首领才能进入下一阶段", "#ff5a5f")
 			Audio.sfx("level")
+			_sync_run_music()
 		elif text.begins_with("boss!"):
 			_hud.show_banner("首领出现了！", text.trim_prefix("boss!"), "#e82a5a", true)
 			Audio.sfx("boss")
+			_sync_run_music()
 		elif text.begins_with("fused"):
 			_hud.show_banner("融合成功！", text.trim_prefix("fused "), "#8a5cff")
 		else:
@@ -401,6 +406,26 @@ func _pump_events() -> void:
 		_stage_seen = stage
 	if bool(_run.get("bossSpawned", false)) and not _boss_seen:
 		_boss_seen = true
+
+
+## Web `musicFor()`: boss track while a boss is alive, else the run's ingame track.
+## Mirrors its 0.5s poll at the stage/boss event points; the state flag avoids
+## restarting the same fade on every frame.
+func _sync_run_music() -> void:
+	var boss := _boss_alive()
+	if boss == _music_boss:
+		return
+	_music_boss = boss
+	Audio.play_run_music(boss)
+
+
+func _boss_alive() -> bool:
+	if not bool(_run.get("bossSpawned", false)):
+		return false
+	var index := int(_run.get("bossIndex", -1))
+	if index < 0:
+		return false
+	return PbEnemies.is_alive(PbJson.as_dict(_run.get("enemies", {})), index)
 
 
 # ------------------------------------------------------------------ render
@@ -768,6 +793,8 @@ func _finish(how: String) -> void:
 	var res := Save.handle("POST", "/runs/%s/finish" % str(_run.get("run_id", "local")), {}, {"result": result})
 	App.last_result = result
 	App.last_settle = res
+	# Web leaves the arena on toMenu, which restarts the menu/halloween track.
+	Audio.play_music("menu")
 	Audio.sfx("boss")
 	_show_settle(result, res)
 
