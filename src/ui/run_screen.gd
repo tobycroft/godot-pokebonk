@@ -404,6 +404,15 @@ func _process(delta: float) -> void:
 		_render(dt)
 		_update_modal()
 		return
+	# Evolution cinematic (PbEvo): gameplay is paused, the avatar swap already
+	# follows player.species_id in _render(), and the reveal comes through
+	# _pump_events() as a banner.
+	if str(_run.get("state", "play")) == "evolving":
+		PbRun.tick(_run, dt)
+		_render(dt)
+		_hud.sync(_run, dt)
+		_pump_events()
+		return
 	_move_input(dt)
 	PbRun.tick(_run, dt)
 	_render(dt)
