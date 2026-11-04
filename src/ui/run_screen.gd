@@ -42,13 +42,15 @@ var _shake_scale := 1.0
 var _msg_seen := 0
 var _stage_seen := 1
 var _boss_seen := false
+var _last_px := 0.0
+var _last_pz := 0.0
 
 
 func _ready() -> void:
 	_build_world()
 	_build_hud()
 	_start_run()
-	_build_terrain()
+	call_deferred("_build_terrain")
 	# QA hook (like --pb-shot): render the level-up modal immediately for screenshots.
 	if "--pb-offer-demo" in OS.get_cmdline_user_args():
 		_run["pendingLevels"] = 1
@@ -369,12 +371,16 @@ func _render(dt: float) -> void:
 		# Billboard frames: swap the texture using the PMD sheet timings.
 		var node = _player_node.get_child(0)
 		if node is MeshInstance3D:
-			var anim := "walk" if absf(player.get("x", 0.0) - px) > 0.0 else "idle"
+			# Compare against last frame's position (not px, which equals this frame's x).
+			var moved := absf(px - _last_px) > 1e-4 or absf(pz - _last_pz) > 1e-4
+			var anim := "walk" if moved else "idle"
 			var tex := PbVisuals.frame_texture(int(player.get("species_id", 1)),
 				String(anim), _time, int(player.get("facing", 2)))
 			var mat := (node as MeshInstance3D).material_override as StandardMaterial3D
 			if mat != null and tex != null:
 				mat.albedo_texture = tex
+	_last_px = px
+	_last_pz = pz
 	var pitch := float(PbData.const_of("camera.pitch", 0.45))
 	var dist := float(PbData.const_of("camera.dist", 9.0))
 	# Hit feedback: the run class carries a `trauma` value that shake() adds to.
@@ -411,13 +417,20 @@ func _render(dt: float) -> void:
 		var species := int(PbEnemies.get_field(pool, "species", i))
 		var mat := node.material_override as StandardMaterial3D
 		var tex := PbVisuals.frame_texture(species, "walk", _time + float(i) * 0.11, 1)
-		if mat != null and tex != null:
+		if tex == null:
+			# Mirror re's front/<id>.png fallback: a missing PMD sheet must show the
+			# static portrait, never an untextured (white) quad.
+			tex = PbVisuals.front_texture(species)
+		if mat != null:
 			mat.albedo_texture = tex
-			var hp_ratio := 1.0
-			var maxhp := float(PbEnemies.get_field(pool, "maxHp", i))
-			if maxhp > 0.0:
-				hp_ratio = clampf(float(PbEnemies.get_field(pool, "hp", i)) / maxhp, 0.0, 1.0)
-			mat.albedo_color = Color(1.0, 0.35 + 0.65 * hp_ratio, 0.35 + 0.65 * hp_ratio)
+			if tex != null:
+				var hp_ratio := 1.0
+				var maxhp := float(PbEnemies.get_field(pool, "maxHp", i))
+				if maxhp > 0.0:
+					hp_ratio = clampf(float(PbEnemies.get_field(pool, "hp", i)) / maxhp, 0.0, 1.0)
+				mat.albedo_color = Color(1.0, 0.35 + 0.65 * hp_ratio, 0.35 + 0.65 * hp_ratio)
+			else:
+				mat.albedo_color = PbVisuals.color_for(PbData.species(species))
 	for i in range(used, ENEMY_POOL):
 		_enemy_nodes[i].visible = false
 
