@@ -54,6 +54,8 @@ static func create(species_id: int, lab_deltas: Dictionary = {}, level: int = 1)
 		"iframes": 0.0,
 		"noHitT": 0.0,
 		"pendingLevels": 0,
+		# Player-side evo counter (bundle Ob.evoStage); incremented by PbEvo.set_species.
+		"evo_stage": 0,
 	}
 	for i in MAX_MOVES:
 		state["moves"].append(null)

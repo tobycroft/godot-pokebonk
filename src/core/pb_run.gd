@@ -89,6 +89,9 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 	PbCapture.create(state)
 	# The run's growth index follows the player's level (estimated mapping).
 	_apply_lab(state, lab_deltas)
+	# First evolution plan (bundle planEvolution @1514341). Runs have no roster
+	# mode, so this is the plain runEvolution result raised to the start level.
+	state["nextEvo"] = PbEvo.plan_evolution(actor, int(actor.get("level", 1)))
 	return state
 
 
@@ -111,7 +114,13 @@ static func _ability_weather(ability: String, base: String) -> String:
 
 ## ------------------------------------------------------------------ tick
 static func tick(state: Dictionary, dt: float) -> void:
-	if str(state.get("state", "play")) != "play":
+	var mode := str(state.get("state", "play"))
+	# Evolution cinematic (startEvolution @1543295) pauses gameplay; the 3.6s
+	# timer and the completion settlement run in PbEvo.
+	if mode == "evolving":
+		PbEvo.tick(state, dt)
+		return
+	if mode != "play":
 		return
 	var player: Dictionary = state["player"]
 	state["time"] = float(state["time"]) + dt
@@ -565,6 +574,10 @@ static func open_offers(state: Dictionary) -> void:
 		state["offers"] = []
 		state["state"] = "play"
 		return
+	# Bundle doLevelUp @1541606: an evolution consumes this level-up and no cards
+	# are offered for it.
+	if PbEvo.try_evolve(state):
+		return
 	var player: Dictionary = state["player"]
 	state["offers"] = PbCards.offer(player, 3, state["banished"])
 	state["state"] = "modal"
@@ -761,7 +774,8 @@ static func simulate(state: Dictionary, seconds: float, dt: float = 1.0 / 12.0) 
 	var steps := int(seconds / dt)
 	var log_every := int(30.0 / dt)
 	for s in steps:
-		_walk_towards_action(state, dt)
+		if str(state.get("state", "play")) != "evolving":
+			_walk_towards_action(state, dt)
 		tick(state, dt)
 		if str(state.get("state", "play")) == "modal":
 			choose_offer(state, 0)

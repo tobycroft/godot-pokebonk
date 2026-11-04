@@ -248,6 +248,9 @@ func apply_actions(actions: Array) -> void:
 				store["counters"][ckey] = int(store["counters"].get(ckey, 0)) + int(a.get("v", 1))
 			"seen":
 				store["seen"] = _union(store["seen"], [int(a.get("id", 0))])
+			"form":
+				# meta.unlockForm(id): the evolved species joins the dex form list.
+				store["forms"] = _union(store.get("forms", []), [int(a.get("id", 0))])
 			"item":
 				var ids = a.get("id", [])
 				store["itemsOwned"] = _union(store["itemsOwned"], ids if ids is Array else [ids])
