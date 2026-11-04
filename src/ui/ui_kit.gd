@@ -79,7 +79,7 @@ static func subtitle(text: String) -> Label:
 
 
 static func dim(text: String) -> Label:
-	return label(text, 13, PbTheme.ink_muted())
+	return label(text, PbTheme.font_size("small"), PbTheme.ink_muted())
 
 
 static func button(text: String, callback: Callable, big: bool = false, accent: String = "yellow", small: bool = false) -> Button:
@@ -154,7 +154,7 @@ static func chip(text: String, color: Color) -> PanelContainer:
 ## Type chip. The port is Chinese-only for now, so the label comes from the mirror's zh
 ## `types` table (草/毒/火...) and the raw id is only a fallback.
 static func type_chip(type_name: String) -> PanelContainer:
-	var label := PbData.localized_name("types", type_name)
+	var label := PbData.localized_name("types", type_name, App.locale)
 	if label.is_empty():
 		label = type_name.to_upper()
 	return chip(label, PbTheme.type_color(type_name))
@@ -294,7 +294,10 @@ static func toast(host: Control, text: String, icon: String = "") -> void:
 	contents.add_theme_constant_override("separation", 8)
 	if not icon.is_empty():
 		contents.add_child(icon_rect(icon, 28))
-	contents.add_child(label(text, 15, PbTheme.ink()))
+	# `.toast{font-size:15px;font-weight:800}` -- body_bold keeps Web's 800 weight.
+	var toast_label := label(text, 15, PbTheme.ink())
+	toast_label.add_theme_font_override("font", PbTheme.font("body_bold"))
+	contents.add_child(toast_label)
 	panel.add_child(contents)
 	row.add_child(panel)
 	stack.add_child(row)
@@ -314,7 +317,7 @@ static func screen_head(title_text: String, sub_text: String, on_back: Callable)
 	var row := hbox(16)
 	row.name = "ScrHead"
 	var back := Button.new()
-	back.text = " 返回"
+	back.text = " " + App.ui("Volver")
 	PbTheme.paint(back, "ghost")
 	back.add_theme_stylebox_override("normal", PbTheme.back_btn_style())
 	back.add_theme_stylebox_override("hover", PbTheme.back_btn_style())
@@ -332,7 +335,7 @@ static func screen_head(title_text: String, sub_text: String, on_back: Callable)
 	var plate := Control.new()
 	plate.name = "ScrTitle"
 	plate.custom_minimum_size = Vector2(0, 46)
-	var grad := PbTheme.gradient(String(PbTheme.decls(".scr-title").get("background", "")))
+	var grad := PbTheme.gradient(str(PbTheme.decls(".scr-title").get("background", "")))
 	var bg := PbWidgets.GradRect.new()
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.setup(grad, null, true)
@@ -392,11 +395,11 @@ class Segment:
 		bg.add_child(_inner)
 		for item in item_list:
 			var entry := PbJson.as_dict(item)
-			var id := String(entry.get("id", ""))
+			var id := str(entry.get("id", ""))
 			var b := Button.new()
 			b.name = "pill-" + id
 			b.flat = true
-			b.text = String(entry.get("text", id))
+			b.text = str(entry.get("text", id))
 			b.focus_mode = Control.FOCUS_NONE
 			b.pressed.connect(_on_button.bind(id))
 			_inner.add_child(b)
@@ -421,7 +424,7 @@ class Segment:
 			return
 		for c in _inner.get_children():
 			var b := c as Button
-			_repaint_button(b, String(b.name).trim_prefix("pill-") == current)
+			_repaint_button(b, str(b.name).trim_prefix("pill-") == current)
 
 	func _repaint_button(b: Button, on: bool) -> void:
 		b.add_theme_stylebox_override("normal", PbTheme.pill_seg_style(on))
@@ -466,7 +469,7 @@ static func banner(host: Control, text: String, sub_text: String = "", accent_ra
 
 	var plate := Control.new()
 	plate.custom_minimum_size = Vector2(0, 64)
-	var grad := PbTheme.gradient(String(PbTheme.decls(".banner h1").get("background", "")),
+	var grad := PbTheme.gradient(str(PbTheme.decls(".banner h1").get("background", "")),
 		{} if accent_raw.is_empty() else {"--c": accent_raw})
 	var bg := PbWidgets.GradRect.new()
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -525,11 +528,11 @@ static func anim_in_simple(node: Control, kind: String, stagger: int = 0) -> voi
 		return
 	var from := PbJson.as_dict(frames[0])
 	var scale := 1.0
-	var tr := String(from.get("transform", ""))
+	var tr := str(from.get("transform", ""))
 	var sc := RegEx.create_from_string(r"scale\(([.\d]+)\)").search(tr)
 	if sc != null:
 		scale = sc.get_string(1).to_float()
-	node.modulate.a = float(String(from.get("opacity", "1")).to_float())
+	node.modulate.a = float(str(from.get("opacity", "1")).to_float())
 	node.pivot_offset = node.get_combined_minimum_size() * 0.5
 	node.scale = Vector2(scale, scale)
 	var tw := node.create_tween()
@@ -549,7 +552,7 @@ static func fmt_num(value: float) -> String:
 		return "%.1fe%d" % [mant / 10.0, exp]
 	for pair in [[1.0e15, "Q"], [1.0e12, "T"], [1.0e9, "B"], [1.0e6, "M"]]:
 		if value >= float(pair[0]):
-			return _trim_one(value / float(pair[0])) + String(pair[1])
+			return _trim_one(value / float(pair[0])) + str(pair[1])
 	if value >= 1.0e4:
 		return _trim_one(value / 1000.0) + "k"
 	return str(int(round(value)))
@@ -653,7 +656,7 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 	var top := Control.new()
 	top.name = "Top"
 	top.custom_minimum_size = Vector2(0, 110)
-	var grad := PbTheme.gradient(String(PbTheme.decls(".card .top").get("background", "")),
+	var grad := PbTheme.gradient(str(PbTheme.decls(".card .top").get("background", "")),
 		{"--rc": "#" + rc.to_html(false)})
 	var band := PbWidgets.GradRect.new()
 	band.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -670,17 +673,17 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 	var icon := Control.new()
 	icon.set_anchors_preset(Control.PRESET_CENTER)
 	icon.name = "Icon"
-	var icon_name := String(data.get("icon_name", ""))
+	var icon_name := str(data.get("icon_name", ""))
 	if not icon_name.is_empty():
 		icon.add_child(icon_rect(icon_name, 64))
 	top.add_child(icon)
-	var rar := String(data.get("rar_text", ""))
+	var rar := str(data.get("rar_text", ""))
 	if not rar.is_empty():
 		var rar_badge := _card_pill(rar, PbTheme.css_color(PbTheme.v("--w92", "#ffffffeb"), Color(1, 1, 1, 0.92)),
 			PbTheme.ink())
 		rar_badge.position = Vector2(10, 10)
 		top.add_child(rar_badge)
-	var kind_txt := String(data.get("kind_text", ""))
+	var kind_txt := str(data.get("kind_text", ""))
 	if not kind_txt.is_empty():
 		var kind_badge := _card_pill(kind_txt, PbTheme.css_color("#2a2440bf", Color(0.16, 0.14, 0.25, 0.75)), Color.WHITE)
 		kind_badge.anchor_left = 1.0
@@ -703,21 +706,21 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 	margins.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margins.add_child(bd)
 	box.add_child(margins)
-	var h3 := title(String(data.get("title", "?")), 21)
+	var h3 := title(str(data.get("title", "?")), 21)
 	h3.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	bd.add_child(h3)
-	var sub := String(data.get("sub", ""))
+	var sub := str(data.get("sub", ""))
 	if not sub.is_empty():
 		var sl := label(sub, 13, PbTheme.ink_muted())
 		sl.add_theme_font_override("font", PbTheme.font("title_bold"))
 		bd.add_child(sl)
 	var lines: Array = PbJson.as_array(data.get("lines", []))
 	for line in lines:
-		var li := label("· " + String(line), 15, PbTheme.ink())
+		var li := label("· " + str(line), 15, PbTheme.ink())
 		li.add_theme_font_override("font", PbTheme.font("body"))
 		li.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		bd.add_child(li)
-	var affects := String(data.get("affects", ""))
+	var affects := str(data.get("affects", ""))
 	if not affects.is_empty():
 		var ap := PanelContainer.new()
 		var asb := StyleBoxFlat.new()
@@ -730,7 +733,7 @@ static func card_offer(data: Dictionary, on_pick: Callable, index: int = 0) -> C
 		ap.add_theme_stylebox_override("panel", asb)
 		ap.add_child(label(affects, 13, PbTheme.ink()))
 		bd.add_child(ap)
-	var key_txt := String(data.get("key", ""))
+	var key_txt := str(data.get("key", ""))
 	if not key_txt.is_empty():
 		var key_badge := _card_pill("[%s]" % key_txt, PbTheme.css_color("#4a4466", Color("#4a4466")), Color.WHITE)
 		key_badge.size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -796,7 +799,7 @@ static func modal_title(text: String, small: bool = false) -> Control:
 	var plate := Control.new()
 	plate.name = "ModalH1"
 	plate.custom_minimum_size = Vector2(0, 60 if not small else 44)
-	var grad := PbTheme.gradient(String(PbTheme.decls(".modal h1").get("background", "")))
+	var grad := PbTheme.gradient(str(PbTheme.decls(".modal h1").get("background", "")))
 	var bg := PbWidgets.GradRect.new()
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.setup(grad, null, true)

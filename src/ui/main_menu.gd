@@ -135,8 +135,8 @@ func _trainer_bar() -> Control:
 
 	_wallet = UI.hbox(6)
 	row.add_child(_wallet)
-	row.add_child(UI.button("存入账号", _ask_account, false, "blue", true))
-	row.add_child(UI.button("退出", _quit, false, "blue", true))
+	row.add_child(UI.button(App.ui("Guardar en cuenta"), _ask_account, false, "blue", true))
+	row.add_child(UI.button(App.ui("Salir"), _quit, false, "blue", true))
 	return bar
 
 
@@ -181,26 +181,26 @@ func _nav_column() -> Control:
 	var grid := UI.grid(2, 10)
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	nav.add_child(grid)
-	grid.add_child(UI.mm_tile("moon-stone", "生存模式", "无尽 · 迁移与首领", PbTheme.accent_color("purple", "c"), _start_endless))
-	grid.add_child(UI.mm_tile("friends", "合作模式", "与好友 2-4 人", PbTheme.accent_color("green", "c"), _todo_coop))
+	grid.add_child(UI.mm_tile("moon-stone", App.ui("Supervivencia"), "无尽 · 迁移与首领", PbTheme.accent_color("purple", "c"), _start_endless))
+	grid.add_child(UI.mm_tile("friends", App.ui("Cooperativo"), App.ui("Con amigos · 2-4"), PbTheme.accent_color("green", "c"), _todo_coop))
 	grid.add_child(UI.mm_tile("map-boss", "Lavanda 之夜", "活动 · 14 天后结束", PbTheme.accent_color("orange", "c"), _todo_event))
-	grid.add_child(UI.mm_tile("mission", "委托", "3 项 · 19 小时后刷新", PbTheme.accent_color("blue", "c"), _todo_tasks))
+	grid.add_child(UI.mm_tile("mission", App.ui("Encargos"), "3 项 · 19 小时后刷新", PbTheme.accent_color("blue", "c"), _todo_tasks))
 
 	var tiles := UI.grid(5, 8)
 	tiles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(tiles)
-	tiles.add_child(_mini_tile("globe", "图鉴", "%d/151" % int(Save.summary().get("captured", 0)),
+	tiles.add_child(_mini_tile("globe", App.ui("Pokédex"), "%d/151" % int(Save.summary().get("captured", 0)),
 		PbTheme.accent_color("blue", "c"), func(): App.goto("dex")))
-	tiles.add_child(_mini_tile("stardust", "研究所", "%d" % int(Save.summary().get("lab", 0)),
+	tiles.add_child(_mini_tile("stardust", App.ui("Laboratorio"), "%d" % int(Save.summary().get("lab", 0)),
 		PbTheme.accent_color("green", "c"), func(): App.goto("lab")))
-	tiles.add_child(_mini_tile("crown", "成就", "0/228", PbTheme.accent_color("red", "c"), _todo_achievements))
-	tiles.add_child(_mini_tile("gold", "排行", "14 d", PbTheme.accent_color("yellow", "c"), _todo_ranking))
-	tiles.add_child(_mini_tile("clan", "氏族", "无氏族", PbTheme.accent_color("purple", "c"), _todo_clan))
+	tiles.add_child(_mini_tile("crown", App.ui("Logros"), "0/228", PbTheme.accent_color("red", "c"), _todo_achievements))
+	tiles.add_child(_mini_tile("gold", App.ui("Ranking"), "14 d", PbTheme.accent_color("yellow", "c"), _todo_ranking))
+	tiles.add_child(_mini_tile("clan", App.ui("Clan"), App.ui("Sin clan"), PbTheme.accent_color("purple", "c"), _todo_clan))
 
 	var mini := UI.hbox(8)
 	box.add_child(mini)
-	mini.add_child(UI.mm_tile("brush", "设置", "", PbTheme.accent_color("blue", "c"), _open_settings))
-	mini.add_child(UI.mm_tile("bug", "反馈", "", PbTheme.accent_color("orange", "c"), _todo_report))
+	mini.add_child(UI.mm_tile("brush", App.ui("Ajustes"), "", PbTheme.accent_color("blue", "c"), _open_settings))
+	mini.add_child(UI.mm_tile("bug", App.ui("Reportar"), "", PbTheme.accent_color("orange", "c"), _todo_report))
 	mini.add_child(UI.mm_tile("chat", "Discord", "", PbTheme.accent_color("purple", "c"), _todo_discord))
 	mini.add_child(UI.mm_tile("megaphone", "Charcher", "", PbTheme.accent_color("green", "c"), _todo_dev))
 
@@ -250,7 +250,7 @@ func _play_tile() -> Control:
 
 	var tx := UI.vbox(2)
 	tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var big := UI.label("开始对局", 30, Color.WHITE)
+	var big := UI.label(App.ui("Jugar"), 30, Color.WHITE)
 	big.add_theme_font_override("font", PbTheme.font("title"))
 	tx.add_child(big)
 	_play_sub = UI.label("", 13, Color(1, 1, 1, 0.92))
@@ -281,29 +281,29 @@ func _season_card() -> Control:
 
 	var head := UI.hbox(8)
 	head.add_theme_constant_override("separation", 8)
-	var word := UI.label("赛季 2", 20, Color.WHITE)
+	var word := UI.label(App.ui("Temporada {n}", {"n": 2}), 20, Color.WHITE)
 	word.add_theme_font_override("font", PbTheme.font("title"))
 	head.add_child(word)
 	var head_sp := Control.new()
 	head_sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(head_sp)
-	head.add_child(UI.label("14 天后结束", 12, Color(1, 1, 1, 0.92)))
+	head.add_child(UI.label(App.ui("Termina en {time}", {"time": "14 d"}), 12, Color(1, 1, 1, 0.92)))
 	box.add_child(_banner(58, head))
 
 	box.add_child(UI.segment([
-		{"id": "kills", "text": "击败"},
-		{"id": "endless", "text": "生存"},
-		{"id": "race", "text": "竞速"},
-		{"id": "clans", "text": "氏族"},
+		{"id": "kills", "text": App.ui("Bajas")},
+		{"id": "endless", "text": App.ui("Supervivencia")},
+		{"id": "race", "text": App.ui("Contrarreloj")},
+		{"id": "clans", "text": App.ui("Clanes")},
 	], "kills", func(_id): _todo_ranking()))
-	box.add_child(UI.mm_tile("globe", "全球", "所有地区合计", PbTheme.accent_color("purple", "c"), _todo_ranking))
+	box.add_child(UI.mm_tile("globe", App.ui("Global"), "所有地区合计", PbTheme.accent_color("purple", "c"), _todo_ranking))
 	box.add_child(UI.dim("还没有人打过本赛季 —— 开一局就能直接进前 100。"))
 
 	var mine := UI.panel(12)
 	mine.name = "SeasonMine"
 	var mbox := UI.vbox(4)
 	mine.add_child(mbox)
-	mbox.add_child(UI.section("你的赛季"))
+	mbox.add_child(UI.section(App.ui("Tu temporada")))
 	mbox.add_child(UI.paragraph("游客不计入排行榜。", 14, PbTheme.ink(), 2))
 	box.add_child(mine)
 
@@ -312,7 +312,7 @@ func _season_card() -> Control:
 	for label_text in ["#1", "#2-3", "#4-10", "#11-25", "#26-50", "#51-100"]:
 		prizes.add_child(UI.chip(label_text, PbTheme.accent_color("yellow", "c")))
 	box.add_child(prizes)
-	box.add_child(UI.button("查看完整排行", _todo_ranking, false, "blue"))
+	box.add_child(UI.button(App.ui("Ver clasificación completa"), _todo_ranking, false, "blue"))
 	return card
 
 
@@ -363,7 +363,10 @@ func _mini_tile(icon_name: String, title_text: String, value_text: String,
 	t.add_theme_font_override("font", PbTheme.font("title"))
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(t)
-	var v := UI.dim(value_text)
+	# `.mm-tx small{font-size:12px;font-weight:800}`: body_bold keeps the weight
+	# now that PbTheme.font("body") is the 700 face.
+	var v := UI.label(value_text, PbTheme.font_size("tiny"), PbTheme.ink_muted())
+	v.add_theme_font_override("font", PbTheme.font("body_bold"))
 	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(v)
 	if on_click.is_valid():
@@ -376,8 +379,8 @@ func _legal_footer() -> Control:
 	return UI.paragraph(
 		"DigiAssault 是非官方同人作品，无广告、无内购、无盈利意图，与 Nintendo / Creatures / GAME FREAK 无关。"
 		+ "宝可梦名称与角色为各自权利所有者的商标 · © 1995-2026 · 精灵图来自 PMD SpriteCollab (CC BY-NC 4.0)。"
-		+ "移植来源：上游 Web 项目 build %s / 版本 %s" % [String(meta.get("site_build", "?")),
-		String(meta.get("site_version", "?"))],
+		+ "移植来源：上游 Web 项目 build %s / 版本 %s" % [str(meta.get("site_build", "?")),
+		str(meta.get("site_version", "?"))],
 		11, PbTheme.ink_muted(), 3)
 
 
@@ -420,12 +423,12 @@ func _settings_card() -> Control:
 	card.custom_minimum_size = Vector2(300, 0)
 	var box := UI.vbox(8)
 	card.add_child(box)
-	box.add_child(UI.subtitle("设置"))
+	box.add_child(UI.subtitle(App.ui("Ajustes")))
 
 	var settings: Dictionary = PbJson.as_dict(Save.store.get("settings", {}))
-	box.add_child(_slider_row("音乐", float(settings.get("music", 1.0)),
+	box.add_child(_slider_row(App.ui("Música"), float(settings.get("music", 1.0)),
 		func(v): _persist("music", v)))
-	box.add_child(_slider_row("音效", float(settings.get("sfx", 1.0)),
+	box.add_child(_slider_row(App.ui("Efectos"), float(settings.get("sfx", 1.0)),
 		func(v): _persist("sfx", v)))
 	box.add_child(_slider_row("镜头震动", float(settings.get("shake", 1.0)),
 		func(v): _persist("shake", v)))
@@ -433,9 +436,9 @@ func _settings_card() -> Control:
 	# .seg/.pill: aim mode as a segmented control (auto = lock nearest enemy).
 	box.add_child(UI.dim("瞄准模式"))
 	box.add_child(UI.segment([
-		{"id": "auto", "text": "自动"},
-		{"id": "manual", "text": "手动"},
-	], String(settings.get("aimMode", "auto")),
+		{"id": "auto", "text": App.ui("Automático")},
+		{"id": "manual", "text": App.ui("Manual")},
+	], str(settings.get("aimMode", "auto")),
 		func(id): _persist("aimMode", id)))
 
 	# Theme switch (web Ajustes -> Tema): light/dark design tokens.
@@ -445,18 +448,34 @@ func _settings_card() -> Control:
 	theme_sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	theme_row.add_child(theme_sp)
 	var theme_sw := PbWidgets.SwitchToggle.new()
-	theme_sw.set_pressed(String(settings.get("theme", "light")) == "dark")
+	theme_sw.set_pressed(str(settings.get("theme", "light")) == "dark")
 	theme_sw.toggled.connect(func(on): App.set_theme_mode("dark" if on else "light"))
 	theme_row.add_child(theme_sw)
 	box.add_child(theme_row)
 
-	# Language: the port is Chinese-only for now, so the web's language row is intentionally
-	# absent here rather than shown as a one-option switch.
+	# Language (web Ajustes -> Idioma del juego). The choice lives in
+	# user://pb.lang, mirroring localStorage('pokebonk.lang'); picking a value
+	# reloads the screen, which is what the web does with location.reload().
+	box.add_child(UI.dim(App.ui("Idioma del juego")))
+	var lang_row := UI.hbox(8)
+	var lang_opt := OptionButton.new()
+	lang_opt.add_item(App.ui("Automático"), 0)
+	var stored_lang := App.stored_locale()
+	for i in App.LOCALES.size():
+		var entry := PbJson.as_dict(App.LOCALES[i])
+		lang_opt.add_item(str(entry.get("name", "")), i + 1)
+		if str(entry.get("id", "")) == stored_lang:
+			lang_opt.select(i + 1)
+	lang_opt.item_selected.connect(func(idx: int):
+		var chosen := "" if idx == 0 else str(PbJson.as_dict(App.LOCALES[idx - 1]).get("id", ""))
+		App.set_locale(chosen))
+	lang_row.add_child(lang_opt)
+	box.add_child(lang_row)
 
 	box.add_child(HSeparator.new())
 	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))
 	box.add_child(UI.paragraph("来源：上游 Web 项目 build %s / 版本 %s" % [
-		String(meta.get("site_build", "?")), String(meta.get("site_version", "?"))], 12, PbTheme.ink_muted(), 2))
+		str(meta.get("site_build", "?")), str(meta.get("site_version", "?"))], 12, PbTheme.ink_muted(), 2))
 	box.add_child(UI.paragraph("公式与数据表由上游项目逆向导出，偏移坐标见 data/pb/constants.json", 12, PbTheme.ink_muted(), 2))
 	return card
 
@@ -481,14 +500,14 @@ func _slider_row(caption: String, value: float, on_change: Callable) -> Control:
 func refresh() -> void:
 	var profile: Dictionary = Save.load_profile()
 	var s := Save.summary()
-	_wallet_name.text = String(s.get("name", "?"))
+	_wallet_name.text = str(s.get("name", "?"))
 	_wallet_sub.text = "%d 场对局 · %d 个家族已捕获" % [int(s.get("runs", 0)), int(s.get("captured", 0))]
 	var portrait := "res://assets/portraits/%d.png" % _starter
 	_wallet_avatar.texture = load(portrait) as Texture2D if ResourceLoader.exists(portrait) else null
 	for c in _wallet.get_children():
 		c.queue_free()
-	_wallet.add_child(UI.stat_pill("星尘", _num(int(s.get("stardust", 0))), "yellow"))
-	_wallet.add_child(UI.stat_pill("图鉴", "%d/151" % int(s.get("captured", 0)), "orange"))
+	_wallet.add_child(UI.stat_pill(App.ui("Polvo Estelar"), _num(int(s.get("stardust", 0))), "yellow"))
+	_wallet.add_child(UI.stat_pill(App.ui("Pokédex"), "%d/151" % int(s.get("captured", 0)), "orange"))
 	if _play_sub != null:
 		_play_sub.text = "经典模式 · %d/151 在你的联盟 · 联盟 %d · 邦币 %d" % [
 			int(s.get("captured", 0)), int(s.get("league", 0)), int(s.get("bonk", 0))]
@@ -502,7 +521,7 @@ func refresh() -> void:
 		_recent.add_child(UI.dim("%s · Lv%d · %d 杀 · %.0fs · %s" % [
 			App.t("pokemon", int(rec.get("species", 0)), "#%d" % int(rec.get("species", 0))),
 			int(rec.get("level", 0)), int(rec.get("kills", 0)), float(rec.get("time", 0.0)),
-			"胜利" if bool(rec.get("victory", false)) else "失败"]))
+			App.ui("Victoria") if bool(rec.get("victory", false)) else App.ui("Derrota")]))
 	_show_starter(int(profile.get("starter", 0)) if int(profile.get("starter", 0)) > 0 else _starter)
 	if _play_sprite != null and is_instance_valid(_play_sprite):
 		_play_sprite.setup(_starter, "idle")
@@ -524,7 +543,7 @@ func _build_settings_modal() -> void:
 	_settings_scrim.add_child(col)
 	var head := UI.hbox(10)
 	col.add_child(head)
-	var title := UI.modal_title("设置", false)
+	var title := UI.modal_title(App.ui("Ajustes"), false)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
 	head.add_child(UI.button("关闭 (Esc)", _close_settings, false, "ghost", true))
@@ -601,14 +620,14 @@ func _show_starter(species_id: int) -> void:
 		return
 	if _showcase_sprite != null and is_instance_valid(_showcase_sprite):
 		_showcase_sprite.setup(species_id, "walk", 4.0, 2)
-	_showcase_name.text = "%d. %s" % [species_id, String(species.get("name", "?"))]
+	_showcase_name.text = "%d. %s" % [species_id, str(species.get("name", "?"))]
 	_showcase_meta.text = "种族值 %d · %s · 捕获率 %d · %s" % [
 		int(species.get("bst", 0)), "闪光" if bool(species.get("mythical", false)) else "普通",
-		int(species.get("captureRate", 0)), String(species.get("color", ""))]
+		int(species.get("captureRate", 0)), str(species.get("color", ""))]
 	for c in _showcase_types.get_children():
 		c.queue_free()
 	for t in PbJson.as_array(species.get("types", [])):
-		_showcase_types.add_child(UI.type_chip(String(t)))
+		_showcase_types.add_child(UI.type_chip(str(t)))
 	for c in _stat_grid.get_children():
 		c.queue_free()
 	var stats := PbJson.as_dict(species.get("stats", {}))
@@ -617,7 +636,7 @@ func _show_starter(species_id: int) -> void:
 		_stat_grid.add_child(UI.dim(key.to_upper()))
 		_stat_grid.add_child(UI.label(str(int(stats.get(key, 0))), 15))
 		_stat_grid.add_child(UI.label("实时", 11))
-		_stat_grid.add_child(UI.label(_derived_for(String(key), derived), 13))
+		_stat_grid.add_child(UI.label(_derived_for(str(key), derived), 13))
 	for c in _moves_box.get_children():
 		c.queue_free()
 	var slots := 0
@@ -629,8 +648,8 @@ func _show_starter(species_id: int) -> void:
 			continue
 		slots += 1
 		_moves_box.add_child(UI.dim("%d. %s  [%s · %s] 伤害 %.1f · 冷却 %.2fs · 段数 %d" % [
-			slots, String(def.get("name", "?")), String(def.get("type", "")),
-			String(def.get("arch", "")), float(def.get("dmg", 0.0)),
+			slots, str(def.get("name", "?")), str(def.get("type", "")),
+			str(def.get("arch", "")), float(def.get("dmg", 0.0)),
 			float(def.get("cd", 0.0)), int(def.get("count", 1))]))
 	Audio.play_cry(species_id)
 
@@ -720,7 +739,7 @@ func _open_starter_picker() -> void:
 	var foot := UI.hbox(8)
 	foot.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(foot)
-	foot.add_child(UI.button("返回", func():
+	foot.add_child(UI.button(App.ui("Volver"), func():
 		if _picker != null and is_instance_valid(_picker):
 			_picker.queue_free()
 		_picker = null, false, "ghost"))
@@ -736,7 +755,7 @@ func _sp_card(species_id: int) -> Control:
 	card.focus_mode = Control.FOCUS_NONE
 	card.custom_minimum_size = Vector2(240, 320)
 	var s := PbTheme.stylebox(".card", {"rc": "#" + PbTheme.type_color(
-		String(PbJson.as_array(species.get("types", ["normal"]))[0])).to_html(false)})
+		str(PbJson.as_array(species.get("types", ["normal"]))[0])).to_html(false)})
 	card.add_theme_stylebox_override("normal", s)
 	card.add_theme_stylebox_override("hover", s)
 	card.add_theme_stylebox_override("pressed", s)
@@ -749,7 +768,7 @@ func _sp_card(species_id: int) -> Control:
 	var show := Control.new()
 	show.name = "LsShow"
 	show.custom_minimum_size = Vector2(0, 200)
-	var rc := PbTheme.type_color(String(PbJson.as_array(species.get("types", ["normal"]))[0]))
+	var rc := PbTheme.type_color(str(PbJson.as_array(species.get("types", ["normal"]))[0]))
 	var band := PbWidgets.GradRect.new()
 	band.set_anchors_preset(Control.PRESET_FULL_RECT)
 	band.setup({"type": "linear", "angle": 135.0, "stops": [
@@ -759,7 +778,7 @@ func _sp_card(species_id: int) -> Control:
 	sprite.setup(species_id, "idle", 2.0)
 	sprite.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	show.add_child(sprite)
-	var stamp := UI.chip("就选你了！", PbTheme.accent_color("red", "c"))
+	var stamp := UI.chip(App.ui("¡Te elijo a ti!"), PbTheme.accent_color("red", "c"))
 	stamp.name = "LsStamp"
 	stamp.visible = false
 	stamp.position = Vector2(24, 150)
@@ -773,17 +792,17 @@ func _sp_card(species_id: int) -> Control:
 		margins.add_theme_constant_override(side, 14)
 	margins.add_child(info)
 	box.add_child(margins)
-	var name_l := UI.title("%d. %s" % [species_id, String(species.get("name", "?"))], 20)
+	var name_l := UI.title("%d. %s" % [species_id, str(species.get("name", "?"))], 20)
 	info.add_child(name_l)
 	var types := UI.hbox(4)
 	info.add_child(types)
 	for t in PbJson.as_array(species.get("types", [])):
-		types.add_child(UI.type_chip(String(t)))
+		types.add_child(UI.type_chip(str(t)))
 	var first := ""
 	var moves: Array = PbJson.as_array(PbActor.create(species_id).get("moves", []))
 	for raw in moves:
 		if raw != null:
-			first = String(PbJson.as_dict(PbJson.as_dict(raw).get("def", {})).get("name", ""))
+			first = str(PbJson.as_dict(PbJson.as_dict(raw).get("def", {})).get("name", ""))
 			break
 	if not first.is_empty():
 		info.add_child(UI.dim("初始招式：%s" % first))
@@ -803,9 +822,9 @@ func _confirm_starter(species_id: int, stamp: Control) -> void:
 		var tw := stamp.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tw.tween_property(stamp, "scale", Vector2.ONE, 0.35)
 	var species := PbData.species(species_id)
-	var nm := String(species.get("name", "?"))
+	var nm := App.t("pokemon", species_id, str(species.get("name", "?")))
 	Audio.play_cry(species_id, 0.9)
-	var modal := UI.modal_shell("选择 %s？" % nm, true)
+	var modal := UI.modal_shell(App.ui("¿Elegir a {name}?", {"name": nm}), true)
 	var scrim: PanelContainer = modal["scrim"]
 	var body: VBoxContainer = modal["body"]
 	add_child(scrim)
@@ -814,9 +833,9 @@ func _confirm_starter(species_id: int, stamp: Control) -> void:
 	var row := UI.hbox(10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	body.add_child(row)
-	row.add_child(UI.button("返回重选", func():
+	row.add_child(UI.button(App.ui("Volver a elegir"), func():
 		scrim.queue_free(), false, "ghost"))
-	row.add_child(UI.button("确认选择 %s" % nm, func():
+	row.add_child(UI.button(App.ui("Sí, elijo a {name}", {"name": nm}), func():
 		_set_starter(species_id)
 		scrim.queue_free()
 		if _picker != null and is_instance_valid(_picker):

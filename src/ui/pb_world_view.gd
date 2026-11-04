@@ -218,7 +218,7 @@ func _hex_color(value: Variant, fallback: int = 0xffffff) -> Color:
 
 
 func _detail_index() -> int:
-	match String(palette.get("ground", "")):
+	match str(palette.get("ground", "")):
 		"sand":
 			return 1
 		"snow":
@@ -232,7 +232,7 @@ func _terrain_material() -> ShaderMaterial:
 	var shader := load(TERRAIN_SHADER) as Shader
 	terrain_mat = ShaderMaterial.new()
 	terrain_mat.shader = shader
-	var biome_id := String(biome.get("id", "forest"))
+	var biome_id := str(biome.get("id", "forest"))
 	var light := PbJson.as_float(biome.get("light"), 1.0)
 	var block: Array = PbJson.as_array(palette.get("block"))
 	var shore: Array = PbJson.as_array(palette.get("shore"))
@@ -302,7 +302,7 @@ func _build_props() -> void:
 	var sprites: Dictionary = PbJson.as_dict(atlas.get("sprites"))
 	var atlas_w := PbJson.as_float(atlas.get("w"), 2048.0)
 	var atlas_h := PbJson.as_float(atlas.get("h"), 128.0)
-	var biome_id := String(biome.get("id", "forest"))
+	var biome_id := str(biome.get("id", "forest"))
 	var tex := _env_texture("res://assets/env/%s/atlas.png" % biome_id, Color(1, 1, 1, 0))
 	var verts := PackedVector3Array()
 	var uvs := PackedVector2Array()
@@ -317,7 +317,7 @@ func _build_props() -> void:
 	var light := PbJson.as_float(biome.get("light"), 1.0)
 	for p in terrain.props:
 		var kind: Dictionary = p["kind"]
-		var name := String(kind.get("name", ""))
+		var name := str(kind.get("name", ""))
 		if kind.has("model"):
 			continue          # real .glb props are placed by _build_models()
 		var rect: Dictionary = PbJson.as_dict(sprites.get(name))
@@ -559,7 +559,7 @@ func apply_look() -> void:
 	terrain_mat.set_shader_parameter("u_fog_near", float(_look.get("near", 45.0)))
 	terrain_mat.set_shader_parameter("u_fog_far", float(_look.get("far", 170.0)))
 	terrain_mat.set_shader_parameter("u_sun_col", sun)
-	terrain_mat.set_shader_parameter("u_shadow_col", _shadow_tint(String(biome.get("id", ""))) * (0.72 * light + 0.08))
+	terrain_mat.set_shader_parameter("u_shadow_col", _shadow_tint(str(biome.get("id", ""))) * (0.72 * light + 0.08))
 	if prop_mat != null:
 		prop_mat.set_shader_parameter("u_fog_col", fog)
 		prop_mat.set_shader_parameter("u_fog_near", float(_look.get("near", 45.0)))
@@ -623,7 +623,7 @@ func place_models() -> int:
 		var kind: Dictionary = p["kind"]
 		if not kind.has("model"):
 			continue
-		var path := "res://assets/models/%s.glb" % String(kind["model"])
+		var path := "res://assets/models/%s.glb" % str(kind["model"])
 		if not ResourceLoader.exists(path):
 			continue
 		var packed = load(path)

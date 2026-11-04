@@ -17,8 +17,8 @@ func _ready() -> void:
 	var root := UI.content(scr, 18)
 
 	# .scr-head: back pill (Esc) + striped title plate (web screen chrome).
-	root.add_child(UI.screen_head("研究所", "Laboratorio · 永久强化", func(): App.back_to_menu()))
-	root.add_child(UI.paragraph("永久强化，每局生效。花费 = 10 ×(当前等级+1)，与 web 版 api-core 一致。", 13, PbTheme.ink_muted(), 1))
+	root.add_child(UI.screen_head(App.ui("Laboratorio"), App.ui("Mejoras permanentes de estadísticas"), func(): App.back_to_menu()))
+	root.add_child(UI.paragraph(App.ui("Mejoras permanentes: valen para todas tus partidas y todos tus Pokémon. Arriba, Entrenamiento (daño, PS, velocidad…); abajo, el equipo de partida. Cada nivel cuesta más que el anterior."), 13, PbTheme.ink_muted(), 1))
 	_stardust = UI.label("", 18, PbTheme.accent_color("blue", "cd"))
 	_stardust.add_theme_font_override("font", PbTheme.font("title"))
 	root.add_child(_stardust)
@@ -30,7 +30,7 @@ func _ready() -> void:
 	sc.add_child(grid)
 	for row in Save.lab_table():
 		var entry := PbJson.as_dict(row)
-		grid.add_child(_card(String(entry["id"]), int(entry["max"]), grid.get_child_count() - 1))
+		grid.add_child(_card(str(entry["id"]), int(entry["max"]), grid.get_child_count() - 1))
 
 	var footer := UI.hbox(8)
 	root.add_child(footer)
@@ -64,7 +64,7 @@ func _card(id: String, max_rank: int, index: int) -> Control:
 	top.custom_minimum_size = Vector2(0, 40)
 	var band := PbWidgets.GradRect.new()
 	band.set_anchors_preset(Control.PRESET_FULL_RECT)
-	band.setup(PbTheme.gradient(String(PbTheme.decls(".lab-top").get("background", "")),
+	band.setup(PbTheme.gradient(str(PbTheme.decls(".lab-top").get("background", "")),
 		{"--c": "#" + accent.to_html(false)}), null, true)
 	top.add_child(band)
 	v.add_child(top)
@@ -83,7 +83,7 @@ func _card(id: String, max_rank: int, index: int) -> Control:
 	name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.add_child(name_l)
 
-	var rank := UI.chip("Lv 0/%d" % max_rank, accent)
+	var rank := UI.chip(App.ui("Nv. {n}/{max}", {"n": 0, "max": max_rank}), accent)
 	rank.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	body.add_child(rank)
 
@@ -91,7 +91,7 @@ func _card(id: String, max_rank: int, index: int) -> Control:
 	cost.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	body.add_child(cost)
 
-	var buy := UI.button("升级", func(): _buy(id), false, "purple")
+	var buy := UI.button(App.ui("Comprar"), func(): _buy(id), false, "purple")
 	buy.custom_minimum_size = Vector2(0, 34)
 	body.add_child(buy)
 
@@ -116,11 +116,11 @@ func _buy(id: String) -> void:
 	var res := Save.lab_buy(id)
 	if not bool(res.get("ok", false)):
 		Audio.sfx("deny")
-		match String(res.get("error", "")):
+		match str(res.get("error", "")):
 			"MAX":
-				UI.toast(self, "%s 已满级" % id)
+				UI.toast(self, App.ui("MÁX."))
 			"NO_STARDUST":
-				UI.toast(self, "星尘不足")
+				UI.toast(self, App.ui("No tienes Polvo Estelar suficiente."))
 	else:
 		Audio.sfx("level")
 		# CSS @keyframes bought: scale .92 -> 1.06 -> 1.
@@ -136,20 +136,21 @@ func _buy(id: String) -> void:
 
 
 func refresh() -> void:
-	_stardust.text = "星尘 / Polvo estelar: %d    邦币 / Bonk: %d" % [
-		int(Save.store.get("stardust", 0)), int(Save.store.get("bonk", 0))]
+	_stardust.text = "%s: %d    %s: %d" % [
+		App.ui("Polvo Estelar"), int(Save.store.get("stardust", 0)),
+		"Bonk", int(Save.store.get("bonk", 0))]
 	var wallet := int(Save.store.get("stardust", 0))
 	for id in _rows.keys():
 		var entry: Dictionary = _rows[id]
 		var rank := Save.lab(id)
 		var max_rank := int(entry["max"])
 		var rank_chip := _chip_label(entry["rank"])
-		rank_chip.text = "Lv %d/%d" % [rank, max_rank]
+		rank_chip.text = App.ui("Nv. {n}/{max}", {"n": rank, "max": max_rank}) if rank < max_rank else App.ui("MÁX.")
 		var cost := 10 * (rank + 1)
 		var maxed := rank >= max_rank
 		var afford := wallet >= cost
 		var cost_chip := _chip_label(entry["cost"])
-		cost_chip.text = "已满级" if maxed else "%d 星尘" % cost
+		cost_chip.text = App.ui("MÁX.") if maxed else App.ui("{n} de Polvo Estelar", {"n": cost})
 		# .kind.price.ok / .kind.price.no colouring by affordability.
 		var price_col := PbTheme.ink_muted()
 		if maxed:
@@ -171,12 +172,12 @@ func _chip_label(chip: Control) -> Label:
 
 func _name(id: String) -> String:
 	var names := {
-		"slot-move": "第 4 个招式槽", "slot-vit": "维生素槽 +1",
-		"reroll": "重掷选项", "skip": "跳过选项", "banish": "禁用选项",
-		"dmg": "伤害", "hp": "生命", "spd": "移动速度", "xp": "经验获取",
-		"gold": "金币", "luck": "幸运", "magnet": "拾取范围", "regen": "回复",
-		"armor": "护甲", "revive": "初始复活", "research": "研究加成",
-		"party": "同伴槽", "area": "范围", "atkspd": "攻击速度", "ult": "终极技",
-		"bag": "背包",
+		"slot-move": "4.º movimiento", "slot-vit": "Huecos de vitamina",
+		"reroll": "Refrescar", "skip": "Saltar", "banish": "Desterrar",
+		"dmg": "Daño", "hp": "PS máx.", "spd": "Velocidad", "xp": "Experiencia",
+		"gold": "Pokédólares", "luck": "Suerte", "magnet": "Recogida", "regen": "Regeneración",
+		"armor": "Armadura", "revive": "Revivir", "research": "Investigación",
+		"party": "Equipo de apoyo", "area": "Área", "atkspd": "Velocidad de ataque", "ult": "Ultimate",
+		"crit": "Crítico", "bag": "Mochila",
 	}
-	return "%s  (%s)" % [String(names.get(id, id)), id]
+	return App.ui(str(names.get(id, id)))

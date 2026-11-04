@@ -23,7 +23,10 @@ func _ready() -> void:
 	var column := UI.content(root, 18)
 
 	# .scr-head: back pill (Esc) + the skewed striped title plate.
-	column.add_child(UI.screen_head("图鉴", "Pokédex · 151 de Kanto", func(): App.back_to_menu()))
+	var captured_now: Array = PbJson.as_array(Save.store.get("captured", []))
+	column.add_child(UI.screen_head(App.ui("Pokédex"),
+		App.ui("{n}/{total} vistos", {"n": captured_now.size(), "total": PbData.kanto_ids().size()}),
+		func(): App.back_to_menu()))
 
 	var row := UI.hbox(14)
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -40,7 +43,7 @@ func _ready() -> void:
 	left.add_child(UI.segment(gen_items, str(_gen), func(id): _set_gen(int(id))))
 
 	# .dx-search: a .field that filters by name or dex number.
-	_search = UI.field("搜索名称或编号…")
+	_search = UI.field(App.ui("Buscar Pokémon…"))
 	_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_search.text_changed.connect(func(t): _query = t.strip_edges(); _rebuild_grid())
 	left.add_child(_search)
@@ -84,7 +87,7 @@ func _matching_ids() -> Array:
 	var out := []
 	for id in ids:
 		var species := PbData.species(int(id))
-		var name := String(species.get("name", "")).to_lower()
+		var name := str(species.get("name", "")).to_lower()
 		if (numeric and int(q) == int(id)) or (not numeric and name.contains(q)):
 			out.append(id)
 	return out
@@ -105,15 +108,26 @@ func _tile(species_id: int, captured: bool) -> Button:
 	b.name = "Tile%d" % species_id
 	b.custom_minimum_size = Vector2(84, 84)
 	b.focus_mode = Control.FOCUS_NONE
-	var rc := PbTheme.type_color(String(PbJson.as_array(species.get("types", ["normal"]))[0]))
-	var s := PbTheme.stylebox(".dx-tile", {"--c": "#" + rc.to_html(false)})
+	var rc := PbTheme.type_color(str(PbJson.as_array(species.get("types", ["normal"]))[0]))
+	var bg_sel := ".dx-tile"
+	var bg_vars := {"--c": "#" + rc.to_html(false)}
 	if not captured:
-		s = PbTheme.stylebox(".dx-tile.unk")
+		bg_sel = ".dx-tile.unk"
+		bg_vars = {}
+	var s := PbTheme.stylebox(bg_sel, bg_vars)
 	b.add_theme_stylebox_override("normal", s)
 	b.add_theme_stylebox_override("hover", s)
 	b.add_theme_stylebox_override("pressed", s)
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.tooltip_text = "%d %s" % [species_id, String(species.get("name", ""))]
+	b.tooltip_text = "%d %s" % [species_id, App.t("pokemon", species_id, str(species.get("name", "")))]
+	# M-13: .dx-tile / .dx-tile.unk paint a radial / linear gradient, which a
+	# StyleBoxFlat cannot express; the theme now returns a transparent box and the
+	# gradient is drawn explicitly behind the tile content.
+	var grad := PbWidgets.GradRect.new()
+	grad.set_anchors_preset(Control.PRESET_FULL_RECT)
+	grad.corner = float(PbTheme.radius_tile())
+	grad.setup(PbTheme.gradient(PbTheme.rule(bg_sel), bg_vars), null, false)
+	b.add_child(grad)
 	var v := UI.vbox(0)
 	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	b.add_child(v)
@@ -147,30 +161,32 @@ func _show(species_id: int) -> void:
 	var title_col := UI.vbox(4)
 	title_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	head.add_child(title_col)
-	var h := UI.title("%d. %s" % [species_id, String(species.get("name", "?"))], 24)
+	var h := UI.title("%d. %s" % [species_id, App.t("pokemon", species_id, str(species.get("name", "?")))], 24)
 	title_col.add_child(h)
 	var types := UI.hbox(4)
 	types.name = "DxTypes"
 	title_col.add_child(types)
 	for t in PbJson.as_array(species.get("types", [])):
-		types.add_child(UI.type_chip(String(t)))
-	title_col.add_child(UI.dim("家族 %d · 进化自 %s · 捕获率 %d · %s" % [
-		int(species.get("family", species_id)),
+		types.add_child(UI.type_chip(str(t)))
+	title_col.add_child(UI.dim("%s · ← %s · %d · %s" % [
+		App.ui("{n} familias", {"n": int(species.get("family", species_id))}),
 		"—" if species.get("evoFrom") == null else str(int(species["evoFrom"])),
-		int(species.get("captureRate", 0)), String(species.get("color", ""))]))
+		int(species.get("captureRate", 0)), str(species.get("color", ""))]))
 
-	var flavor := String(species.get("flavor", ""))
+	var flavor := App.t("flavor", species_id, str(species.get("flavor", "")))
 	if not flavor.is_empty():
 		_detail.add_child(UI.paragraph(flavor, 13, PbTheme.ink_muted(), 2))
 
 	# .dx-bar six-stat bars (value -> bar width, coloured by magnitude)
 	_detail.add_child(HSeparator.new())
-	_detail.add_child(UI.section("种族值"))
+	_detail.add_child(UI.section(App.ui("Estadísticas base")))
 	var stats := PbJson.as_dict(species.get("stats", {}))
 	var bar_col := UI.vbox(3)
 	_detail.add_child(bar_col)
+	var stat_labels := {"hp": "PS", "atk": "Ataque", "def": "Defensa",
+		"spa": "At. Esp.", "spd": "Def. Esp.", "spe": "Velocidad"}
 	for key in ["hp", "atk", "def", "spa", "spd", "spe"]:
-		bar_col.add_child(_stat_row(key.to_upper(), int(stats.get(key, 0))))
+		bar_col.add_child(_stat_row(App.ui(str(stat_labels[key])), int(stats.get(key, 0))))
 	var bst := int(species.get("bst", 0))
 	bar_col.add_child(_stat_row("BST", bst, 720.0, PbTheme.accent_color("purple", "c")))
 
@@ -184,12 +200,12 @@ func _show(species_id: int) -> void:
 
 	# .dx-ms learnable moves with dps bars
 	_detail.add_child(HSeparator.new())
-	_detail.add_child(UI.section("可学招式（实时解析，前 12 项）"))
+	_detail.add_child(UI.section(App.ui("Ataques")))
 	var actor := PbActor.create(species_id)
 	var moves := PbMoves.learnable_moves(species_id)
 	var scored := []
 	for key in moves:
-		var def := PbMoves.resolve(String(key))
+		var def := PbMoves.resolve(str(key))
 		if def.is_empty():
 			continue
 		var built := PbDamage.move_instance(def, PbActor.actor_for_damage(actor), 1)
@@ -202,7 +218,8 @@ func _show(species_id: int) -> void:
 		_detail.add_child(_move_row(PbJson.as_dict(scored[i]["def"]), float(scored[i]["dps"]) / max_dps))
 	var best := PbMoves.best_move_for(species_id)
 	if not best.is_empty():
-		_detail.add_child(UI.label("自动招牌招式: %s" % PbMoves.resolve(best).get("name", best), 15))
+		var best_def := PbMoves.resolve(best)
+		_detail.add_child(UI.label(App.t("moves", int(best_def.get("id", 0)), str(best_def.get("name", best))), 15))
 	Audio.play_cry(species_id)
 
 
@@ -253,12 +270,12 @@ func _move_row(def: Dictionary, dps_ratio: float) -> Control:
 	panel.add_theme_stylebox_override("panel", PbTheme.stylebox(".dx-ms"))
 	var row := UI.hbox(10)
 	panel.add_child(row)
-	row.add_child(UI.type_chip(String(def.get("type", "normal"))))
+	row.add_child(UI.type_chip(str(def.get("type", "normal"))))
 	var col := UI.vbox(2)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(col)
 	col.add_child(UI.label("%s  [%s]  dmg %.1f cd %.2fs" % [
-		String(def.get("name", "?")), String(def.get("arch", "")),
+		App.t("moves", int(def.get("id", 0)), str(def.get("name", "?"))), str(def.get("arch", "")),
 		float(def.get("dmg", 0.0)), float(def.get("cd", 0.0))], 13, PbTheme.ink()))
 	var bar := Control.new()
 	bar.custom_minimum_size = Vector2(0, 5)
@@ -270,7 +287,7 @@ func _move_row(def: Dictionary, dps_ratio: float) -> Control:
 	track.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bar.add_child(track)
 	var fill := ColorRect.new()
-	fill.color = PbTheme.type_color(String(def.get("type", "normal")))
+	fill.color = PbTheme.type_color(str(def.get("type", "normal")))
 	fill.custom_minimum_size = Vector2(0, 5)
 	fill.size = Vector2(200 * clampf(dps_ratio, 0.0, 1.0), 5)
 	bar.add_child(fill)

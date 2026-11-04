@@ -152,12 +152,12 @@ func _build_hud() -> void:
 	_layer.add_child(_settle_scrim)
 	UI.fill(_settle_scrim)
 
-	var pause := UI.modal_shell("已暂停", true)
+	var pause := UI.modal_shell(App.ui("En pausa"), true)
 	var pause_scrim: PanelContainer = pause["scrim"]
 	var pause_body: VBoxContainer = pause["body"]
 	var prow := UI.hbox(8)
 	prow.alignment = BoxContainer.ALIGNMENT_CENTER
-	prow.add_child(UI.button("继续", func(): _toggle_pause()))
+	prow.add_child(UI.button(App.ui("Continuar"), func(): _toggle_pause()))
 	prow.add_child(UI.button("结束本局", func():
 		_toggle_pause()
 		_finish("exit"), false, "red"))
@@ -179,10 +179,10 @@ func _toggle_pause() -> void:
 func _toggle_aim() -> void:
 	# re keymap: aim = KeyQ. Flip the run's aim mode the way the web toggles auto/manual
 	# acquisition (PbRun._tick_player reads state.aimMode every frame, pb_run.gd:265).
-	var cur := String(_run.get("aimMode", "auto"))
+	var cur := str(_run.get("aimMode", "auto"))
 	var next := "manual" if cur == "auto" else "auto"
 	_run["aimMode"] = next
-	_hud.notify("瞄准模式：%s" % ("自动" if next == "auto" else "手动"))
+	_hud.notify(App.ui("Apuntado") + ": " + (App.ui("Automático") if next == "auto" else App.ui("Manual")))
 	Audio.sfx("ui")
 
 
@@ -194,13 +194,13 @@ func _start_run() -> void:
 	var species := App.selected_species
 	if species <= 0:
 		species = 4
-	_run = PbRun.create(species, String(Save.store.get("lastBiome", "forest")),
+	_run = PbRun.create(species, str(Save.store.get("lastBiome", "forest")),
 		int(start.get("seed", 0)), Save.lab_deltas())
 	if _run.is_empty():
 		push_error("Run: could not start (unknown species %d)" % species)
 		return
-	_run["run_id"] = String(start.get("id", "run-local"))
-	_run["aimMode"] = String(settings.get("aimMode", "auto"))
+	_run["run_id"] = str(start.get("id", "run-local"))
+	_run["aimMode"] = str(settings.get("aimMode", "auto"))
 	_shake_scale = clampf(float(settings.get("shake", 1.0)), 0.0, 1.0)
 	_time = 0.0
 	_last_damage_taken = 0.0
@@ -221,7 +221,7 @@ func _start_run() -> void:
 ## Build the arena from the run's own seed + biome, so the same seed walks the same map as
 ## the web client (PbTerrain is asserted against the shipped generator, see tools/terrain_reference.mjs).
 func _build_terrain() -> void:
-	var biome_id := String(_run.get("biome", "forest"))
+	var biome_id := str(_run.get("biome", "forest"))
 	var seed_value := int(_run.get("seed", 0))
 	var biome_dict := PbData.biome(biome_id)
 	if biome_dict.is_empty():
@@ -253,7 +253,7 @@ func _process(delta: float) -> void:
 		return
 	_time += delta
 	var dt := minf(delta, 1.0 / 15.0)
-	if String(_run.get("state", "play")) == "over":
+	if str(_run.get("state", "play")) == "over":
 		_render(dt)
 		_hud.sync(_run, dt)
 		_show_settle_once()
@@ -261,7 +261,7 @@ func _process(delta: float) -> void:
 	if _paused:
 		_render(dt)
 		return
-	if String(_run.get("state", "play")) == "modal":
+	if str(_run.get("state", "play")) == "modal":
 		_render(dt)
 		_update_modal()
 		return
@@ -270,7 +270,7 @@ func _process(delta: float) -> void:
 	_render(dt)
 	_hud.sync(_run, dt)
 	_pump_events()
-	if String(_run.get("state", "play")) == "modal":
+	if str(_run.get("state", "play")) == "modal":
 		Audio.sfx("level")
 
 
@@ -314,8 +314,8 @@ func _move_input(dt: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed:
 		return
-	var modal := String(_run.get("state", "")) == "modal" and _modal_scrim.visible
-	var over := String(_run.get("state", "")) == "over"
+	var modal := str(_run.get("state", "")) == "modal" and _modal_scrim.visible
+	var over := str(_run.get("state", "")) == "over"
 	match event.keycode:
 		KEY_R:
 			# re keymap: ult/fusion = KeyR (moved off F to align with re).
@@ -367,11 +367,11 @@ func _unhandled_input(event: InputEvent) -> void:
 func _pump_events() -> void:
 	var msgs: Array = PbJson.as_array(_run.get("messages", []))
 	while _msg_seen < msgs.size():
-		var text := String(msgs[_msg_seen])
+		var text := str(msgs[_msg_seen])
 		_msg_seen += 1
 		if text.begins_with("stage"):
 			var n := int(text.get_slice(" ", 1))
-			_hud.show_banner("第 %d 阶段" % n, "击杀首领才能进入下一阶段", "#ff5a5f")
+			_hud.show_banner(App.ui("Fase {n}", {"n": n}), "击杀首领才能进入下一阶段", "#ff5a5f")
 			Audio.sfx("level")
 		elif text.begins_with("boss!"):
 			_hud.show_banner("首领出现了！", text.trim_prefix("boss!"), "#e82a5a", true)
@@ -406,7 +406,7 @@ func _render(dt: float) -> void:
 			var moved := absf(px - _last_px) > 1e-4 or absf(pz - _last_pz) > 1e-4
 			var anim := "walk" if moved else "idle"
 			var tex := PbVisuals.frame_texture(int(player.get("species_id", 1)),
-				String(anim), _time, int(player.get("facing", 2)))
+				str(anim), _time, int(player.get("facing", 2)))
 			var mat := (node as MeshInstance3D).material_override as StandardMaterial3D
 			if mat != null and tex != null:
 				mat.albedo_texture = tex
@@ -483,7 +483,7 @@ func _render(dt: float) -> void:
 ## showLevelUp() parity (bundle @2173200): h1 + .cards of .card.offer + the
 ## reroll/skip/banish actions + buildMini current-move row.
 func _update_modal() -> void:
-	if String(_run.get("state", "play")) != "modal":
+	if str(_run.get("state", "play")) != "modal":
 		_modal_scrim.visible = false
 		return
 	var token := "offers:%d" % int(_run.get("pendingLevels", 0))
@@ -504,15 +504,15 @@ func _update_modal() -> void:
 		var data := _offer_card_data(card)
 		_modal_cards.add_child(UI.card_offer(data, func(): _offer_key(i), i))
 	# .actions: btn blue/ghost/red small with counts + kbd hints, disabled at 0.
-	var reroll := UI.small_button("刷新 F (%d)" % int(_run.get("rerolls", 0)), _act_reroll, "blue")
+	var reroll := UI.small_button("F " + App.ui("Refrescar ({n})", {"n": int(_run.get("rerolls", 0))}), _act_reroll, "blue")
 	reroll.disabled = int(_run.get("rerolls", 0)) <= 0
 	reroll.add_child(_action_icon("reroll"))
 	_modal_actions.add_child(reroll)
-	var skip := UI.small_button("跳过 X (%d)" % int(_run.get("skips", 0)), _act_skip, "ghost")
+	var skip := UI.small_button("X " + App.ui("Saltar ({n})", {"n": int(_run.get("skips", 0))}), _act_skip, "ghost")
 	skip.disabled = int(_run.get("skips", 0)) <= 0
 	skip.add_child(_action_icon("skip"))
 	_modal_actions.add_child(skip)
-	var banish := UI.small_button("取消 Z" if _banish_mode else "放逐 Z (%d)" % int(_run.get("banishes", 0)),
+	var banish := UI.small_button("Z " + (App.ui("Cancelar") if _banish_mode else App.ui("Desterrar ({n})", {"n": int(_run.get("banishes", 0))})),
 		_act_banish_toggle, "red" if not _banish_mode else "ghost")
 	if not _banish_mode:
 		banish.disabled = int(_run.get("banishes", 0)) <= 0
@@ -526,13 +526,13 @@ func _update_modal() -> void:
 		var def := PbJson.as_dict(inst.get("def", {}))
 		if def.is_empty():
 			continue
-		var chip := UI.chip("%s Lv%d" % [String(def.get("name", "?")), int(inst.get("level", 1))],
-			PbTheme.type_color(String(def.get("type", "normal"))))
+		var chip := UI.chip("%s Lv%d" % [App.t("moves", int(def.get("id", 0)), str(def.get("name", "?"))), int(inst.get("level", 1))],
+			PbTheme.type_color(str(def.get("type", "normal"))))
 		_modal_mini.add_child(chip)
 	if _banish_mode:
 		# CSS .cards.banning: hue-rotate the row, outline the picked card red.
 		_modal_cards.modulate = Color(1.15, 0.9, 0.9)
-		_hud.notify("选择要放逐的卡：再点一次同一张确认")
+		_hud.notify(App.ui("Desterrar pide confirmación: pulsa la carta otra vez para desterrarla."))
 	else:
 		_modal_cards.modulate = Color.WHITE
 	Audio.sfx("level")
@@ -545,43 +545,43 @@ func _action_icon(name: String) -> Control:
 ## .card.offer payload from a PbCards card (structure per offerCard(); amounts
 ## untouched). Rarity mapping is estimated -- see PORT_STATUS.
 func _offer_card_data(card: Dictionary) -> Dictionary:
-	var kind := String(card.get("kind", "stat"))
+	var kind := str(card.get("kind", "stat"))
 	var mods: Array = PbJson.as_array(card.get("mods", []))
-	var label_text := String(card.get("label", ""))
+	var label_text := str(card.get("label", ""))
 	var out := {"lines": [], "mods": mods}
 	var rc: Color
 	var rar := 0
 	match kind:
 		"new_move":
-			var def := PbMoves.resolve(String(card.get("move_key", "")))
-			var type_name := String(def.get("type", "normal"))
+			var def := PbMoves.resolve(str(card.get("move_key", "")))
+			var type_name := str(def.get("type", "normal"))
 			rc = PbTheme.type_color(type_name)
-			out["rar_text"] = "招式"
-			out["kind_text"] = "新"
-			out["title"] = String(def.get("name", "?"))
-			out["sub"] = "%s · %s" % ["物理" if String(def.get("cls", "physical")) == "physical" else "特殊",
-				String(def.get("arch", ""))]
-			out["lines"] = [String(def.get("desc", ""))]
+			out["rar_text"] = App.ui("Movimiento")
+			out["kind_text"] = App.ui("NUEVO")
+			out["title"] = App.t("moves", int(def.get("id", 0)), str(def.get("name", "?")))
+			out["sub"] = "%s · %s" % [App.ui("Físico") if str(def.get("cls", "physical")) == "physical" else App.ui("Especial"),
+				str(def.get("arch", ""))]
+			out["lines"] = [str(def.get("desc", ""))]
 			out["icon_name"] = type_name if ResourceLoader.exists("res://assets/ui/icons/%s.png" % type_name) else "poke-ball"
 			rar = mini(4, int(roundf(float(def.get("dmg", 10.0)) / 12.0)))
 		"move_upgrade":
-			var def2 := _move_def_by_key(String(card.get("move_key", "")))
+			var def2 := _move_def_by_key(str(card.get("move_key", "")))
 			rc = PbTheme.rarity_color(rar)
-			out["rar_text"] = "强化"
+			out["rar_text"] = App.ui("MEJORA")
 			out["kind_text"] = "升级"
-			out["title"] = String(def2.get("name", card.get("move_key", "?")))
+			out["title"] = App.t("moves", int(def2.get("id", 0)), str(def2.get("name", card.get("move_key", "?"))))
 			out["sub"] = label_text
 			out["lines"] = [_mod_line(PbJson.as_dict(mods[0])) if not mods.is_empty() else label_text]
-			out["icon_name"] = String(def2.get("type", "")) if ResourceLoader.exists("res://assets/ui/icons/%s.png" % String(def2.get("type", ""))) else ""
+			out["icon_name"] = str(def2.get("type", "")) if ResourceLoader.exists("res://assets/ui/icons/%s.png" % str(def2.get("type", ""))) else ""
 		"type":
-			rc = PbTheme.type_color(String(card.get("type", "normal")))
+			rc = PbTheme.type_color(str(card.get("type", "normal")))
 			out["rar_text"] = "属性"
-			out["kind_text"] = "强化"
+			out["kind_text"] = App.ui("MEJORA")
 			out["title"] = label_text
-			out["sub"] = "%s 属性加成" % App.t("types", String(card.get("type", "")), String(card.get("type", "")))
+			out["sub"] = "%s 属性加成" % App.t("types", str(card.get("type", "")), str(card.get("type", "")))
 			for raw in mods:
 				out["lines"].append(_mod_line(PbJson.as_dict(raw)))
-			out["icon_name"] = String(card.get("type", "")) if ResourceLoader.exists("res://assets/ui/icons/%s.png" % String(card.get("type", ""))) else ""
+			out["icon_name"] = str(card.get("type", "")) if ResourceLoader.exists("res://assets/ui/icons/%s.png" % str(card.get("type", ""))) else ""
 		_:
 			var mod0 := PbJson.as_dict(mods[0]) if not mods.is_empty() else {}
 			# estimated magnitude -> rarity band (0..2), flagged as ours
@@ -589,9 +589,9 @@ func _offer_card_data(card: Dictionary) -> Dictionary:
 			rar = 0 if mag < 10.0 else (1 if mag < 18.0 else 2)
 			rc = PbTheme.rarity_color(rar)
 			out["rar_text"] = _rar_name(rar)
-			out["kind_text"] = "强化"
+			out["kind_text"] = App.ui("MEJORA")
 			out["title"] = label_text
-			out["sub"] = String(card.get("stat", ""))
+			out["sub"] = str(card.get("stat", ""))
 			for raw in mods:
 				out["lines"].append(_mod_line(PbJson.as_dict(raw)))
 	out["rc"] = rc
@@ -601,15 +601,15 @@ func _offer_card_data(card: Dictionary) -> Dictionary:
 
 
 func _rar_name(rar: int) -> String:
-	var zh := ["常见", "较少", "稀有", "史诗", "传说"]
-	return String(zh[clampi(rar, 0, zh.size() - 1)])
+	var zh := [App.ui("Común"), App.ui("Poco común"), App.ui("Raro"), App.ui("Épico"), App.ui("Legendario")]
+	return str(zh[clampi(rar, 0, zh.size() - 1)])
 
 
 func _mod_line(mod: Dictionary) -> String:
 	if mod.has("add"):
 		var v := float(mod["add"])
-		return "%s +%s" % [String(mod.get("stat", "?")), ("%d%%" % int(roundf(v * 100.0)) if absf(v) < 1.0 else str(v))]
-	return "%s ×%.2f" % [String(mod.get("stat", "?")), float(mod.get("mul", 1.0))]
+		return "%s +%s" % [str(mod.get("stat", "?")), ("%d%%" % int(roundf(v * 100.0)) if absf(v) < 1.0 else str(v))]
+	return "%s ×%.2f" % [str(mod.get("stat", "?")), float(mod.get("mul", 1.0))]
 
 
 func _move_def_by_key(key: String) -> Dictionary:
@@ -618,7 +618,7 @@ func _move_def_by_key(key: String) -> Dictionary:
 		if raw == null:
 			continue
 		var def := PbJson.as_dict(PbJson.as_dict(raw).get("def", {}))
-		if String(def.get("key", "")) == key:
+		if str(def.get("key", "")) == key:
 			return def
 	return PbMoves.resolve(key)
 
@@ -634,7 +634,7 @@ func _offer_key(index: int) -> void:
 		else:
 			_banish_pick = index
 			_outline_picked(index)
-			_hud.notify("再按一次确认放逐「%s」" % String(PbJson.as_dict(offers[index]).get("label", "?")))
+			_hud.notify("再按一次确认放逐「%s」" % str(PbJson.as_dict(offers[index]).get("label", "?")))
 			Audio.sfx("ui")
 		return
 	if PbRun.choose_offer(_run, index):
@@ -712,19 +712,19 @@ func _try_fusion() -> void:
 	if not inst.is_empty():
 		Audio.sfx("fusion")
 		var fdef := PbJson.as_dict(inst.get("def", {}))
-		_hud.show_banner("融合：%s" % String(fdef.get("name", "?")),
+		_hud.show_banner(App.ui("Fusión") + ": " + App.t("moves", int(fdef.get("id", 0)), str(fdef.get("name", "?"))),
 			"伤害 %.0f · 段数 %.1f" % [float(fdef.get("dmg", 0)),
 				float(PbJson.as_dict(fdef.get("fusion", {})).get("hits", 1))], "#8a5cff")
 
 
 # ------------------------------------------------------------------ settle
 func _finish(how: String) -> void:
-	if String(_run.get("state", "")) == "settled":
+	if str(_run.get("state", "")) == "settled":
 		return
 	var result := PbRun.finish(_run, how)
 	PbRun.result(_run)
 	_run["state"] = "settled"
-	var res := Save.handle("POST", "/runs/%s/finish" % String(_run.get("run_id", "local")), {}, {"result": result})
+	var res := Save.handle("POST", "/runs/%s/finish" % str(_run.get("run_id", "local")), {}, {"result": result})
 	App.last_result = result
 	App.last_settle = res
 	Audio.sfx("boss")
@@ -734,7 +734,7 @@ func _finish(how: String) -> void:
 func _show_settle_once() -> void:
 	if _settle_scrim.visible:
 		return
-	_finish(String(_run.get("endHow", "exit")))
+	_finish(str(_run.get("endHow", "exit")))
 
 
 ## .modal h1 + detail cards (.card.mini style) + .actions buttons.
@@ -748,17 +748,17 @@ func _show_settle(result: Dictionary, res: Dictionary) -> void:
 	var row := UI.hbox(12)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_settle_body.add_child(row)
-	row.add_child(_settle_card("结果",
-		"胜利！" if bool(result.get("victory", false)) else "失败",
-		String(result.get("endHow", "")), PbTheme.accent_color("green", "c")))
+	row.add_child(_settle_card(App.ui("Resultado"),
+		App.ui("¡Victoria!") if bool(result.get("victory", false)) else App.ui("Derrota"),
+		str(result.get("endHow", "")), PbTheme.accent_color("green", "c")))
 	row.add_child(_settle_card("战绩", "%d 阶段 · %s" % [int(result.get("stage", 0)), UI.fmt_clock(float(result.get("time", 0)))],
 		"%d 击杀 · %s 伤害 · Lv%d" % [int(result.get("kills", 0)), UI.fmt_num(float(result.get("damage", 0))),
 			int(result.get("level", 0))], PbTheme.accent_color("blue", "c")))
 	var fusions: Array = PbJson.as_array(result.get("fusions", []))
-	row.add_child(_settle_card("融合", "%d 次" % fusions.size(), ", ".join(fusions),
+	row.add_child(_settle_card(App.ui("Fusión"), "%d 次" % fusions.size(), ", ".join(fusions),
 		PbTheme.accent_color("purple", "c")))
-	row.add_child(_settle_card("奖励", "+%s 星尘" % UI.fmt_num(int(reward.get("stardust", 0))),
-		"余额 %s · 记录 %s" % [UI.fmt_num(int(Save.store.get("stardust", 0))), String(record.get("id", "?"))],
+	row.add_child(_settle_card(App.ui("Premios"), App.ui("+{n} de Polvo Estelar", {"n": UI.fmt_num(int(reward.get("stardust", 0)))}),
+		"余额 %s · 记录 %s" % [UI.fmt_num(int(Save.store.get("stardust", 0))), str(record.get("id", "?"))],
 		PbTheme.accent_color("yellow", "c")))
 	var actions := UI.hbox(8)
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER

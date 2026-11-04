@@ -23,7 +23,7 @@ func _ready() -> void:
 	UI.fill(scr)
 	var root := UI.content(scr, 18)
 
-	root.add_child(UI.screen_head("存档管理", "Gestor de guardado", func(): App.back_to_menu()))
+	root.add_child(UI.screen_head(App.ui("Guardar"), "Gestor de guardado", func(): App.back_to_menu()))
 	root.add_child(UI.paragraph("Godot 存档位置：user://pb.offline.profile.json（等价于浏览器 localStorage）", 13, PbTheme.ink_muted(), 1))
 	_summary = UI.label("", 15)
 	root.add_child(_summary)
@@ -34,11 +34,11 @@ func _ready() -> void:
 
 	var actions := UI.vbox(6)
 	row.add_child(actions)
-	actions.add_child(UI.button("立即保存", func(): _do(_save_now())))
+	actions.add_child(UI.button(App.ui("Guardar"), func(): _do(_save_now())))
 	actions.add_child(UI.button("导出到文件", func(): _do(_export_file())))
 	actions.add_child(UI.button("复制存档文本（打印到控制台）", func(): _do(_export_console())))
 	actions.add_child(UI.button("自动备份（保留最近 5 份）", func(): _do(_backup())))
-	actions.add_child(UI.button("返回主菜单", func(): App.back_to_menu(), false, "ghost"))
+	actions.add_child(UI.button(App.ui("Volver"), func(): App.back_to_menu(), false, "ghost"))
 	# Danger zone (web save-ui.js groups destructive actions below a red rule).
 	actions.add_child(HSeparator.new())
 	actions.add_child(UI.button("重置为满解锁存档", func(): _confirm_reset(true), false, "red"))
@@ -122,9 +122,9 @@ func _import_file() -> String:
 	candidates.sort()
 	if candidates.is_empty():
 		return "没有找到导出的存档文件"
-	var text := FileAccess.get_file_as_string("user://%s" % String(candidates[-1]))
+	var text := FileAccess.get_file_as_string("user://%s" % str(candidates[-1]))
 	var res := Save.import_text(text)
-	return "导入 %s → %s" % [String(candidates[-1]), res]
+	return "导入 %s → %s" % [str(candidates[-1]), res]
 
 
 func _reset(to_full: bool) -> String:
@@ -148,7 +148,7 @@ func _confirm_reset(to_full: bool) -> void:
 func refresh() -> void:
 	var s := Save.summary()
 	_summary.text = "训练家 %s · 星尘 %d · 邦币 %d · 联盟 %d · 图鉴 %d · 对局记录 %d · 距上次保存 %.0fs" % [
-		String(s.get("name", "—")), int(s.get("stardust", 0)), int(s.get("bonk", 0)),
+		str(s.get("name", "—")), int(s.get("stardust", 0)), int(s.get("bonk", 0)),
 		int(s.get("league", 0)), int(s.get("captured", 0)), int(s.get("runs", 0)),
 		Save.stale_seconds()]
 	for c in _backups.get_children():
@@ -159,10 +159,10 @@ func refresh() -> void:
 	for raw in backups.slice(0, 5):
 		var b := PbJson.as_dict(raw)
 		var sum := PbJson.as_dict(b.get("summary", {}))
-		var label := UI.dim("%s · %s · 星尘 %d" % [String(b.get("time", "?")),
-			String(sum.get("name", "?")), int(sum.get("stardust", 0))])
+		var label := UI.dim("%s · %s · 星尘 %d" % [str(b.get("time", "?")),
+			str(sum.get("name", "?")), int(sum.get("stardust", 0))])
 		_backups.add_child(label)
-		var bid := String(b.get("id", ""))
+		var bid := str(b.get("id", ""))
 		var restore_btn := UI.button("恢复这份", func(): _confirm_restore(bid), false, "blue")
 		if _pending_restore == bid:
 			restore_btn.text = "再次点击确认恢复"

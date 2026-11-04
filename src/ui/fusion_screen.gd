@@ -23,7 +23,7 @@ func _ready() -> void:
 	UI.fill(scr)
 	var root := UI.content(scr, 18)
 
-	root.add_child(UI.screen_head("融合机器", "Máquina de fusión", func(): App.back_to_menu()))
+	root.add_child(UI.screen_head(App.ui("Fusión"), "Máquina de fusión", func(): App.back_to_menu()))
 	_status = UI.dim("")
 	root.add_child(_status)
 	var row := UI.hbox(12)
@@ -35,7 +35,7 @@ func _ready() -> void:
 	row.add_child(left)
 	var lv := UI.vbox(6)
 	left.add_child(lv)
-	lv.add_child(UI.label("当前招式", 18))
+	lv.add_child(UI.label(App.ui("Ataques"), 18))
 	var actor := _actor()
 	_moves = PbJson.as_array(actor.get("moves", []))
 	for i in _moves.size():
@@ -45,14 +45,14 @@ func _ready() -> void:
 			continue
 		var def := PbJson.as_dict(PbJson.as_dict(m).get("def", {}))
 		lv.add_child(UI.label("槽 %d：%s [%s/%s] Lv%d" % [
-			i, String(def.get("name", "?")), String(def.get("type", "")),
-			String(def.get("arch", "")), int(PbJson.as_dict(m).get("level", 1))], 14))
+			i, App.t("moves", int(def.get("id", 0)), str(def.get("name", "?"))), str(def.get("type", "")),
+			str(def.get("arch", "")), int(PbJson.as_dict(m).get("level", 1))], 14))
 	lv.add_child(HSeparator.new())
 	lv.add_child(UI.button("把招式设为 8 级（可融合）", func(): _toggle_levels()))
 	var swap := UI.hbox(6)
 	lv.add_child(swap)
 	swap.add_child(UI.button("重新随机招式", func(): _reroll_moves()))
-	swap.add_child(UI.button("返回", func(): App.back_to_menu(), false, "ghost"))
+	swap.add_child(UI.button(App.ui("Volver"), func(): App.back_to_menu(), false, "ghost"))
 
 	# ---- middle: offers / catalogue
 	var mid := UI.panel(12)
@@ -60,7 +60,7 @@ func _ready() -> void:
 	row.add_child(mid)
 	var mv := UI.vbox(4)
 	mid.add_child(mv)
-	mv.add_child(UI.label("可融合组合", 18))
+	mv.add_child(UI.label(App.ui("Fusiones posibles"), 18))
 	var kind_items := []
 	for kind in ["all", "signature", "reaction", "type", "glitch"]:
 		kind_items.append({"id": kind, "text": _kind_label(kind)})
@@ -111,7 +111,7 @@ func _reroll_moves() -> void:
 			if _moves[i] != null:
 				PbJson.as_dict(_moves[i])["level"] = PbFusion.MOVE_MAX_LEVEL
 	_status.text = "宝可梦 %s · 招式等级 %s · 目录共 %d 条融合配方（签名/类型/反应/故障）" % [
-		String(actor.get("name", "?")),
+		str(actor.get("name", "?")),
 		"全部 8 级" if _max_level else "1 级（未达融合门槛）",
 		_catalogue_size(),
 	]
@@ -129,11 +129,11 @@ func _set_filter(kind: String) -> void:
 	refresh()
 
 
-## Chinese gloss for the recipe kind filter (data keys stay English).
+## Recipe-kind filter labels (web: Todos / Fusión de firma / Fusión de tipo / Reacción / Glitch).
 func _kind_label(kind: String) -> String:
-	var zh := {"all": "全部", "signature": "签名", "reaction": "反应",
-		"type": "同属性", "glitch": "故障"}
-	return String(zh.get(kind, kind))
+	var keys := {"all": "Todos", "signature": "Fusión de firma", "reaction": "Reacción",
+		"type": "Fusión de tipo", "glitch": "Glitch"}
+	return App.ui(str(keys.get(kind, kind)))
 
 
 func refresh() -> void:
@@ -144,7 +144,7 @@ func refresh() -> void:
 	for raw in offers:
 		var offer := PbJson.as_dict(raw)
 		var recipe := PbJson.as_dict(offer.get("recipe", {}))
-		if _filter != "all" and String(recipe.get("kind", "")) != _filter:
+		if _filter != "all" and str(recipe.get("kind", "")) != _filter:
 			continue
 		shown += 1
 		var names: Array = PbJson.as_array(offer.get("names", []))
@@ -157,7 +157,7 @@ func refresh() -> void:
 		# Fall back to browsing the whole recovered catalogue.
 		_catalogue_size()
 		for entry in _catalogue:
-			if _filter != "all" and String(entry.get("kind", "")) != _filter:
+			if _filter != "all" and str(entry.get("kind", "")) != _filter:
 				continue
 			_list.add_child(_recipe_card(entry, PbJson.as_array(entry.get("moves", [])),
 				func(): _preview_recipe(entry), true))
@@ -192,17 +192,17 @@ func _recipe_card(recipe: Dictionary, names: Array, on_click: Callable, ready: b
 			var plus := UI.label("+", 13, PbTheme.ink_muted())
 			plus.add_theme_font_override("font", PbTheme.font("title"))
 			row.add_child(plus)
-		var nm := UI.label(String(names[i]), 12, PbTheme.ink())
+		var nm := UI.label(str(names[i]), 12, PbTheme.ink())
 		nm.autowrap_mode = TextServer.AUTOWRAP_OFF
 		row.add_child(nm)
 	var arrow := UI.label("→", 14, PbTheme.ink())
 	arrow.add_theme_font_override("font", PbTheme.font("title"))
 	row.add_child(arrow)
-	var out := UI.label(String(recipe.get("name", "?")), 13, PbTheme.accent_color("purple", "cd"))
+	var out := UI.label(str(recipe.get("name", "?")), 13, PbTheme.accent_color("purple", "cd"))
 	out.add_theme_font_override("font", PbTheme.font("title"))
 	out.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(out)
-	row.add_child(UI.chip(_kind_label(String(recipe.get("kind", "?"))), _kind_color(String(recipe.get("kind", "")))))
+	row.add_child(UI.chip(_kind_label(str(recipe.get("kind", "?"))), _kind_color(str(recipe.get("kind", "")))))
 	if on_click.is_valid():
 		card.pressed.connect(on_click)
 	return card
@@ -210,7 +210,7 @@ func _recipe_card(recipe: Dictionary, names: Array, on_click: Callable, ready: b
 
 func _kind_color(kind: String) -> Color:
 	var m := {"signature": "purple", "type": "green", "reaction": "orange", "glitch": "red"}
-	return PbTheme.accent_color(String(m.get(kind, "blue")), "c")
+	return PbTheme.accent_color(str(m.get(kind, "blue")), "c")
 
 
 func _preview_recipe(recipe: Dictionary) -> void:
@@ -231,23 +231,23 @@ func _preview_recipe(recipe: Dictionary) -> void:
 			var arrow := UI.label("+", 16, PbTheme.ink_muted())
 			arrow.add_theme_font_override("font", PbTheme.font("title"))
 			pair.add_child(arrow)
-		pair.add_child(UI.chip(String(names[i]), PbTheme.accent_color("blue", "c")))
+		pair.add_child(UI.chip(str(names[i]), PbTheme.accent_color("blue", "c")))
 	var to := UI.label("→", 18, PbTheme.ink())
 	to.add_theme_font_override("font", PbTheme.font("title"))
 	pair.add_child(to)
-	var out_chip := UI.chip(String(fused.get("name", "?")), PbTheme.accent_color("purple", "c"))
+	var out_chip := UI.chip(str(fused.get("name", "?")), PbTheme.accent_color("purple", "c"))
 	pair.add_child(out_chip)
 
-	_preview.add_child(UI.label("★ %s" % String(fused.get("name", "?")), 20, PbTheme.ink()))
+	_preview.add_child(UI.label("★ %s" % str(fused.get("name", "?")), 20, PbTheme.ink()))
 	# .fu-types: the fused move's type chips
 	var ftypes := UI.hbox(4)
 	ftypes.name = "FuTypes"
 	_preview.add_child(ftypes)
-	ftypes.add_child(UI.type_chip(String(fused.get("type", ""))))
+	ftypes.add_child(UI.type_chip(str(fused.get("type", ""))))
 	if fused.get("type2") != null:
-		ftypes.add_child(UI.type_chip(String(fused["type2"])))
+		ftypes.add_child(UI.type_chip(str(fused["type2"])))
 	# .fu-desc
-	var desc := UI.paragraph(String(fused.get("desc", "")), 12, PbTheme.ink_muted(), 2)
+	var desc := UI.paragraph(str(fused.get("desc", "")), 12, PbTheme.ink_muted(), 2)
 	desc.name = "FuDesc"
 	_preview.add_child(desc)
 
@@ -256,7 +256,7 @@ func _preview_recipe(recipe: Dictionary) -> void:
 	var table := UI.grid(2, 3)
 	_preview.add_child(table)
 	var rows := [
-		["原型 arch", String(fused.get("arch", ""))],
+		["原型 arch", str(fused.get("arch", ""))],
 		["基础威力 dmg", "%.2f  (fusion 原型 17 × 配方 power %.2f)" % [float(fused.get("dmg", 0)), float(recipe.get("power", 1))]],
 		["冷却 cd", "%.2fs（融合下限 0.60s）" % float(built.get("cd", 0))],
 		["段数 hits", "%.1f" % float(PbJson.as_dict(fused.get("fusion", {})).get("hits", 1))],
@@ -269,8 +269,8 @@ func _preview_recipe(recipe: Dictionary) -> void:
 		["repeats 追加", "是（最多 2 次，第二次 70% 伤害）" if bool(recipe.get("repeats", false)) else "否"],
 	]
 	for r in rows:
-		table.add_child(UI.dim(String(r[0])))
-		table.add_child(UI.label(String(r[1]), 14))
+		table.add_child(UI.dim(str(r[0])))
+		table.add_child(UI.label(str(r[1]), 14))
 	_preview.add_child(HSeparator.new())
 	_preview.add_child(UI.dim("配方 key：%s · 素材：%s" % [
-		String(recipe.get("key", "")), ", ".join(PbJson.as_array(recipe.get("moves", [])))]))
+		str(recipe.get("key", "")), ", ".join(PbJson.as_array(recipe.get("moves", [])))]))

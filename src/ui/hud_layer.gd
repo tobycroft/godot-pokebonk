@@ -166,7 +166,7 @@ func _build_danger() -> Control:
 		slot.custom_minimum_size = Vector2(13, 7)
 		slot.add_theme_stylebox_override("panel", _dg_slot_style())
 		var fill := ColorRect.new()
-		fill.color = PbTheme.css_color(String(PbTheme.danger_colors()[i]), Color("#36c96a"))
+		fill.color = PbTheme.css_color(str(PbTheme.danger_colors()[i]), Color("#36c96a"))
 		fill.size = Vector2(13, 7)
 		fill.pivot_offset = Vector2(0, 0)
 		slot.add_child(fill)
@@ -221,7 +221,7 @@ func _build_tl() -> void:
 	_els["portrait"] = portrait
 	var lvl := PanelContainer.new()
 	lvl.name = "TlLvl"
-	lvl.add_theme_stylebox_override("panel", PbTheme.stylebox(".tl-lvl"))
+	lvl.add_theme_stylebox_override("panel", PbTheme.level_badge_style())
 	var lvl_row := UI.hbox(2)
 	lvl_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	lvl.add_child(lvl_row)
@@ -241,7 +241,9 @@ func _build_tl() -> void:
 	plate.position = Vector2(74, 12) # 108px medal - 34px overlap, scaled to our 84 ring
 	plate.z_index = -1 # CSS z-index: medal 2 above plate 1
 	var plate_style := PbTheme.stylebox(".tl-plate")
-	plate_style.bg_color = PbTheme.css_color(PbTheme.v("--w97", "#fffffff7"), Color(1, 1, 1, 0.97))
+	# H-18: the plate fill lives on `.tl-plate:before{background:var(--w97)}` in
+	# the stylesheet; read it through the token instead of a literal #fffffff7.
+	plate_style.bg_color = PbTheme.hud_plate()
 	plate.add_theme_stylebox_override("panel", plate_style)
 	tl.add_child(plate)
 	var pv := UI.vbox(3)
@@ -362,7 +364,7 @@ func _build_bl() -> void:
 	nms.content_margin_top = 2
 	nms.content_margin_bottom = 2
 	nm.add_theme_stylebox_override("panel", nms)
-	var nml := UI.label("融合", 11, Color.WHITE)
+	var nml := UI.label(App.ui("Fusión"), 11, Color.WHITE)
 	nml.add_theme_font_override("font", PbTheme.font("title"))
 	nm.add_child(nml)
 	ult.add_child(nm)
@@ -436,7 +438,7 @@ func _build_bl() -> void:
 	var gleft := UI.vbox(0)
 	gleft.alignment = BoxContainer.ALIGNMENT_END
 	gmain.add_child(gleft)
-	var gleft_cap := UI.dim("还需")
+	var gleft_cap := UI.dim(App.ui("Te faltan"))
 	gleft_cap.add_theme_font_size_override("font_size", 8)
 	gleft.add_child(gleft_cap)
 	var gleft_val := UI.label("", 19, PbTheme.rarity_color(3))
@@ -560,9 +562,9 @@ func sync(state: Dictionary, dt: float) -> void:
 	(_els["clock_sub"] as Label).text = "第 %d/%d 阶段" % [stage, PbRun.STAGES]
 
 	# biome + stage pips + weather
-	(_els["biome"] as Label).text = _biome_name(String(state.get("biome", "forest")))
+	(_els["biome"] as Label).text = _biome_name(str(state.get("biome", "forest")))
 	_sync_pips(stage)
-	var weather := String(state.get("weather", "clear"))
+	var weather := str(state.get("weather", "clear"))
 	var wpill := _els["weather"] as PanelContainer
 	wpill.visible = weather != "clear"
 	if weather != "clear":
@@ -583,7 +585,7 @@ func sync(state: Dictionary, dt: float) -> void:
 	(_els["level"] as Label).text = str(int(player.get("level", 1)))
 	# zh species title from the mirror's i18n table; the actor's raw name is the fallback.
 	(_els["name"] as Label).text = App.t("pokemon", int(player.get("species_id", 0)),
-		String(player.get("name", "?")))
+		str(player.get("name", "?")))
 	_sync_types(player)
 
 	# hpbar with red lag + shield overlay
@@ -629,7 +631,7 @@ func _sync_minimap(state: Dictionary, player: Dictionary) -> void:
 		if not PbEnemies.is_alive(pool, i):
 			continue
 		var types: Array = PbEnemies.types_of(pool, i)
-		var col := PbTheme.type_color(String(types[0])) if not types.is_empty() else PbTheme.type_color("normal")
+		var col := PbTheme.type_color(str(types[0])) if not types.is_empty() else PbTheme.type_color("normal")
 		var is_boss := PbEnemies.is_boss(pool, i)
 		blips.append({
 			"x": float(PbEnemies.get_field(pool, "x", i)),
@@ -647,18 +649,18 @@ func _sync_minimap(state: Dictionary, player: Dictionary) -> void:
 func _biome_name(id: String) -> String:
 	# The mirror's own region titles (zh), e.g. forest -> 青翠森林; the short names stay as the
 	# fallback so the HUD never shows a raw id when the table is unavailable.
-	var label := PbData.biome_label(id)
+	var label := PbData.biome_label(id, App.locale)
 	if not label.is_empty() and label != id:
 		return label
 	var names := {"forest": "森林", "coast": "海岸", "desert": "沙漠",
 		"glacier": "冰川", "graveyard": "墓地", "volcano": "火山"}
-	return String(names.get(id, id))
+	return str(names.get(id, id))
 
 
 func _weather_name(key: String) -> String:
-	var names := {"rain": "降雨", "sun": "烈日", "sand": "沙暴",
-		"hail": "冰雹", "fog": "浓雾", "ash": "灰烬"}
-	return String(names.get(key, key))
+	var names := {"rain": App.ui("Lluvia"), "sun": App.ui("Sol"), "sand": App.ui("Tormenta de arena"),
+		"hail": App.ui("Granizo"), "fog": App.ui("Niebla"), "ash": App.ui("Ceniza")}
+	return str(names.get(key, key))
 
 
 func _sync_pips(stage: int) -> void:
@@ -694,14 +696,14 @@ func _sync_pips(stage: int) -> void:
 
 func _sync_types(player: Dictionary) -> void:
 	var key := str(player.get("types", []))
-	if String(_els.get("types_key", "")) == key:
+	if str(_els.get("types_key", "")) == key:
 		return
 	_els["types_key"] = key
 	var types := _els["types"] as HBoxContainer
 	for c in types.get_children():
 		c.queue_free()
 	for t in PbJson.as_array(player.get("types", [])):
-		var chip := UI.type_chip(String(t))
+		var chip := UI.type_chip(str(t))
 		(chip.get_child(0) as Label).add_theme_font_size_override("font_size", 10)
 		types.add_child(chip)
 
@@ -758,11 +760,12 @@ func _sync_danger(state: Dictionary) -> void:
 			level = i
 	var cap := _els["danger_cap"] as Label
 	var colors := PbTheme.danger_colors()
-	var zh := ["安全", "普通", "危险", "很危险", "狂暴", "致命", "绝境"]
-	cap.text = String(zh[clampi(level, 0, zh.size() - 1)])
+	var zh := [App.ui("Tranquilo"), App.ui("Moderado"), App.ui("Peligroso"), App.ui("Muy peligroso"),
+		App.ui("Brutal"), App.ui("Letal"), App.ui("Imposible")]
+	cap.text = str(zh[clampi(level, 0, zh.size() - 1)])
 	cap.add_theme_color_override("font_color",
-		PbTheme.css_color(String(colors[clampi(level, 0, colors.size() - 1)]), Color("#36c96a")))
-	if String(_els.get("danger_level", "")) != str(level):
+		PbTheme.css_color(str(colors[clampi(level, 0, colors.size() - 1)]), Color("#36c96a")))
+	if str(_els.get("danger_level", "")) != str(level):
 		if level > int(_els.get("danger_prev", 0)):
 			Audio.sfx("xp", 0.6)
 		_els["danger_level"] = str(level)
@@ -817,7 +820,7 @@ func _sync_goal(state: Dictionary, stage: int) -> void:
 	elif not boss_now:
 		var species := _next_boss_species(stage)
 		(_els["kg_name"] as Label).text = App.t("pokemon", species, "#%d" % species)
-		(_els["kg_tag"] as Label).text = "阶段 %d" % stage
+		(_els["kg_tag"] as Label).text = App.ui("Fase {n}", {"n": stage})
 		var sprite := _els["kg_sprite"] as PmdSprite
 		if sprite.species_id != species:
 			sprite.setup(species, "idle", 0.36)
@@ -866,7 +869,7 @@ func _sync_pw(player: Dictionary) -> void:
 	var row := _els["pw_row"] as HBoxContainer
 	var mods := PbJson.as_array(player.get("mods", []))
 	var signature := str(mods.slice(maxi(0, mods.size() - 6)))
-	if String(_els.get("pw_key", "")) == signature:
+	if str(_els.get("pw_key", "")) == signature:
 		return
 	_els["pw_key"] = signature
 	for c in row.get_children():
@@ -875,7 +878,7 @@ func _sync_pw(player: Dictionary) -> void:
 	var recent := mods.slice(maxi(0, mods.size() - 6))
 	for raw in recent:
 		var mod := PbJson.as_dict(raw)
-		var stat := String(mod.get("stat", "?"))
+		var stat := str(mod.get("stat", "?"))
 		var delta := "×%.2f" % float(mod.get("mul", 1.0)) if mod.has("mul") else "+%.2f" % float(mod.get("add", 0.0))
 		var chip := UI.chip("%s %s" % [stat, delta], PbTheme.accent_color("blue", "c"))
 		(chip.get_child(0) as Label).add_theme_font_size_override("font_size", 10)
