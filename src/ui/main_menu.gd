@@ -1,7 +1,7 @@
 extends Control
 ## Main menu, laid out node-for-node like the web build's start screen (v0.8.34, mirrored in
 ## pokebonk-re): floating language/fullscreen pills top-left, the trainer bar top-right, the
-## PokéBonk wordmark with its BETA badge, the `.mm-item` grid (a big striped `play` tile plus
+## DigiAssault wordmark with its BETA badge, the `.mm-item` grid (a big striped `play` tile plus
 ## endless / coop / event / tasks), the five small tiles, the mini row, and the season card on
 ## the right -- all painted from the ported CSS tokens (PbTheme) over the page backdrop.
 ##
@@ -165,11 +165,11 @@ func _nav_column() -> Control:
 
 	var brand := UI.hbox(10)
 	brand.add_theme_constant_override("separation", 8)
-	var title := UI.title("PokéBonk", 58)
+	var title := UI.title("DigiAssault", 58)
 	brand.add_child(title)
 	brand.add_child(UI.chip("BETA v0.8.34", PbTheme.accent_color("red", "c")))
 	box.add_child(brand)
-	box.add_child(UI.dim("Godot 移植版 · 完全离线 · 世界与公式对齐 pokebonk-re 镜像"))
+	box.add_child(UI.dim("Godot 移植版 · 完全离线 · 数据与世界对齐上游项目镜像"))
 
 	# .mm-nav: the play tile is full width (`.mm-item.play` spans the grid), then the four
 	# mode/event tiles two-up, the five small tiles, and the mini row.
@@ -374,10 +374,10 @@ func _mini_tile(icon_name: String, title_text: String, value_text: String,
 func _legal_footer() -> Control:
 	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))
 	return UI.paragraph(
-		"PokéBonk 是非官方同人作品，无广告、无内购、无盈利意图，与 Nintendo / Creatures / GAME FREAK 无关。"
+		"DigiAssault 是非官方同人作品，无广告、无内购、无盈利意图，与 Nintendo / Creatures / GAME FREAK 无关。"
 		+ "宝可梦名称与角色为各自权利所有者的商标 · © 1995-2026 · 精灵图来自 PMD SpriteCollab (CC BY-NC 4.0)。"
-		+ "移植来源：%s build %s / %s" % [String(meta.get("ported_from_repo", "pokebonk-web")),
-		String(meta.get("site_build", "?")), String(meta.get("site_version", "?"))],
+		+ "移植来源：上游 Web 项目 build %s / 版本 %s" % [String(meta.get("site_build", "?")),
+		String(meta.get("site_version", "?"))],
 		11, PbTheme.ink_muted(), 3)
 
 
@@ -455,9 +455,9 @@ func _settings_card() -> Control:
 
 	box.add_child(HSeparator.new())
 	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))
-	box.add_child(UI.paragraph("来源：pokebonk-web build %s / 版本 %s" % [
+	box.add_child(UI.paragraph("来源：上游 Web 项目 build %s / 版本 %s" % [
 		String(meta.get("site_build", "?")), String(meta.get("site_version", "?"))], 12, PbTheme.ink_muted(), 2))
-	box.add_child(UI.paragraph("公式与数据表由 pokebonk-web/tools-re 逆向导出，偏移坐标见 data/pb/constants.json", 12, PbTheme.ink_muted(), 2))
+	box.add_child(UI.paragraph("公式与数据表由上游项目逆向导出，偏移坐标见 data/pb/constants.json", 12, PbTheme.ink_muted(), 2))
 	return card
 
 
