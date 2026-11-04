@@ -30,6 +30,35 @@ const FONT_TITLE_BOLD := "res://assets/fonts/MPLUSRounded-800.ttf"
 const FONT_BODY := "res://assets/fonts/Nunito-800.ttf"
 const FONT_BODY_REGULAR := "res://assets/fonts/Nunito-700.ttf"
 
+## The page itself is dark in both web themes: `html,body{background:#1a1630}`.
+## It is a plain declaration rather than a :root custom property, so it cannot
+## live in ui_theme.json's vars; keep the one copy here.
+const PAGE_BG := "#1a1630"
+## `.rotate-hint` / `.auth-hero`: radial-gradient(circle at 50% 40%, #3a2f7a, #1a1630)
+## -- the purple haze the shell puts over the dark base.
+const PAGE_GLOW := "#3a2f7a"
+
+## `.screen{padding:18px 24px 20px}` -- the shell's content inset (H-02..H-17).
+const SCREEN_PAD := {"top": 18, "right": 24, "bottom": 20, "left": 24}
+
+## Type scale extracted from the web rules (each value has a selector in the
+## stylesheet; rerun extract_ui_tokens.py before adding a role here).
+##   micro 10 (.mm-legal) / tiny 12 (.mm-tx small) / small 13 (.card .sub)
+##   body 16 (.field, .mm-tx) / lead 17 (h3) / card_title 19 (h2)
+##   title 21 (.tl-plate b) / screen_title 28 (.scr-title) / display 40 / banner 54
+const FONT_SCALE := {
+	"micro": 10,
+	"tiny": 12,
+	"small": 13,
+	"body": 16,
+	"lead": 17,
+	"card_title": 19,
+	"title": 21,
+	"screen_title": 28,
+	"display": 40,
+	"banner": 54,
+}
+
 ## The ported webfonts are latin subsets, so CJK (and the 中文 UI copy) needs a
 ## system fallback attached -- otherwise Han characters render as tofu boxes.
 const CJK_FALLBACKS := ["PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
@@ -42,6 +71,7 @@ static var _color_cache := {}
 static var _mode := "light"
 static var _decl_cache := {}
 static var _sb_cache := {}
+static var _warned := {}
 
 
 static func tokens() -> Dictionary:
@@ -77,7 +107,7 @@ static func mode() -> String:
 
 
 static func v(name: String, fallback: String = "") -> String:
-	return String(vars().get(name, fallback))
+	return str(vars().get(name, fallback))
 
 
 ## Parse one CSS colour token: #rgb / #rgba / #rrggbb / #rrggbbaa, plus the
@@ -195,7 +225,7 @@ static func resolve_vars(value: String) -> String:
 		var comma := _top_level_comma(inner)
 		var token := inner if comma < 0 else inner.substr(0, comma)
 		var fallback := "" if comma < 0 else inner.substr(comma + 1)
-		var replaced := String(vars().get(token.strip_edges(), fallback.strip_edges()))
+		var replaced := str(vars().get(token.strip_edges(), fallback.strip_edges()))
 		# var(--x, color-mix(...)) : fallbacks may themselves be funcs.
 		replaced = resolve_vars(replaced)
 		out = out.substr(0, idx) + replaced + out.substr(j + 1)
@@ -243,7 +273,7 @@ static func split_top_commas(s: String) -> PackedStringArray:
 
 ## One rule body from ui_theme.json `rules`, as raw CSS text ("" when absent).
 static func rule(sel: String) -> String:
-	return String(PbJson.as_dict(tokens().get("rules", {})).get(sel, ""))
+	return str(PbJson.as_dict(tokens().get("rules", {})).get(sel, ""))
 
 
 ## Parsed declarations of a rule; per-instance vars_for tokens (--c/--rc/...)
@@ -269,10 +299,10 @@ static func decls(sel: String, vars_for: Dictionary = {}) -> Dictionary:
 	var entry: Dictionary = _decl_cache[key]
 	var merged := PbJson.as_dict(entry.get("local", {}))
 	for k in vars_for:
-		merged[("--" + String(k)) if not String(k).begins_with("--") else String(k)] = vars_for[k]
+		merged[("--" + str(k)) if not str(k).begins_with("--") else str(k)] = vars_for[k]
 	var out := {}
 	for k in PbJson.as_dict(entry.get("decls", {})):
-		out[k] = _substitute(String(entry["decls"][k]), merged)
+		out[k] = _substitute(str(entry["decls"][k]), merged)
 	return out
 
 
@@ -318,8 +348,8 @@ static func _substitute(value: String, vars_for: Dictionary) -> String:
 		elif vars_for.has(token.trim_prefix("--")):
 			replacement = vars_for[token.trim_prefix("--")]
 		if replacement != null:
-			out = out.substr(0, idx) + String(replacement) + out.substr(close + 1)
-			search = idx + String(replacement).length()
+			out = out.substr(0, idx) + str(replacement) + out.substr(close + 1)
+			search = idx + str(replacement).length()
 		else:
 			# keep scanning past this token; resolve_vars handles the fallback later
 			search = close + 1
@@ -378,8 +408,8 @@ static func shadow_layers(value: String) -> Array:
 	return out
 
 
-## linear-gradient(...) -> {type,angle,stops:[{color,pos}]}. conic/radial return
-## {type,raw} so widgets can pick their own approximation (ult ring, tiles).
+## linear/radial-gradient(...) -> {type, angle|center, stops:[{color,pos}]}.
+## conic returns {type,raw} so widgets can pick their own approximation (ult ring).
 ## Values like "var(--stripes), linear-gradient(135deg, ...)" are scanned for
 ## the first non-repeating linear-gradient layer.
 static func gradient(value: String, vars_for: Dictionary = {}) -> Dictionary:
@@ -391,8 +421,9 @@ static func gradient(value: String, vars_for: Dictionary = {}) -> Dictionary:
 			return {"type": "conic", "raw": vtxt.substr(ci, _func_end(vtxt, ci) - ci + 1)}
 		if "repeating-linear-gradient(" in vtxt:
 			return {"type": "stripes", "raw": vtxt}
-		if "radial-gradient(" in vtxt:
-			return {"type": "radial", "raw": vtxt}
+		var radial := _parse_radial(vtxt)
+		if not radial.is_empty():
+			return radial
 		return {}
 	var inner := _func_args(vtxt, start)
 	var parts := split_top_commas(inner)
@@ -403,10 +434,49 @@ static func gradient(value: String, vars_for: Dictionary = {}) -> Dictionary:
 	if "deg" in first or first.begins_with("to "):
 		angle = _px(first, 180.0)
 		parts.remove_at(0)
+	return {"type": "linear", "angle": angle, "stops": _gradient_stops(parts)}
+
+
+## radial-gradient(circle at 50% 40%, c1 30%, c2) -> {type:"radial", center, stops}.
+## GradRect paints it as a vertex-coloured fan clipped to the rounded rect.
+static func _parse_radial(vtxt: String) -> Dictionary:
+	var ri := vtxt.find("radial-gradient(")
+	if ri < 0:
+		return {}
+	var parts := split_top_commas(_func_args(vtxt, ri))
+	if parts.is_empty():
+		return {}
+	var center := Vector2(0.5, 0.5)
+	var head := str(parts[0]) if parts.size() > 0 else ""
+	if head.contains(" at "):
+		var pos := head.split(" at ", false)[1].strip_edges().split(" ", false)
+		center = Vector2(_pos_fraction(pos[0]),
+				_pos_fraction(pos[1] if pos.size() > 1 else "50%"))
+		parts.remove_at(0)
+	if parts.is_empty():
+		return {}
+	return {"type": "radial", "center": center, "stops": _gradient_stops(parts)}
+
+
+## "50%" / "40px" / "center" -> 0..1 fraction of the box.
+static func _pos_fraction(txt: String) -> float:
+	var t := txt.strip_edges()
+	if t == "center":
+		return 0.5
+	var m := RegEx.create_from_string("^(-?[\\d.]+)(%|px)?").search(t)
+	if m == null:
+		return 0.5
+	if m.get_string(2) == "px":
+		return 0.5  # px needs the box size; the ported rules use percentages
+	return m.get_string(1).to_float() / 100.0
+
+
+## Stop list of a gradient's argument parts: [{color, pos(0..100)}].
+static func _gradient_stops(parts: PackedStringArray) -> Array:
 	var stops := []
 	var evenly := parts.size() - 1
 	for i in parts.size():
-		var toks := _split_top_spaces(String(parts[i]))
+		var toks := _split_top_spaces(str(parts[i]))
 		if toks.is_empty():
 			continue
 		var pos := -1.0
@@ -417,7 +487,7 @@ static func gradient(value: String, vars_for: Dictionary = {}) -> Dictionary:
 		if pos < 0.0 and evenly > 0:
 			pos = float(i) / float(evenly) * 100.0
 		stops.append({"color": css_color(toks[0], ink()), "pos": pos})
-	return {"type": "linear", "angle": angle, "stops": stops}
+	return stops
 
 
 ## Index of a `linear-gradient(` that is not `repeating-`.
@@ -487,26 +557,31 @@ static func stylebox(sel: String, vars_for: Dictionary = {}) -> StyleBoxFlat:
 		push_warning("Theme: rule %s missing in ui_theme.json (re-run extract_ui_tokens.py)" % sel)
 		var empty := StyleBoxFlat.new()
 		return empty
+	if sel.contains(":before") or sel.contains(":after"):
+		# M-13: :before/:after layers (tl-plate's plate, timer's ball halves) have
+		# no StyleBox equivalent; build them as explicit nodes instead of dropping.
+		_warn_once(sel, "pseudo-element rule cannot be a StyleBox; draw it as an "
+			+ "explicit node (see PbTheme.pseudo_rule)")
+		return StyleBoxFlat.new()
 	var s := StyleBoxFlat.new()
-	var bg_raw := String(d.get("background", d.get("background-color", "")))
-	# "background: colour; background: gradient" double-declaration: the second
-	# wins on the web, so prefer a gradient layer's end colour when present.
-	var fallback_col := css_color(bg_raw.split(";")[0], paper())
-	if bg_raw.begins_with("linear-gradient") or "linear-gradient" in bg_raw:
-		var g := gradient(bg_raw, vars_for)
-		if g.has("stops") and not g["stops"].is_empty():
-			# solid approximation = middle stop (the 60% body colour of .btn).
-			var stops: Array = g["stops"]
-			fallback_col = stops[int(stops.size() / 2)]["color"]
-	s.bg_color = fallback_col
-	var radius_txt := resolve_vars(String(d.get("border-radius", "")))
+	var bg_raw := str(d.get("background", d.get("background-color", "")))
+	if "gradient(" in bg_raw:
+		# M-13: a gradient used to silently degrade to paper() here, which is why
+		# ported tiles looked washed out. Paint nothing and point at GradRect;
+		# callers that need a fill draw the gradient explicitly.
+		_warn_once(sel, "background is a gradient; StyleBoxFlat cannot express it "
+			+ "-- layer PbWidgets.GradRect over this transparent box")
+		s.bg_color = Color(0, 0, 0, 0)
+	else:
+		s.bg_color = css_color(bg_raw.split(";")[0], paper())
+	var radius_txt := resolve_vars(str(d.get("border-radius", "")))
 	if not radius_txt.is_empty() and radius_txt != "0":
 		s.set_corner_radius_all(int(_px(radius_txt, 0.0)))
 		if _px(radius_txt) > 900.0:
 			s.corner_detail = 12
-	_apply_padding(s, resolve_vars(String(d.get("padding", ""))))
-	if d.has("box-shadow") and String(d["box-shadow"]) != "none":
-		for layer in shadow_layers(String(d["box-shadow"])):
+	_apply_padding(s, resolve_vars(str(d.get("padding", ""))))
+	if d.has("box-shadow") and str(d["box-shadow"]) != "none":
+		for layer in shadow_layers(str(d["box-shadow"])):
 			if layer["inset"]:
 				# inset 0 -2px shade -> bottom border (the chip's under-edge).
 				if absf(layer["y"]) > 0.0 and layer["blur"] <= 4.0:
@@ -526,18 +601,54 @@ static func stylebox(sel: String, vars_for: Dictionary = {}) -> StyleBoxFlat:
 				s.shadow_offset = Vector2(layer["x"], layer["y"])
 	if s.shadow_size > 0:
 		s.anti_aliasing = true
-	if d.has("border") and not String(d["border"]).begins_with("none"):
-		var b := resolve_vars(String(d["border"])).split(" ", false)
+	if d.has("border") and not str(d["border"]).begins_with("none"):
+		var b := resolve_vars(str(d["border"])).split(" ", false)
 		if b.size() >= 3:
 			s.set_border_width_all(int(_px(b[0])))
 			s.border_color = css_color(b[2], line())
-			if String(d["border"]).contains("bottom"):
+			if str(d["border"]).contains("bottom"):
 				s.border_width_top = 0
 				s.border_width_left = 0
 				s.border_width_right = 0
 	if d.has("border-color"):
-		s.border_color = css_color(String(d["border-color"]), s.border_color)
+		s.border_color = css_color(str(d["border-color"]), s.border_color)
+	# M-13: `border-bottom: 4px solid var(--c)` and friends were ignored because
+	# only the shorthand `border` was read. Apply each side independently.
+	for side in ["top", "right", "bottom", "left"]:
+		var key: String = "border-" + str(side)
+		if not d.has(key) or str(d[key]).begins_with("none"):
+			continue
+		var parts := resolve_vars(str(d[key])).split(" ", false)
+		if parts.is_empty():
+			continue
+		var width := int(_px(parts[0]))
+		var col := css_color(parts[2] if parts.size() >= 3 else "", line())
+		match side:
+			"top":
+				s.border_width_top = width
+			"right":
+				s.border_width_right = width
+			"bottom":
+				s.border_width_bottom = width
+			"left":
+				s.border_width_left = width
+		s.border_color = col
 	return s
+
+
+## One-time warning per selector: stylebox() is called per widget, so a plain
+## push_warning would spam the log once per tile/card.
+static func _warn_once(key: String, message: String) -> void:
+	if _warned.has(key):
+		return
+	_warned[key] = true
+	push_warning("Theme[%s]: %s" % [key, message])
+
+
+## Declarations of a pseudo-element rule (`sel:before` / `sel:after`), for the
+## widgets that rebuild those layers as explicit nodes (M-13).
+static func pseudo_rule(sel: String, which: String = "before") -> Dictionary:
+	return decls("%s:%s" % [sel, which])
 
 
 static func _apply_padding(s: StyleBoxFlat, pad: String) -> void:
@@ -574,7 +685,7 @@ static func _apply_padding(s: StyleBoxFlat, pad: String) -> void:
 ## animation shorthand of a rule: {name, duration, delay, easing} (seconds).
 static func anim_of(sel: String, fallback_name: String = "") -> Dictionary:
 	var out := {"name": fallback_name, "duration": 0.0, "delay": 0.0, "easing": "ease-out"}
-	var a := String(decls(sel).get("animation", ""))
+	var a := str(decls(sel).get("animation", ""))
 	if a.is_empty():
 		return out
 	# Values like ".35s ease-out backwards cardIn" or "tileIn .35s var(--d,0s) backwards".
@@ -601,7 +712,7 @@ static func keyframes() -> Dictionary:
 
 ## Frames of one @keyframes as [{pos, decl: value}]; the port's Tween guide.
 static func keyframe_frames(name: String) -> Array:
-	var body := String(keyframes().get(name, ""))
+	var body := str(keyframes().get(name, ""))
 	var out := []
 	if body.is_empty():
 		return out
@@ -628,7 +739,7 @@ static func keyframe_frames(name: String) -> Array:
 # ---- shared JS tables (rarity / danger), offsets recorded in the JSON -------
 static func _js_table(where: String, which: String) -> Array:
 	var grp := PbJson.as_dict(tokens().get(where, {}))
-	var txt := String(PbJson.as_dict(grp.get(which, {})).get("text", ""))
+	var txt := str(PbJson.as_dict(grp.get(which, {})).get("text", ""))
 	var out := []
 	if txt.is_empty():
 		return out
@@ -655,7 +766,7 @@ static func rarity_dot_color(rarity: int) -> Color:
 	var colors := _js_table("rarity", "dot_colors")
 	if colors.is_empty():
 		return rarity_color(rarity)
-	return css_color(String(colors[clampi(rarity, 0, colors.size() - 1)]), rarity_color(rarity))
+	return css_color(str(colors[clampi(rarity, 0, colors.size() - 1)]), rarity_color(rarity))
 
 
 static func rarity_labels() -> Array:
@@ -692,7 +803,7 @@ static func mix(base: Color, other: Color, weight: float) -> Color:
 
 static func accent_color(accent: String, which: String = "c") -> Color:
 	var map := PbJson.as_dict(ACCENTS.get(accent, ACCENTS["yellow"]))
-	var token := String(map.get(which, "--yellow"))
+	var token := str(map.get(which, "--yellow"))
 	var key := accent + ":" + which
 	if _color_cache.has(key):
 		return _color_cache[key]
@@ -703,7 +814,7 @@ static func accent_color(accent: String, which: String = "c") -> Color:
 
 static func type_color(type_name: String) -> Color:
 	var table := PbJson.as_dict(tokens().get("type_colors", {}))
-	var hex := String(table.get(type_name, ""))
+	var hex := str(table.get(type_name, ""))
 	if hex.is_empty():
 		return Color("#9aa4b8")
 	return css_color(hex, Color("#9aa4b8"))
@@ -715,11 +826,14 @@ static func font(weight: String = "body") -> Font:
 		var paths := {
 			"title": FONT_TITLE,
 			"title_bold": FONT_TITLE_BOLD,
-			"body": FONT_BODY,
+			# M-01: the web's body copy is Nunito 700 (html,body{font-weight:700}),
+			# so `body` is the 700 face; 800 stays available as `body_bold`.
+			"body": FONT_BODY_REGULAR,
+			"body_bold": FONT_BODY,
 			"body_regular": FONT_BODY_REGULAR,
 		}
 		for key in paths.keys():
-			var path := String(paths[key])
+			var path := str(paths[key])
 			if ResourceLoader.exists(path):
 				var loaded := load(path)
 				if loaded is FontFile and cjk != null:
@@ -744,6 +858,98 @@ static func radius() -> int:
 	return v("--radius", "22px").trim_suffix("px").to_int()
 
 
+## ---- design tokens used by the shell/layout work (H-02..H-17) ---------------
+## Everything below is one lookup point for numbers that used to be re-typed
+## into scenes. Each function names the web rule it comes from.
+
+## html,body{background:#1a1630}
+static func page_bg() -> Color:
+	return css_color(PAGE_BG, Color("#1a1630"))
+
+
+## radial-gradient(circle at 50% 40%, #3a2f7a, #1a1630) from .rotate-hint
+static func page_glow() -> Color:
+	return css_color(PAGE_GLOW, Color("#3a2f7a"))
+
+
+## --w82..--w97: the "white at N%" surfaces (.tl-plate:before uses --w97,
+## .hud-top / .toast use --w96). Token-driven, so dark theme follows too.
+static func w(level: int, fallback: String = "#ffffff") -> Color:
+	return css_color(v("--w%d" % level, fallback), paper())
+
+
+## .tl-plate:before{background:var(--w97)} -- the HUD name plate's fill.
+static func hud_plate() -> Color:
+	return w(97)
+
+
+## Secondary ink (.card .sub, captions). --ink-2.
+static func ink2() -> Color:
+	return css_color(v("--ink-2", "#4a4568"), ink())
+
+
+## Role -> px from the web type scale (see FONT_SCALE's selector notes).
+static func font_size(role: String, fallback: int = 16) -> int:
+	return int(FONT_SCALE.get(role, fallback))
+
+
+## .screen{padding:18px 24px 20px}
+static func screen_padding() -> Dictionary:
+	return SCREEN_PAD.duplicate()
+
+
+## .mm{--mm-gutter:clamp(22px, 5vw, 84px)}
+static func gutter(viewport_width: float) -> float:
+	return clampf(viewport_width * 0.05, 22.0, 84.0)
+
+
+## Border-radius of any extracted rule (px), for one-off widgets.
+static func radius_of(sel: String, fallback: float = -1.0) -> int:
+	var txt := resolve_vars(str(decls(sel).get("border-radius", "")))
+	if txt.is_empty():
+		return int(fallback)
+	return int(_px(txt, fallback))
+
+
+## .dx-tile 16px / .lab-card 20px / .card 22px / pills 99px.
+static func radius_tile() -> int:
+	return radius_of(".dx-tile", 16.0)
+
+
+static func radius_lab() -> int:
+	return radius_of(".lab-card", 20.0)
+
+
+static func radius_card() -> int:
+	return radius_of(".card", 22.0)
+
+
+static func radius_pill() -> int:
+	return radius_of(".back-btn", 99.0)
+
+
+## CSS transition/animation timings used by the shell (.mm-item .18s/.16s,
+## .screen .25s fadeIn, .toast .25s popIn, mmIn .5s). `back` matches the
+## cubic-bezier(.3,1.6,.5,1) overshoot the site uses on tiles/cards.
+static func motion(kind: String = "base") -> Dictionary:
+	var table := {
+		"fast": {"seconds": 0.16, "trans": Tween.TRANS_CUBIC, "ease": Tween.EASE_OUT},
+		"base": {"seconds": 0.25, "trans": Tween.TRANS_CUBIC, "ease": Tween.EASE_OUT},
+		"pop": {"seconds": 0.5, "trans": Tween.TRANS_BACK, "ease": Tween.EASE_OUT},
+		"hover": {"seconds": 0.18, "trans": Tween.TRANS_BACK, "ease": Tween.EASE_OUT},
+	}
+	return table.get(kind, table["base"]).duplicate()
+
+
+## Configure a Tween from the motion tokens so animations stop hand-rolling
+## durations in scene code.
+static func ease_tween(tw: Tween, kind: String = "base") -> Tween:
+	var m := motion(kind)
+	tw.set_trans(int(m["trans"]))
+	tw.set_ease(int(m["ease"]))
+	return tw
+
+
 static func build() -> Theme:
 	if _theme != null:
 		return _theme
@@ -751,7 +957,9 @@ static func build() -> Theme:
 	t.default_font = font("body")
 	t.default_font_size = 16
 	t.set_stylebox("panel", "PanelContainer", card_style())
-	t.set_stylebox("panel", "Panel", card_style(Color("#f3f1fa")))
+	# H-18: Panel used a hard-coded #f3f1fa (paper-2) and stayed light in dark
+	# theme; it now follows .card's --paper token like PanelContainer.
+	t.set_stylebox("panel", "Panel", card_style())
 	t.set_stylebox("normal", "Button", button_style("yellow"))
 	t.set_stylebox("hover", "Button", button_style("yellow", 0.10))
 	t.set_stylebox("pressed", "Button", button_style("yellow", 0.0, true))
@@ -771,7 +979,8 @@ static func build() -> Theme:
 	t.set_stylebox("slider", "HSlider", slider_knob())
 	t.set_color("font_color", "Label", ink())
 	t.set_font("font", "Label", font("body"))
-	t.set_font_size("font_size", "Label", 15)
+	# M-01: web body copy is 16px/700 (html,body), not the old 15px.
+	t.set_font_size("font_size", "Label", font_size("body"))
 	t.set_color("font_color", "Button", Color("#2a2440"))
 	t.set_font("font", "Button", font("title_bold"))
 	t.set_font_size("font_size", "Button", 17)
@@ -796,6 +1005,37 @@ static func paper(shift: float = 0.0) -> Color:
 	return css_color(v(token, "#ffffff"), Color.WHITE)
 
 
+## Parsed box-shadow layers of any rule, e.g. .card's
+## `0 10px 28px #1a124638, 0 2px 6px #1a12461f`. StyleBoxFlat can only carry one
+## shadow, so this exposes the whole stack to callers that add a second pass.
+static func shadow_layers_of(sel: String) -> Array:
+	return shadow_layers(str(decls(sel).get("box-shadow", "")))
+
+
+## --shadow (two layers, 28/10 + 2/6). L-01 uses the dominant layer below.
+static func card_shadow_layers() -> Array:
+	return shadow_layers_of(".card")
+
+
+## Apply the CSS shadow stack to a StyleBoxFlat: the layer with the largest blur
+## becomes the Godot shadow (blur -> shadow_size at the port's 0.5 ratio, CSS
+## offset kept). This is the token-level composition L-01 asks for; the second
+## layer stays available through card_shadow_layers() for an extra draw pass.
+static func apply_shadow_stack(s: StyleBoxFlat, layers: Array) -> void:
+	var dominant := {}
+	for layer in layers:
+		if bool(layer.get("inset", false)):
+			continue
+		if dominant.is_empty() or float(layer["blur"]) > float(dominant["blur"]):
+			dominant = layer
+	if dominant.is_empty():
+		return
+	s.shadow_size = int(maxf(2.0, float(dominant["blur"]) * 0.5))
+	s.shadow_color = dominant["color"]
+	s.shadow_offset = Vector2(float(dominant["x"]), float(dominant["y"]))
+	s.anti_aliasing = true
+
+
 ## .card: { background: var(--paper); border-radius: 22px;
 ##          box-shadow: 0 10px 28px #1a124638, 0 2px 6px #1a12461f }
 static func card_style(override: Color = Color(1, 1, 1, 0)) -> StyleBoxFlat:
@@ -803,10 +1043,8 @@ static func card_style(override: Color = Color(1, 1, 1, 0)) -> StyleBoxFlat:
 	s.bg_color = override if override.a > 0.0 else paper()
 	var r := maxi(6, radius())
 	s.set_corner_radius_all(r)
-	s.shadow_size = 14
-	s.shadow_color = css_color("#1a124638", Color(0.1, 0.07, 0.27, 0.22))
-	s.shadow_offset = Vector2(0, 8)
 	s.anti_aliasing = true
+	apply_shadow_stack(s, card_shadow_layers())
 	s.content_margin_left = 16
 	s.content_margin_right = 16
 	s.content_margin_top = 14
@@ -938,19 +1176,36 @@ static func hud_top_style() -> StyleBoxFlat:
 
 
 ## .timer: the poké-ball pill clock; .final swaps in the red pulse gradient.
+## M-13: the rule's background is a gradient, so stylebox() now returns a
+## transparent fill; take the top stop (#4a4068 / #ff6a6f) explicitly instead of
+## letting it fall back to paper.
 static func timer_style(final: bool = false) -> StyleBoxFlat:
 	var s := stylebox(".timer")
-	if final:
-		var g := gradient(String(decls(".timer.final").get("background", "")))
-		if g.has("stops") and not g["stops"].is_empty():
-			s.bg_color = g["stops"][0]["color"]
+	var g := gradient(str(decls(".timer.final" if final else ".timer").get("background", "")))
+	if g.has("stops") and not g["stops"].is_empty():
+		s.bg_color = g["stops"][0]["color"]
 	return s
 
 
-## .card .top: rarity band. The 135° gradient is sampled at its mid stop and
-## the stripes overlay is drawn separately (UI.stripes_overlay).
+## .tl-lvl: the skewed Nv badge (linear-gradient(#4a4068 0 50%, #2e2848 50%)).
+## Same M-13 treatment as .timer: paint the top stop on the transparent box.
+static func level_badge_style() -> StyleBoxFlat:
+	var s := stylebox(".tl-lvl")
+	var g := gradient(str(decls(".tl-lvl").get("background", "")))
+	if g.has("stops") and not g["stops"].is_empty():
+		s.bg_color = g["stops"][0]["color"]
+	return s
+
+
+## .card .top: rarity band. M-13: the 135° gradient is a gradient rule, so use
+## its first stop as the flat fill and keep drawing the stripes overlay on top
+## (UI.stripes_overlay) -- the report's H-06 handles the full gradient layer.
 static func card_top_style(rc: Color) -> StyleBoxFlat:
 	var s := stylebox(".card .top", {"rc": "#" + rc.to_html(false)})
+	var g := gradient(str(decls(".card .top").get("background", "")),
+		{"rc": "#" + rc.to_html(false)})
+	if g.has("stops") and not g["stops"].is_empty():
+		s.bg_color = g["stops"][0]["color"]
 	return s
 
 
@@ -971,15 +1226,15 @@ static func offer_card_style(rc: Color, hovered: bool = false) -> StyleBoxFlat:
 ## .scr-title: skewed red→orange striped plate behind the screen h1.
 static func scr_title_style(accent_raw: String = "") -> StyleBoxFlat:
 	var d := decls(".scr-title")
-	var bg := String(d.get("background", ""))
+	var bg := str(d.get("background", ""))
 	if not accent_raw.is_empty():
 		bg = bg.replace("var(--red)", accent_raw)
 	var s := StyleBoxFlat.new()
 	var g := gradient(bg)
 	s.bg_color = g["stops"][0]["color"] if g.has("stops") and g["stops"].size() > 0 else accent_color("red", "c")
-	s.set_corner_radius_all(int(_px(resolve_vars(String(d.get("border-radius", "14px"))))))
-	_apply_padding(s, resolve_vars(String(d.get("padding", ""))))
-	for layer in shadow_layers(String(d.get("box-shadow", ""))):
+	s.set_corner_radius_all(int(_px(resolve_vars(str(d.get("border-radius", "14px"))))))
+	_apply_padding(s, resolve_vars(str(d.get("padding", ""))))
+	for layer in shadow_layers(str(d.get("box-shadow", ""))):
 		if layer["blur"] == 0.0 and layer["y"] >= 2.0:
 			s.border_width_bottom = int(layer["y"])
 			s.border_color = layer["color"]
@@ -1007,14 +1262,14 @@ static func modal_scrim() -> StyleBoxFlat:
 static func pill_seg_style(on: bool) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	var d := decls(".pill.on") if on else decls(".pill")
-	s.bg_color = css_color(String(d.get("background", "0 0")), Color(0, 0, 0, 0)) if on else Color(0, 0, 0, 0)
+	s.bg_color = css_color(str(d.get("background", "0 0")), Color(0, 0, 0, 0)) if on else Color(0, 0, 0, 0)
 	if on and s.bg_color.a <= 0.0:
 		s.bg_color = paper()
 	s.set_corner_radius_all(999)
 	s.corner_detail = 10
-	_apply_padding(s, resolve_vars(String(d.get("padding", "7px 14px"))))
+	_apply_padding(s, resolve_vars(str(d.get("padding", "7px 14px"))))
 	if on:
-		for layer in shadow_layers(String(d.get("box-shadow", ""))):
+		for layer in shadow_layers(str(d.get("box-shadow", ""))):
 			if layer["blur"] == 0.0 and layer["y"] >= 1.0:
 				s.border_width_bottom = int(layer["y"])
 				s.border_color = layer["color"]
@@ -1037,7 +1292,7 @@ static func switch_track_style(on: bool, accent: Color = Color(0, 0, 0, 0)) -> S
 	s.set_corner_radius_all(99)
 	s.corner_detail = 10
 	if not on:
-		for layer in shadow_layers(String(decls(".switch").get("box-shadow", ""))):
+		for layer in shadow_layers(str(decls(".switch").get("box-shadow", ""))):
 			if layer["inset"]:
 				s.draw_center = true
 	return s
@@ -1060,8 +1315,8 @@ static func field_style(focused: bool = false) -> StyleBoxFlat:
 	var s := stylebox(".field")
 	if focused:
 		var f := decls(".field:focus")
-		s.bg_color = css_color(String(f.get("background", "")), paper())
-		s.border_color = css_color(String(f.get("border-color", "")), accent_color("blue", "c"))
+		s.bg_color = css_color(str(f.get("background", "")), paper())
+		s.border_color = css_color(str(f.get("border-color", "")), accent_color("blue", "c"))
 	return s
 
 
@@ -1094,11 +1349,11 @@ static func wallet_gold() -> Color:
 static func hpbar_colors() -> Dictionary:
 	var out := {}
 	for pair in [["high", ".hpbar>i"], ["mid", ".hpbar.mid>i"], ["low", ".hpbar.low>i"]]:
-		var g := gradient(String(decls(String(pair[1])).get("background", "")))
+		var g := gradient(str(decls(str(pair[1])).get("background", "")))
 		var stops: Array = g.get("stops", [])
 		var top: Color = stops[0]["color"] if stops.size() > 0 else accent_color("green", "c")
 		var base: Color = stops[stops.size() - 1]["color"] if stops.size() > 1 else top
-		out[String(pair[0])] = {"top": top, "base": base}
+		out[str(pair[0])] = {"top": top, "base": base}
 	return out
 
 
@@ -1145,10 +1400,10 @@ static func paint(button: Button, accent: String = "yellow", big: bool = false, 
 	elif big:
 		pad_size_sel = ".btn.big"
 	var pd := decls(pad_size_sel)
-	var pad := resolve_vars(String(pd.get("padding", "12px 26px")))
+	var pad := resolve_vars(str(pd.get("padding", "12px 26px")))
 	var nums := pad.split(" ", false)
-	var pad_v := int(_px(String(nums[0]))) if nums.size() > 0 else 12
-	var pad_h := int(_px(String(nums[1]))) if nums.size() > 1 else 26
+	var pad_v := int(_px(str(nums[0]))) if nums.size() > 0 else 12
+	var pad_h := int(_px(str(nums[1]))) if nums.size() > 1 else 26
 	var normal := button_style(accent)
 	normal.content_margin_left = pad_h
 	normal.content_margin_right = pad_h
@@ -1211,4 +1466,5 @@ static func reset_cache() -> void:
 	_color_cache = {}
 	_decl_cache = {}
 	_sb_cache = {}
+	_warned = {}
 	_tokens = {}

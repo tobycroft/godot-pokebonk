@@ -78,6 +78,17 @@ class GradRect:
 				var u := clampf((t - lo) / span, 0.0, 1.0)
 				cols.append(_sample_gradient(u))
 			draw_polygon(pts, cols)
+		elif gradient.get("type", "") == "radial":
+			# radial-gradient(circle at X% Y%, centre, rim): a vertex-coloured fan
+			# from the centre to the rounded rim (clipped by the same corner radii).
+			var center_uv: Vector2 = gradient.get("center", Vector2(0.5, 0.5))
+			var center := Vector2(center_uv.x * size.x, center_uv.y * size.y)
+			var fan := PackedVector2Array([center])
+			var cols := PackedColorArray([_sample_gradient(0.0)])
+			for p in pts:
+				fan.append(p)
+				cols.append(_sample_gradient(1.0))
+			draw_polygon(fan, cols)
 		elif not gradient.is_empty():
 			if style != null:
 				draw_colored_polygon(pts, style.bg_color)
