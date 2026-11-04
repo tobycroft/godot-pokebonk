@@ -39,6 +39,7 @@ func _ready() -> void:
 	_danger_golden_checks()
 	_ui_build_checks()
 	_terrain_checks()
+	_hazard_checks()
 	_locale_checks()
 	report()
 	get_tree().quit(0 if _failures.is_empty() else 1)
@@ -913,6 +914,183 @@ func _terrain_checks() -> void:
 	ok(prop_match, "the first %d props land in the same spots with the same flips" % first_props.size())
 	ok(not t.in_bounds(0, t.walk_lim() + 5.0), "outside the walk limit is out of bounds")
 	ok(t.height(0.0, 0.0) > 4.0, "the centre dais is above the terrace step")
+
+
+# ------------------------------------------------------------------ 6c hazards
+## Hostile terrain effects (web `kw` @1311320): slow is a multiplier, pull is a
+## per-second displacement, hurt (player) and bite (enemy) are maxHp fractions
+## on a .2s-then-.5s tick. world_fx.json is the runtime source; hazards.json is
+## the derived flat copy and must still agree numerically.
+func _hazard_checks() -> void:
+	section("hostile terrain: data + effects (6c)")
+	var table := PbData.hazards_table()
+	var defs := PbJson.as_dict(table.get("defs"))
+	ok(defs.size() == 4, "world_fx hazards carry the 4 kinds")
+	var derived := PbJson.as_dict(PbJson.as_dict(PbData.pb_table("hazards")).get("defs"))
+	ok(derived.size() == defs.size(), "derived hazards.json has the same 4 kinds")
+	var drift := []
+	for kind in defs.keys():
+		for field in ["slow", "pull", "hurt", "bite"]:
+			var a := PbJson.as_float(PbJson.as_dict(defs[kind]).get(field), -1.0)
+			var b := PbJson.as_float(PbJson.as_dict(derived.get(kind, {})).get(field), -2.0)
+			if absf(a - b) > EPS:
+				drift.append("%s.%s" % [kind, field])
+		ok(PbJson.as_dict(PbJson.as_dict(defs[kind]).get("say")).size() >= 4,
+			"%s say text is localized in 4 locales" % kind)
+	ok(drift.is_empty(), "hazards.json agrees with the runtime source (drift %s)" % str(drift))
+	ok(PbHazards.atlas_ready(), "hazards.png atlas is importable")
+
+	# byBiome: every fight biome has a pair, and the union covers all 4 kinds.
+	var seen := {}
+	for biome in ["forest", "desert", "coast", "glacier"]:
+		var kinds := PbHazards.kinds_for(biome)
+		ok(kinds.size() == 2, "%s gets its 2-kind hazard pair (got %s)" % [biome, str(kinds)])
+		for kind in kinds:
+			seen[str(kind)] = true
+			ok(defs.has(str(kind)), "%s maps to a defined kind (%s)" % [biome, str(kind)])
+	ok(seen.size() == 4, "the 4 biomes cover all 4 hazard kinds")
+	ok(PbHazards.kinds_for("forest") == ["mud", "bramble"]
+		and PbHazards.kinds_for("desert") == ["quicksand", "fire"]
+		and PbHazards.kinds_for("coast") == ["mud", "quicksand"]
+		and PbHazards.kinds_for("glacier") == ["mud", "bramble"],
+		"byBiome matches the web table exactly")
+
+	# Spawn toast: the Spanish source is the i18n key, resolved through App.ui.
+	var state := PbRun.create(1, "forest", 424242)
+	var messages := PbJson.as_array(state["messages"])
+	var before := messages.size()
+	PbHazards.spawn(state, "mud", 0.0, 0.0, 6.0, 50.0)
+	ok(messages.size() == before + 1, "spawn pushes exactly one toast")
+	ok(str(messages[-1]) == App.ui(str(PbJson.as_dict(PbJson.as_dict(defs["mud"]).get("say")).get("es"))),
+		"mud toast uses the web say key via App.ui")
+	ok(not str(messages[-1]).is_empty(), "spawn toast text resolves")
+
+	# Player slow: mud 0.55, min across overlaps, back to 1.0 after leaving.
+	var player := PbJson.as_dict(state["player"])
+	player["x"] = 0.0
+	player["z"] = 0.0
+	PbHazards.list(state)[0]["age"] = 2.0
+	PbHazards.update(state, 0.1)
+	close(float(player.get("hazardSlow", 1.0)), 0.55, "mud slows the player to 0.55x")
+	player["x"] = 20.0
+	PbHazards.update(state, 0.1)
+	close(float(player.get("hazardSlow", 1.0)), 1.0, "leaving the hazard restores player speed")
+	PbHazards.clear(state)
+
+	# Player hurt: fire 3 % of maxHp per tick, and no damage after leaving.
+	player["x"] = 0.0
+	player["z"] = 0.0
+	var max_hp := float(player["maxHp"])
+	var hp_before := float(player["hp"])
+	PbHazards.spawn(state, "fire", 0.0, 0.0, 6.0, 50.0)
+	PbHazards.list(state)[0]["age"] = 2.0
+	PbHazards.update(state, 0.25)
+	close(hp_before - float(player["hp"]), max_hp * 0.03, "fire hurts the player 3% maxHp per tick")
+	player["x"] = 20.0
+	var hp_after := float(player["hp"])
+	PbHazards.update(state, 0.5)
+	close(float(player["hp"]), hp_after, "fire stops hurting once the player leaves")
+	PbHazards.clear(state)
+
+	# Player pull: quicksand 2.4/s toward the centre with the 1-f/r*.5 falloff.
+	player["x"] = 1.0
+	player["z"] = 0.0
+	PbHazards.spawn(state, "quicksand", 0.0, 0.0, 6.0, 50.0)
+	PbHazards.list(state)[0]["age"] = 2.0
+	PbHazards.update(state, 0.1)
+	close(float(player["x"]), 1.0 - 0.24 * (1.0 - 1.0 / 6.0 * 0.5),
+		"quicksand pulls the player toward the centre")
+	PbHazards.clear(state)
+
+	# Enemy slow: .9x of the player multiplier, consumed by the move step.
+	var pool := PbJson.as_dict(state["enemies"])
+	var index := PbEnemies.spawn(pool, 1, 0.0, 0.0, 1, state["diff"], "wild")
+	player["x"] = 40.0
+	player["z"] = 40.0
+	PbHazards.spawn(state, "mud", 0.0, 0.0, 6.0, 50.0)
+	PbHazards.list(state)[0]["age"] = 2.0
+	PbHazards.update(state, 0.1)
+	close(float(PbEnemies.get_field(pool, "hazSlow", index)), 0.55 * 0.9,
+		"mud slows enemies to 0.495x")
+	PbRun.tick(state, 0.1)
+	close(float(PbEnemies.get_field(pool, "hazSlow", index)), 1.0,
+		"the enemy move step consumes hazSlow")
+	PbHazards.clear(state)
+
+	# Enemy bite: bramble 5 % maxHp, x.1 for boss-family flags.
+	PbEnemies.set_field(pool, "maxHp", index, 1000.0)
+	PbEnemies.set_field(pool, "hp", index, 1000.0)
+	PbEnemies.set_field(pool, "x", index, 0.0)
+	PbEnemies.set_field(pool, "z", index, 0.0)
+	PbHazards.spawn(state, "bramble", 0.0, 0.0, 6.0, 50.0)
+	PbHazards.list(state)[0]["age"] = 2.0
+	PbHazards.update(state, 0.25)
+	close(1000.0 - float(PbEnemies.get_field(pool, "hp", index)), 50.0,
+		"bramble bites enemies for 5% maxHp per tick")
+	PbHazards.clear(state)
+
+	PbEnemies.set_field(pool, "hp", index, 1000.0)
+	PbEnemies.set_field(pool, "flags", index,
+		int(PbEnemies.Flag["Alive"]) | int(PbEnemies.Flag["Boss"]))
+	PbHazards.spawn(state, "bramble", 0.0, 0.0, 6.0, 50.0)
+	PbHazards.list(state)[0]["age"] = 2.0
+	PbHazards.update(state, 0.25)
+	close(1000.0 - float(PbEnemies.get_field(pool, "hp", index)), 5.0,
+		"boss-family enemies take .1 of the bite")
+	PbHazards.clear(state)
+
+	# Enemy pull: quicksand x1.3.
+	PbEnemies.set_field(pool, "flags", index, int(PbEnemies.Flag["Alive"]))
+	PbEnemies.set_field(pool, "x", index, 1.0)
+	PbEnemies.set_field(pool, "z", index, 0.0)
+	PbHazards.spawn(state, "quicksand", 0.0, 0.0, 6.0, 50.0)
+	PbHazards.list(state)[0]["age"] = 2.0
+	PbHazards.update(state, 0.1)
+	close(float(PbEnemies.get_field(pool, "x", index)), 1.0 - 2.4 * 1.3 * 0.1,
+		"quicksand pulls enemies at x1.3")
+	PbHazards.clear(state)
+
+	# Flying enemies ignore hazards; statuses roll at 50% per bite tick.
+	PbEnemies.set_field(pool, "flags", index,
+		int(PbEnemies.Flag["Alive"]) | int(PbEnemies.Flag["Flying"]))
+	PbEnemies.set_field(pool, "x", index, 0.0)
+	PbEnemies.set_field(pool, "z", index, 0.0)
+	PbHazards.spawn(state, "mud", 0.0, 0.0, 6.0, 50.0)
+	PbHazards.list(state)[0]["age"] = 2.0
+	PbHazards.update(state, 0.1)
+	close(float(PbEnemies.get_field(pool, "hazSlow", index)), 1.0,
+		"flying enemies ignore hazard slow")
+	PbHazards.clear(state)
+
+	PbEnemies.set_field(pool, "flags", index, int(PbEnemies.Flag["Alive"]))
+	PbEnemies.set_field(pool, "maxHp", index, 1000000.0)
+	PbEnemies.set_field(pool, "hp", index, 1000000.0)
+	PbHazards.spawn(state, "bramble", 0.0, 0.0, 6.0, 50.0)
+	PbHazards.list(state)[0]["age"] = 2.0
+	var poisoned := false
+	for i in 12:
+		PbHazards.update(state, 0.5)
+		if float(PbEnemies.get_field(pool, "poison", index)) > 0.0:
+			poisoned = true
+			break
+	ok(poisoned, "bramble bites roll the web's 50% poison status")
+	PbHazards.clear(state)
+
+	# Lifecycle: intro 2s + life + 1.5s fade, then the record is dropped.
+	var count := PbHazards.list(state).size()
+	var hazard := PbHazards.spawn(state, "mud", 0.0, 0.0, 6.0, 50.0)
+	hazard["age"] = 60.0
+	PbHazards.update(state, 0.0)
+	ok(PbHazards.list(state).size() == count, "hazards expire after intro + life + fade")
+
+	# Ticks only land while active (intro is visual-only).
+	player["x"] = 0.0
+	player["z"] = 0.0
+	var fresh := PbHazards.spawn(state, "fire", 0.0, 0.0, 6.0, 50.0)
+	var hp_intro := float(player["hp"])
+	PbHazards.update(state, 1.0)
+	close(float(player["hp"]), hp_intro, "the 2s intro deals no damage")
+	ok(float(fresh["age"]) >= 1.0 and float(fresh["tick"]) > 0.0, "the intro still counts up age")
 
 
 # ------------------------------------------------------------------ language

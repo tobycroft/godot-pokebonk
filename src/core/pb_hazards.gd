@@ -86,6 +86,9 @@ static func clear(state: Dictionary) -> void:
 	controller["list"] = []
 	controller["nextT"] = 180.0
 	PbJson.as_dict(state.get("player", {}))["hazardSlow"] = 1.0
+	var pool := PbJson.as_dict(state.get("enemies", {}))
+	for entry in PbJson.as_array(pool.get("live", [])):
+		PbEnemies.set_field(pool, "hazSlow", int(entry), 1.0)
 
 
 # ------------------------------------------------------------------ scheduling
