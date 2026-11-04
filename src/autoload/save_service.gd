@@ -166,6 +166,10 @@ func normalize(p: Variant) -> Dictionary:
 	for key in ["best", "times", "kills", "medals", "endless", "bag"]:
 		if typeof(out.get(key)) != TYPE_DICTIONARY:
 			out[key] = {}
+	# Web saves turn `league` from a number into a starter-id array after
+	# /profile/starter (api-core.js:342). The port only needs the progression
+	# count, so migrate an imported array to its length; the field shape is kept.
+	out["league"] = _league_count(out.get("league", 1))
 	return out
 
 
@@ -238,11 +242,21 @@ func apply_actions(actions: Array) -> void:
 				var key := str(a.get("id", ""))
 				store["bag"][key] = int(store["bag"].get(key, 0)) + int(a.get("v", 0))
 			"league":
-				store["league"] = maxi(int(store.get("league", 1)), int(a.get("v", 0)))
+				store["league"] = maxi(_league_count(store.get("league", 1)), int(a.get("v", 0)))
 			"biome":
 				store["biomes"] = _union(store["biomes"], [a.get("id")])
 			_:
 				pass
+
+
+## `league` is an int in a fresh profile and a starter-id array after the web's
+## /profile/starter route; arithmetic must read either shape.
+func _league_count(value: Variant) -> int:
+	if value is Array:
+		return PbJson.as_array(value).size()
+	if value == null:
+		return 1
+	return int(value)
 
 
 func _union(list: Variant, add: Variant) -> Array:
@@ -307,13 +321,8 @@ func apply_run_result(result: Dictionary, run_id: String = "") -> Dictionary:
 		var bonk := bosses * (1 + randi() % 3)
 		store["bonk"] = int(store.get("bonk", 0)) + bonk
 		store["totalBonk"] = int(store.get("totalBonk", 0)) + bonk
-	# Research progress for the species that was played.
-	var species := int(r.get("species", 0))
-	if species > 0:
-		var research: Dictionary = store.get("research", {})
-		var skey := str(species)
-		research[skey] = int(research.get(skey, 0)) + 1
-		store["research"] = research
+	# api-core.js applyRunResult() stops at the stardust/bonk rewards: it does not
+	# touch `research`, so neither does this port (keeps saves in lock-step).
 	save()
 	return {"gain": gain, "record": rec}
 
@@ -423,6 +432,13 @@ func handle(method: String, path: String, query: Dictionary = {}, body: Dictiona
 		store["team"] = _union(store["team"], [id])
 		store["captured"] = _union(store["captured"], [id])
 		store["seen"] = _union(store["seen"], [id])
+		# api-core.js:342-343: the first starter replaces the numeric league
+		# counter with an array of starter ids.
+		if typeof(store.get("league")) != TYPE_ARRAY:
+			store["league"] = []
+		var league: Array = store["league"]
+		if not league.has(id):
+			league.append(id)
 		save()
 		return {"ok": true, "profile": store}
 	if method == "POST" and path == "/runs/start":

@@ -2,12 +2,13 @@
 
 importer="oggvorbisstr"
 type="AudioStreamOggVorbis"
-uid="uid://ck3twoxe36to4"
-valid=false
+uid="uid://b2qeaqims0gnj"
+path="res://.godot/imported/halloween-menu.ogg-24d2c634b932a810ece46deb8a09eebc.oggvorbisstr"
 
 [deps]
 
 source_file="res://assets/music/halloween-menu.ogg"
+dest_files=["res://.godot/imported/halloween-menu.ogg-24d2c634b932a810ece46deb8a09eebc.oggvorbisstr"]
 
 [params]
 

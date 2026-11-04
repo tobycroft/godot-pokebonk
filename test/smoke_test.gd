@@ -394,7 +394,8 @@ func _save_flow() -> void:
 	ok(int(Save.store["stardust"]) == 999999 + 44, "stardust +44 (golden formula)")
 	ok(int(Save.store["bonk"]) >= 2, "bonk awarded per boss kill (offline rule)")
 	ok(int(Save.store["counters"]["gold"]) == 300, "econ.gold counted")
-	ok(PbJson.as_dict(Save.store["research"]).has("1"), "research tracked for the species")
+	ok(not PbJson.as_dict(Save.store["research"]).has("1"),
+		"run finish does not touch research (api-core parity)")
 
 	section("export / import / backups")
 	var text := Save.export_string()

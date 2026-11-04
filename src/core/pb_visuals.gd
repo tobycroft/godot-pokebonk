@@ -68,9 +68,17 @@ static func idle_frame_texture(species_id: int) -> Texture2D:
 ## A Node3D representing the species in the arena.
 static func front_texture(species_id: int) -> Texture2D:
 	## The web build falls back to `front/<id>.png` for species with no PMD anims;
-	## this port ships that same static art as assets/portraits/<id>.png.
+	## this port ships that same static art as assets/portraits/<id>.png, and the
+	## remaining 54 species carry `fallback: "front/<id>.png"` in sprites.json.
 	var p := "res://assets/portraits/%d.png" % species_id
-	return load(p) if ResourceLoader.exists(p) else null
+	if ResourceLoader.exists(p):
+		return load(p)
+	var fallback := str(PbData.pmd_meta(species_id).get("fallback", ""))
+	if not fallback.is_empty():
+		var alt := "res://assets/%s" % fallback
+		if ResourceLoader.exists(alt):
+			return load(alt)
+	return null
 
 
 ## A Node3D representing the species in the arena.
