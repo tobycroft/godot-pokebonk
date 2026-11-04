@@ -89,6 +89,9 @@ static func recompute(state: Dictionary) -> void:
 		var mods := PbJson.as_array(def.get("mods", []))
 		for n in count:
 			groups.append(mods)
+	# Vitamins fold their per-level mods in the same pass (bundle
+	# recompute @838100 loops `this.vitamins` through `hn`).
+	groups.append(PbVitamins.mods_for(state))
 	var stats := PbStats.stats_for(species, growth, lab, groups)
 	for key in items.keys():
 		var def := PbData.item_game(str(key))

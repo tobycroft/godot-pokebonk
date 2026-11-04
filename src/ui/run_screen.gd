@@ -772,6 +772,44 @@ func _offer_card_data(card: Dictionary) -> Dictionary:
 			out["sub"] = label_text
 			out["lines"] = [_mod_line(PbJson.as_dict(mods[0])) if not mods.is_empty() else label_text]
 			out["icon_name"] = str(def2.get("type", "")) if ResourceLoader.exists("res://assets/ui/icons/%s.png" % str(def2.get("type", ""))) else ""
+		"new_vit", "up_vit":
+			# qS() @1100020: title = vitamin name, sub = level -> level+1 / "Nueva
+			# vitamina", line = the rarity-scaled increment, icon = `item:`+ icon.
+			var vdef := PbVitamins.def_of(str(card.get("vit", "")))
+			var vstat := str(vdef.get("stat", ""))
+			rar = clampi(int(card.get("rarity", 0)), 0, PbCards.RARITY_MULT.size() - 1)
+			rc = PbTheme.rarity_color(rar)
+			out["rar_text"] = _rar_name(rar)
+			# The `.kind` badge: `newVit` -> NUEVA, everything else -> MEJORA.
+			out["kind_text"] = App.ui("NUEVA") if kind == "new_vit" else App.ui("MEJORA")
+			out["title"] = App.ui(str(vdef.get("name", card.get("vit", "?"))))
+			var lvl := int(card.get("level", 0))
+			out["sub"] = App.ui("Nueva vitamina") if lvl <= 0 else App.ui(
+				"Nivel {a} → {b} (máx. {max})", {"a": lvl, "b": lvl + 1,
+				"max": int(card.get("cap", PbVitamins.LEVEL_CAP))})
+			var value := float(PbCards.RARITY_MULT[rar])
+			var amount := float(vdef.get("per", 0.0)) * value
+			var pct := str(vdef.get("kind", "mul")) == "mul" \
+				or vstat in ["critChance", "evasion", "lifesteal"]
+			var amount_text := ("+%s%%" % _trim_num(amount * 100.0, 1)) if pct \
+				else ("+%s" % _trim_num(amount, 2))
+			if bool(vdef.get("dice", false)):
+				out["lines"] = [App.ui("Tira el dado: la estadística de una vitamina al azar, ×{n}",
+					{"n": _trim_num(PbVitamins.DICE_SCALE * value, 2)})]
+			elif not PbJson.as_array(vdef.get("extra", [])).is_empty():
+				# qS: extra vitamins show the stat label, then one line per side mod.
+				out["lines"] = ["%s %s" % [amount_text, PbCards._label(vstat).to_lower()]]
+				for raw_extra in PbJson.as_array(vdef.get("extra", [])):
+					var extra := PbJson.as_dict(raw_extra)
+					out["lines"].append("+%s%% %s" % [
+						_trim_num(float(extra.get("mul", 0.0)) * value * 100.0, 1),
+						PbCards._label(str(extra.get("stat", ""))).to_lower()])
+			else:
+				out["lines"] = ["%s %s" % [amount_text, str(vdef.get("desc", vstat)).to_lower()]]
+				var note := str(vdef.get("note", ""))
+				if not note.is_empty():
+					out["lines"].append(note)
+			out["icon_name"] = str(vdef.get("icon", ""))
 		"type":
 			rc = PbTheme.type_color(str(card.get("type", "normal")))
 			out["rar_text"] = "属性"
@@ -802,6 +840,14 @@ func _offer_card_data(card: Dictionary) -> Dictionary:
 func _rar_name(rar: int) -> String:
 	var zh := [App.ui("Común"), App.ui("Poco común"), App.ui("Raro"), App.ui("Épico"), App.ui("Legendario")]
 	return str(zh[clampi(rar, 0, zh.size() - 1)])
+
+
+## JS `+n.toFixed(k)` drops trailing zeros (10.0 -> "10"); mirror that here.
+func _trim_num(value: float, decimals: int) -> String:
+	var text := ("%." + str(decimals) + "f") % value
+	if text.contains("."):
+		text = text.rstrip("0").rstrip(".")
+	return text
 
 
 func _mod_line(mod: Dictionary) -> String:

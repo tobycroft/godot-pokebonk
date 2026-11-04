@@ -1,0 +1,259 @@
+[
+ {
+  "key": "calcium",
+  "name": "Calcio",
+  "icon": "calcium",
+  "stat": "special",
+  "per": 0.1,
+  "kind": "mul",
+  "desc": "Daño especial"
+ },
+ {
+  "key": "carbos",
+  "name": "Carburante",
+  "icon": "carbos",
+  "stat": "moveSpeed",
+  "per": 0.07,
+  "kind": "mul",
+  "desc": "Velocidad de movimiento"
+ },
+ {
+  "key": "cursed",
+  "name": "Incienso Maldito",
+  "icon": "cleanse-tag",
+  "stat": "difficulty",
+  "per": 0.12,
+  "kind": "mul",
+  "desc": "Más enemigos y más fuertes, pero +6% XP y +6% ₽ por nivel",
+  "extra": [
+   {
+    "stat": "xpGain",
+    "mul": 0.06
+   },
+   {
+    "stat": "gold",
+    "mul": 0.06
+   }
+  ]
+ },
+ {
+  "key": "dire-hit",
+  "name": "Directo X",
+  "icon": "dire-hit",
+  "stat": "critChance",
+  "per": 0.05,
+  "kind": "add",
+  "desc": "Probabilidad de crítico"
+ },
+ {
+  "key": "elixir",
+  "name": "Elixir",
+  "icon": "elixir",
+  "stat": "duration",
+  "per": 0.1,
+  "kind": "mul",
+  "desc": "Duración"
+ },
+ {
+  "key": "enigma-berry",
+  "name": "Baya Enigma",
+  "icon": "enigma-berry",
+  "stat": "overheal",
+  "per": 0.05,
+  "kind": "add",
+  "desc": "Sobrecuración",
+  "note": "La curación que no te cabe se guarda como PS extra dorados (se van gastando poco a poco)."
+ },
+ {
+  "key": "escape-rope",
+  "name": "Cuerda Huida",
+  "icon": "escape-rope",
+  "stat": "pickupRange",
+  "per": 1.2,
+  "kind": "add",
+  "desc": "Rango de recogida"
+ },
+ {
+  "key": "ether",
+  "name": "Éter",
+  "icon": "ether",
+  "stat": "attackSpeed",
+  "per": 0.08,
+  "kind": "mul",
+  "desc": "Velocidad de ataque"
+ },
+ {
+  "key": "exp-candy",
+  "name": "Caramelo Exp.",
+  "icon": "rare-candy",
+  "stat": "xpGain",
+  "per": 0.1,
+  "kind": "mul",
+  "desc": "Experiencia"
+ },
+ {
+  "key": "hp-up",
+  "name": "Más PS",
+  "icon": "hp-up",
+  "stat": "maxHp",
+  "per": 18,
+  "kind": "add",
+  "desc": "PS máximos"
+ },
+ {
+  "key": "iron",
+  "name": "Hierro",
+  "icon": "iron",
+  "stat": "armor",
+  "per": 5,
+  "kind": "add",
+  "desc": "Armadura"
+ },
+ {
+  "key": "loaded-dice",
+  "name": "Dado Trucado",
+  "icon": "loaded-dice",
+  "stat": "luck",
+  "per": 0,
+  "kind": "add",
+  "desc": "Una estadística al azar",
+  "dice": true,
+  "note": "Cada nivel tira el dado: sube la estadística de otra vitamina al azar, un 50% más que esa vitamina."
+ },
+ {
+  "key": "max-potion",
+  "name": "Máx. Poción",
+  "icon": "max-potion",
+  "stat": "lifesteal",
+  "per": 0.02,
+  "kind": "add",
+  "desc": "Robo de vida"
+ },
+ {
+  "key": "nugget",
+  "name": "Pepita",
+  "icon": "nugget",
+  "stat": "gold",
+  "per": 0.15,
+  "kind": "mul",
+  "desc": "Pokédólares"
+ },
+ {
+  "key": "poke-radar",
+  "name": "Pokéradar",
+  "icon": "poke-radar",
+  "stat": "powerup",
+  "per": 0.15,
+  "kind": "mul",
+  "desc": "Power-ups",
+  "note": "Salen más power-ups (Imán, MT, bayas…) y duran más."
+ },
+ {
+  "key": "pp-up",
+  "name": "Más PP",
+  "icon": "pp-up",
+  "stat": "projectiles",
+  "per": 0.5,
+  "kind": "add",
+  "desc": "Proyectiles",
+  "note": "Se acumulan: cada +1 entero es un proyectil más (con rareza común, un proyectil cada 2 niveles)."
+ },
+ {
+  "key": "protein",
+  "name": "Proteína",
+  "icon": "protein",
+  "stat": "physical",
+  "per": 0.1,
+  "kind": "mul",
+  "desc": "Daño físico"
+ },
+ {
+  "key": "star-piece-v",
+  "name": "Trozo Estrella",
+  "icon": "star-piece",
+  "stat": "luck",
+  "per": 10,
+  "kind": "add",
+  "desc": "Suerte"
+ },
+ {
+  "key": "stardust",
+  "name": "Polvo Estelar",
+  "icon": "stardust",
+  "stat": "area",
+  "per": 0.1,
+  "kind": "mul",
+  "desc": "Área de efecto"
+ },
+ {
+  "key": "sticky-barb",
+  "name": "Toxiestrella",
+  "icon": "sticky-barb",
+  "stat": "thorns",
+  "per": 10,
+  "kind": "add",
+  "desc": "Espinas",
+  "note": "Las espinas golpean a todos los que te rodean, envenenan y también saltan cuando esquivas."
+ },
+ {
+  "key": "super-lure",
+  "name": "Supercebo",
+  "icon": "super-lure",
+  "stat": "eliteSpawn",
+  "per": 0.18,
+  "kind": "mul",
+  "desc": "Aparición de élites",
+  "extra": [
+   {
+    "stat": "eliteDamage",
+    "mul": 0.05
+   }
+  ],
+  "note": "Y +5% de daño a élites y jefes por nivel."
+ },
+ {
+  "key": "super-potion",
+  "name": "Superpoción",
+  "icon": "super-potion",
+  "stat": "regen",
+  "per": 0.7,
+  "kind": "add",
+  "desc": "Regeneración de PS"
+ },
+ {
+  "key": "x-attack",
+  "name": "Ataque X",
+  "icon": "x-attack",
+  "stat": "statusChance",
+  "per": 0.15,
+  "kind": "mul",
+  "desc": "Probabilidad de estados"
+ },
+ {
+  "key": "x-defense",
+  "name": "Defensa X",
+  "icon": "x-defense",
+  "stat": "evasion",
+  "per": 0.035,
+  "kind": "add",
+  "desc": "Evasión"
+ },
+ {
+  "key": "x-speed",
+  "name": "Velocidad X",
+  "icon": "x-speed",
+  "stat": "projSpeed",
+  "per": 0.12,
+  "kind": "mul",
+  "desc": "Velocidad de proyectil"
+ },
+ {
+  "key": "zinc",
+  "name": "Zinc",
+  "icon": "zinc",
+  "stat": "shieldMax",
+  "per": 12,
+  "kind": "add",
+  "desc": "Escudo regenerable"
+ }
+]
