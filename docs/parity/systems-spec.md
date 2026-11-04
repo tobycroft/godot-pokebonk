@@ -44,7 +44,7 @@ var dD=7500,fD=2500,pD=.4,mD={ball:{...},...}
 | `dD` | `7500` | 交互提示停留 **7.5 s** 后加淡出 class | main @1388836 |
 | `fD` | `2500` | 提示展示后 **再锁 2.5 s** 才允许下一条提示 | main @1388836 |
 | `pD` | `.4` | 场景扫描交互物的间隔 **0.4 s** | main @1388836 |
-| 硬编码 `7900` | `7900` | 提示 7.9 s 后从 DOM 移除 | main @1391808 |
+| 硬编码 `7900` | `7900` | 提示 7.9 s 后从 DOM 移除 | main @1391943 |
 
 > 商店计时是另一组：`meowthT=210` / 重置 `300` / `meowthLeft=45`（§1.7）。
 
@@ -72,6 +72,13 @@ var dD=7500,fD=2500,pD=.4,mD={ball:{...},...}
 | `canHold(e)` | main @840446 | 持有上限校验 |
 | `meowthArrives()` | main @1407519 | 商人到场 |
 | `meowthLeaves()` | main @1407893 | 商人离场 |
+
+数据来源（道具定义表）：
+
+| 表 | 文件 / offset | 说明 |
+|---|---|---|
+| 道具定义数组 `f` | news @55824 | `f=[...Object.entries(se).map(([e,t])=>ae(t,e,0)),{key:`oran-…}…]`；条目字段 `{key, rarity, desc, mods, max}`（`gold-teeth` 即在此） |
+| keyed 索引 `ce` | news @70046 | `ce=new Map(f.map(e=>[e.key,e]))`；news 导出名 `ti`，main import 为 `cr`（数组本身 main import 为 `wt`） |
 
 ### 1.3 库存生成（`nC` / `XS` / `GS`）
 
@@ -346,7 +353,7 @@ function $w(e){
 | `ue(e,t,n)` | news | @73720 | 单条 mod（`n=acc`） |
 | `de(e,t)` | news | @73817 | 一个维生素条目的全部 mod |
 | `pe(e,t)` | news | @74110 | `loaded-dice` 的随机 roll（`e`=卡值，`t`=picker） |
-| `fe` | news | @74270 附近 | `1.5`（dice 倍率） |
+| `fe` | news | @74099 | `1.5`（dice 倍率） |
 | 稀有度倍率 `ie` | news | @54905 | `[1,1.2,1.45,1.75,2.1]` |
 | 稀有度名 `ne` | news | @54781 | `Común/Poco común/Raro/Épico/Legendario` |
 | 稀有度色 `re` | news | @54850 | `#c8d0dc/#5ad87a/#4aa8ff/#c070ff/#ffc83a` |
@@ -356,9 +363,9 @@ function $w(e){
 | `canHold(e)` | main | @840446 | 道具上限 |
 | `KS(e,t)` | main | @1097230 | 出卡候选与权重 |
 | `GS(e,t,n,r)` | main | @1096826 | 稀有度抽样（同 §1.3） |
-| `qS(e,t)` | main | @1099900 附近 | 卡片文案/预览数值 |
+| `qS(e,t)` | main | @1099689 | 卡片文案/预览数值 |
 
-> main 里维生素定义 Map 被 import 成 `er`；新闻里的局部名是 `le`。同一个 `ue/de/pe` 在 main 中被 import 成别的短名（`addVitamin` 里 dice 分支调用的是 `Ln` = `pe`）。
+> main 里维生素定义 Map 被 import 成 `er`；新闻里的局部名是 `le`。同一个 `ue/de/pe` 在 main 中被 import 成别的短名：`addVitamin` 的 dice 分支调用 `Ln` = `pe`；`recompute` 调用 `hn` = `de`（main @837657：`for(let[e,n]of this.vitamins){let r=er.get(e);r&&t.push(...hn(r,n))}`）。
 
 ### 2.2 26 条维生素真值表（原样抄写）
 
@@ -436,36 +443,18 @@ addVitamin(e,t){
 ### 2.4 `ue` / `de` / `pe` 精确公式
 
 ```js
-function ue(e,t,n){let r=e.per*n;return e.kind==='add'?{add:r}:{mul:1+r}}
+function ue(e,t,n){let r=e.per*n;return e.kind===`add`?{stat:e.stat,add:r}:{stat:e.stat,mul:1+r}}
 
-function de(e,t){
-  if(er.get(e)?.dice){
-    let n={};
-    for(let r of t.rolls??[]){
-      let i=n[r.stat];
-      if(i) i.add==null?i.mul=(i.mul??1)+(r.mul-1):i.add=(i.add??0)+r.add;
-      else n[r.stat]=r.add==null?{stat:r.stat,mul:r.mul}:{stat:r.stat,add:r.add};
-    }
-    return Object.values(n)
-  }
-  return [
-    ue(e,t.level,t.acc),
-    ...(e.extra??[]).map(e=>({stat:e.stat,mul:1+e.mul*t.acc}))
-  ]
-}
+function de(e,t){if(e.dice){let e=new Map;for(let n of t.rolls??[]){let t=e.get(n.stat);t?n.add==null?t.mul=(t.mul??1)+(n.mul-1):t.add=(t.add??0)+n.add:e.set(n.stat,{...n})}return[...e.values()]}return[ue(e,t.level,t.acc),...(e.extra??[]).map(e=>({stat:e.stat,mul:1+e.mul*t.acc}))]}
 
 var fe=1.5;
-function pe(e,t){
-  let n=t(p.filter(e=>!e.dice&&!e.extra&&e.stat!=='overheal'&&e.stat!=='powerup')),
-      r=n.per*e*fe;
-  return {def:n,mod:n.kind==='add'?{stat:n.stat,add:r}:{stat:n.stat,mul:1+r}}
-}
+function pe(e,t){let n=t(p.filter(e=>!e.dice&&!e.extra&&e.stat!==`overheal`&&e.stat!==`powerup`)),r=n.per*e*fe;return{def:n,mod:n.kind===`add`?{stat:n.stat,add:r}:{stat:n.stat,mul:1+r}}}
 ```
 
 | 符号 | 语义 |
 |---|---|
-| `ue(def, level, acc)` | 取 `def.per * acc`；`level` 参数**未使用**。`add` → `{add}`；`mul` → `{mul:1+r}` |
-| `de(key, entry)` | 普通维生素：`ue` + 每个 `extra` 的 `{mul:1+extra.mul*acc}`；`loaded-dice`：只返回 `rolls` 按 `stat` 合并后的 mods（忽略 `acc`/`extra`） |
+| `ue(def, level, acc)` | 取 `def.per * acc`；`level` 参数**未使用**。`add` → `{stat, add}`；`mul` → `{stat, mul:1+r}`（**必须带 `stat`**，否则下游按 stat 合并会丢键） |
+| `de(def, entry)` | 普通维生素：`ue` + 每个 `extra` 的 `{stat, mul:1+extra.mul*acc}`；`loaded-dice`：只返回 `rolls` 按 `stat` 合并后的 mods（忽略 `acc`/`extra`）。注意参数是 **def 对象**（取 `e.dice`），不是 key |
 | `pe(value, picker)` | 从「非 dice、无 extra、stat 不是 overheal/powerup」的维生素里随机取一条，幅度 `per*value*1.5` |
 
 `de` 的 dice 合并规则：
@@ -525,6 +514,11 @@ for(let t of Zt){
 - 全部闭包 `F.shuffle` 后逐个调用，按 `key` 去重，取前 `t` 张（`t=3`，实验室 `choice4` 时 4 张）。
 - 不足时先用 `newMove` 候选 `o` 补齐，再用 `c` 里的未拥有维生素以 `newVit` 补齐（此时也调 `GS(e)`）。
 - 结论：**升级卡出现概率 ∝ 2×已拥有数量**；新维生素 ∝ `0.45×未拥有数量`。不是均匀分布。
+- **补充（核查）**：`F.shuffle(a)` 之后还有一次「置顶」——若首个 `newMove`/`upMove` 闭包位于下标 `u>0`，会 splice 出来 unshift 到队首，所以首张卡优先是招式卡（main @1099146）。原文：
+  ```js
+  let u=a.findIndex(e=>{let t=e();return t?.kind===`newMove`||t?.kind===`upMove`});
+  if(u>0){let[e]=a.splice(u,1);a.unshift(e)}
+  ```
 
 ### 2.8 展示格式（`qS`）
 
@@ -598,6 +592,14 @@ case `newVit`:case `upVit`:{
 | `showBranch` | main @2190988 | 伊布分支选择 UI |
 | `showEvolution` | main @2191571 | 进化中 HUD |
 | `evolutionReveal` | main @2192719 | 进化后揭示卡 |
+
+数据来源（进化表）：
+
+| 项 | 文件 / offset | 说明 |
+|---|---|---|
+| `evolutions` Map | main @4839 | 物种 DB 初始化 `evolutions=new Map` |
+| 反向索引构建 | main @5379 附近 | `if(e.evoFrom!=null&&ir(e.evoFrom)){…this.evolutions.set(e.evoFrom,…)}`；物种原始条目（含 `evoFrom`/`evoLevel`/`evoStage`）来自 `pokemon` 数据集 |
+| Godot 对应 | `pb_data_registry.gd:40-45`、`:141` | `_children_of` 同样由 `pokemon_list()` 的 `evoFrom` 构建，`evolutions_of` 直接读取；数据与 Web 同源 |
 
 ### 3.2 `runEvolution` / `evolutionsOf`（原样）
 
@@ -710,7 +712,7 @@ startEvolution(){
       this.enemies.flags[e]&R.Capture||(
         this.enemies.flags[e]&(R.Boss|12290)
           ? this.combat.hit(e,this.enemies.maxHp[e]*.05,{type:n.types[0],cls:'special',fixed:!0,silent:!0,noReact:!0})
-          : this.combat.hit(e,80*n.level,{type:n.types[0],cls:'special',silent:!0,knock:8,noReact:!0}
+          : this.combat.hit(e,80*n.level,{type:n.types[0],cls:'special',silent:!0,knock:8,noReact:!0})
       );
     this.cry(t);
     this.audio.evolveDone();
@@ -811,7 +813,7 @@ setSpecies(e){
   - `ready(actor) -> bool`：`level >= next.level` 且 `to` 有 sprite；
   - `set_species(actor, new_id)`：照抄 §3.6（HP 公式、`recompute`、`evoStage`），**不学招式**；
   - `start_evolution(state)`：`state='evolving'`、3.6 s 计时、结算顺序照抄 §3.5。
-- **触发钩子**：`src/core/pb_run.gd:559 open_offers` 开头，在 `PbCards.offer` 之前：
+- **触发钩子**：`src/core/pb_run.gd:563 open_offers` 开头，在 `PbCards.offer` 之前：
   ```gdscript
   if int(state["pendingLevels"]) > 0 and PbEvo.try_evolve(state):
       return   # 本次升级被进化消耗，不出卡
@@ -839,9 +841,9 @@ setSpecies(e){
 | `uS` 事件表 | main @1061261 | `fog/storm/eclipse/meowth` 的 name/sub/color/dur/pool/look |
 | `dS=52` | main @1062373 | meowth 事件物种 id（Meowth） |
 | `class fS` | main @1062329 | 事件控制器（`RD` 内的 `events` 字段） |
-| `get blind()` | main @1062871 | `kind==='fog' && k>.5` |
-| `get eliteBonus()` | main @1062889 | `kind==='eclipse' ? .12 : 0` |
-| `get marker()` | main @1062907 | 事件 Meowth 的存活标记 |
+| `get blind()` | main @1062767 | `kind==='fog' && k>.5` |
+| `get eliteBonus()` | main @1062815 | `kind==='eclipse' ? .12 : 0` |
+| `get marker()` | main @1062867 | 事件 Meowth 的存活标记 |
 | `startRandom()` | main @1062999 | 选事件、前置条件 |
 | `start(e)` | main @1063313 | 进入事件 |
 | `pool()` | main @1063720 | 事件刷怪池 |
@@ -1240,6 +1242,8 @@ this.weatherT>0&&(this.weatherT-=e,
 | `graveyard` | `['fog','clear','rain']` |
 | `volcano` | `['ash','sun','clear']` |
 
+> 数据来源：news 生物群系表 `a` @**44079**（`a=[{id:`forest`,…}]`）各条目的 `weather` 字段：forest @44652、desert @46514、coast @48376、glacier @50256、graveyard @52008、volcano @52807。
+
 - 事件结束**不调用** `setBaseWeather`，所以 `baseWeather` 始终不变；`weather` 只会因为 `weatherT` 归零或 `setWeather` 而变。
 - `blind = kind==='fog' && k>.5`（雾事件过半后启用「致盲」标记）。
 - `eliteBonus = kind==='eclipse' ? .12 : 0`。
@@ -1549,7 +1553,7 @@ clear(){for(let e=this.list.length-1;e>=0;e--)this.drop(e);this.run.player.hazar
   - `update`：`age` 阶段、`hazardSlow`/`hazSlow`、`hurt`/`bite`、`tick=.2 → .5`。
 - **接入点**：
   - `src/core/pb_run.gd:197 _tick_director` 末尾调用 `PbHazards.schedule/update`（与 Web 一致：无 `state==='play'` gate）；
-  - 玩家速度：`src/core/pb_run.gd:808` 的 `speed` 乘 `hazardSlow`；
+  - 玩家速度：`src/core/pb_run.gd:816` 的 `speed` 乘 `hazardSlow`；
   - 敌人速度：`PbEnemies` 移动结算处乘 `hazSlow` 并重置（需先加每槽位字段）；
   - 迁移：`PbRun` 的迁图流程里调用 `clear()`。
 - `data/pb/hazards.json` 已可直接读取；`name`/`say` 为西语 i18n key。
@@ -1574,9 +1578,9 @@ clear(){for(let e=this.list.length-1;e>=0;e--)this.drop(e);this.run.player.hazar
 | 项 | 状态 | 依据 |
 |---|---|---|
 | `dD/fD/pD` 与商店刷新有关 | **已否定** | 三常量只出现在交互提示系统；商店用 `meowthT/meowthLeft` |
-| `meowth` 事件的 `this.marker` 定义 | **推断** | `updateMeowth` 用 `this.marker` 判活，另有 `meowthGen` 字段；未逐字 dump |
+| `meowth` 事件的 `this.marker` 定义 | **已定位** | main @1062867：`t>=0&&e.gen[t]===this.meowthGen&&e.isAlive(t)` |
 | `roster.branch / evoLevel / evoLevels` | **部分未定位** | 属于 roster/league 模式；普通模式不触发。`planEvolution` 已给全码 |
-| `eliteBonus` 的使用方 | **未定位** | 只确认 getter `kind==='eclipse'?.12:0`；未找到消费点 |
+| `eliteBonus` 的使用方 | **已定位** | main @884098：计入精英生成概率 `(o + Se.elite[tier] + (difficulty-1)*.05 + events.eliteBonus) * stats.eliteSpawn` |
 | `JS(e,t)` / `Ey(t,Ot[n])` 等出卡应用函数 | **未展开** | 本文只到「卡片生成/展示」层；具体数值落地在 `doLevelUp` 的 `JS` 分支 |
 | `F` RNG 的具体实现 | **已知语义** | `F.range(a,b)`、`F.pick`、`F.weighted`、`F.chance`、`F.shuffle` 均在 bundle 内；未逐字抄实现 |
 | `Yt(n)`（director 阶段） | **未展开** | 与商店/维生素无关；影响 `enterPhase` |
