@@ -176,6 +176,16 @@ func _toggle_pause() -> void:
 	Audio.sfx("ui")
 
 
+func _toggle_aim() -> void:
+	# re keymap: aim = KeyQ. Flip the run's aim mode the way the web toggles auto/manual
+	# acquisition (PbRun._tick_player reads state.aimMode every frame, pb_run.gd:265).
+	var cur := String(_run.get("aimMode", "auto"))
+	var next := "manual" if cur == "auto" else "auto"
+	_run["aimMode"] = next
+	_hud.notify("瞄准模式：%s" % ("自动" if next == "auto" else "手动"))
+	Audio.sfx("ui")
+
+
 # ------------------------------------------------------------------ run flow
 func _start_run() -> void:
 	var settings := PbJson.as_dict(Save.store.get("settings", {}))
@@ -305,15 +315,33 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed:
 		return
 	var modal := String(_run.get("state", "")) == "modal" and _modal_scrim.visible
+	var over := String(_run.get("state", "")) == "over"
 	match event.keycode:
-		KEY_F:
-			if not modal and not _paused:
+		KEY_R:
+			# re keymap: ult/fusion = KeyR (moved off F to align with re).
+			if not modal and not _paused and not over:
 				_try_fusion()
+		KEY_F:
+			# re keymap: reroll = KeyF (offer modal only).
+			if modal:
+				_act_reroll()
+		KEY_X:
+			# re keymap: skip = KeyX (offer modal only).
+			if modal:
+				_act_skip()
+		KEY_Z:
+			# re keymap: banish = KeyZ (offer modal only).
+			if modal:
+				_act_banish_toggle()
+		KEY_Q:
+			# re keymap: aim = KeyQ -> toggle runtime aim mode (auto/manual).
+			if not _paused and not over:
+				_toggle_aim()
 		KEY_P:
-			if String(_run.get("state", "play")) != "over":
+			if not over:
 				_toggle_pause()
 		KEY_ESCAPE:
-			if String(_run.get("state", "")) == "over":
+			if over:
 				App.back_to_menu()
 			elif modal:
 				pass # the web blocks dismissal mid-choice
@@ -328,6 +356,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_3, KEY_KP_3:
 			if modal:
 				_offer_key(2)
+		KEY_4, KEY_KP_4:
+			if modal:
+				_offer_key(3)
 
 
 # ------------------------------------------------------------------ events
@@ -473,15 +504,15 @@ func _update_modal() -> void:
 		var data := _offer_card_data(card)
 		_modal_cards.add_child(UI.card_offer(data, func(): _offer_key(i), i))
 	# .actions: btn blue/ghost/red small with counts + kbd hints, disabled at 0.
-	var reroll := UI.small_button("刷新 (%d)" % int(_run.get("rerolls", 0)), _act_reroll, "blue")
+	var reroll := UI.small_button("刷新 F (%d)" % int(_run.get("rerolls", 0)), _act_reroll, "blue")
 	reroll.disabled = int(_run.get("rerolls", 0)) <= 0
 	reroll.add_child(_action_icon("reroll"))
 	_modal_actions.add_child(reroll)
-	var skip := UI.small_button("跳过 (%d)" % int(_run.get("skips", 0)), _act_skip, "ghost")
+	var skip := UI.small_button("跳过 X (%d)" % int(_run.get("skips", 0)), _act_skip, "ghost")
 	skip.disabled = int(_run.get("skips", 0)) <= 0
 	skip.add_child(_action_icon("skip"))
 	_modal_actions.add_child(skip)
-	var banish := UI.small_button("取消" if _banish_mode else "放逐 (%d)" % int(_run.get("banishes", 0)),
+	var banish := UI.small_button("取消 Z" if _banish_mode else "放逐 Z (%d)" % int(_run.get("banishes", 0)),
 		_act_banish_toggle, "red" if not _banish_mode else "ghost")
 	if not _banish_mode:
 		banish.disabled = int(_run.get("banishes", 0)) <= 0
