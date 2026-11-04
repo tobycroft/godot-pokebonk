@@ -40,9 +40,14 @@ var _settle_scrim: PanelContainer
 var _settle_body: VBoxContainer
 var _shop_scrim: PanelContainer
 var _shop_rows: VBoxContainer
+var _shop_sell_rows: VBoxContainer
 var _shop_actions: HBoxContainer
 var _shop_info: Label
 var _shop_open := false
+var _meowth_node: MeshInstance3D
+var _prompt: Label
+var _sell_armed_key := ""
+var _sell_armed_t := 0.0
 var _time := 0.0
 var _paused := false
 var _trauma := 0.0
@@ -129,6 +134,22 @@ func _build_world() -> void:
 		o.visible = false
 		add_child(o)
 		_orb_nodes.append(o)
+	# Meowth shop NPC (species 52): a billboard like the enemies, shown only while
+	# PbRun's meowth timer has it on the map.
+	var meowth := MeshInstance3D.new()
+	var meowth_quad := QuadMesh.new()
+	meowth_quad.size = Vector2(1.8, 1.8)
+	var meowth_mat := StandardMaterial3D.new()
+	meowth_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	meowth_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	meowth_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	meowth_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	meowth_mat.albedo_texture = PbVisuals.front_texture(52)
+	meowth.mesh = meowth_quad
+	meowth.material_override = meowth_mat
+	meowth.visible = false
+	add_child(meowth)
+	_meowth_node = meowth
 
 
 # ------------------------------------------------------------------ hud
@@ -145,6 +166,14 @@ func _build_hud() -> void:
 	_fx.name = "HudFx"
 	_layer.add_child(_fx)
 	UI.fill(_fx)
+	# Interactable prompt (`[E] Tienda de Meowth`), shown while the NPC is near.
+	_prompt = UI.label("", 18, Color.WHITE)
+	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_prompt.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_prompt.offset_top = -120.0
+	_prompt.offset_bottom = -90.0
+	_prompt.visible = false
+	_layer.add_child(_prompt)
 
 	# .modal shells (CSS .modal: radial scrim, h1 plate, centred column).
 	var level := UI.modal_shell("升级！选择强化")
@@ -192,9 +221,9 @@ func _build_hud() -> void:
 	UI.fill(pause_scrim)
 	UI.fit_capsule(pause_body.get_parent().get_child(0) as Control, 34.0)
 
-	# Meowth shop (nC/aC @1104993-1105132). The web opens it from the meowth
-	# interactable (@1303449); this port has no interactable layer yet, so the
-	# run screen binds it to KeyM -- 待确认.
+	# Meowth shop (nC/aC @1103831/@1104019). The web opens it from the meowth
+	# interactable (@1547939); this port shows an [E] prompt next to the NPC
+	# (PbRun meowth timer, @1407519/@1407893).
 	var shop := UI.modal_shell(App.ui("Meowth: «¿Tienes dinero, miau?»"), true)
 	_shop_scrim = shop["scrim"]
 	var shop_body: VBoxContainer = shop["body"]
@@ -208,6 +237,9 @@ func _build_hud() -> void:
 	_shop_rows = UI.vbox(10)
 	_shop_rows.name = "ShopRows"
 	shop_body.add_child(_shop_rows)
+	_shop_sell_rows = UI.vbox(6)
+	_shop_sell_rows.name = "ShopSellRows"
+	shop_body.add_child(_shop_sell_rows)
 	_shop_actions = UI.hbox(10)
 	_shop_actions.name = "ShopActions"
 	_shop_actions.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -235,6 +267,9 @@ func _toggle_aim() -> void:
 
 # ------------------------------------------------------------------ shop
 func _open_shop() -> void:
+	# The NPC must still be on the map: after 45 s (meowthLeaves) it is gone.
+	if not PbRun.meowth_present(_run):
+		return
 	PbShop.open(_run)
 	_shop_open = true
 	_shop_scrim.visible = true
@@ -245,6 +280,7 @@ func _open_shop() -> void:
 func _close_shop() -> void:
 	_shop_open = false
 	_shop_scrim.visible = false
+	_sell_armed_key = ""
 	Audio.sfx("ui")
 
 
@@ -260,9 +296,27 @@ func _shop_buy(index: int) -> void:
 		_render_shop()
 
 
-## Shop rows: item icon + name/desc + price / VENDIDO (showShop @2183004).
+## Selling (oT @1284315): one click arms the row for 3 s, a second click sells.
+func _shop_sell(key: String) -> void:
+	if _sell_armed_key == key and _time - _sell_armed_t <= 3.0:
+		var price := PbShop.sell(_run, key)
+		_sell_armed_key = ""
+		if price > 0:
+			_hud.notify(App.ui("Vender +{n}", {"n": price}))
+			Audio.sfx("ui")
+			_render_shop()
+		return
+	_sell_armed_key = key
+	_sell_armed_t = _time
+	Audio.sfx("ui", 1.6)
+	_render_shop()
+
+
+## Shop rows: item icon + name/desc + price / VENDIDO (showShop @2178449).
 func _render_shop() -> void:
 	for child in _shop_rows.get_children():
+		child.queue_free()
+	for child in _shop_sell_rows.get_children():
 		child.queue_free()
 	for child in _shop_actions.get_children():
 		child.queue_free()
@@ -272,6 +326,11 @@ func _render_shop() -> void:
 		_shop_rows.add_child(UI.dim(App.ui("«Ya lo tienes todo, miau. Aquí no me queda nada para ti.»")))
 	for i in rows.size():
 		_shop_rows.add_child(_shop_row(i, PbJson.as_dict(rows[i])))
+	var sellable := PbShop.sellable(_run)
+	if not sellable.is_empty():
+		_shop_sell_rows.add_child(UI.dim(App.ui("Vender tus objetos:")))
+		for raw in sellable:
+			_shop_sell_rows.add_child(_sell_row(PbJson.as_dict(raw)))
 	var cost := PbShop.reroll_cost(_run)
 	var reroll := UI.button(App.ui("Renovar surtido · {n} ₽", {"n": cost}), _shop_reroll, false, "blue", true)
 	reroll.disabled = int(_run.get("gold", 0)) < cost
@@ -314,6 +373,23 @@ func _shop_row(index: int, entry: Dictionary) -> Control:
 	return panel
 
 
+## Sell row: name + owned count + `Vender +n` (armed state asks for a second
+## press within 3 s).
+func _sell_row(entry: Dictionary) -> Control:
+	var key := str(entry.get("key", ""))
+	var meta := PbJson.as_dict(PbData.items_map().get(key, {}))
+	var row := UI.hbox(8)
+	var name := UI.label(App.t("items", int(meta.get("id", 0)), str(meta.get("name", key))), 16)
+	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(name)
+	row.add_child(UI.dim("%d" % int(entry.get("count", 0))))
+	var armed := _sell_armed_key == key and _time - _sell_armed_t <= 3.0
+	var label := App.ui("¿Vender? Pulsa otra vez") if armed \
+		else App.ui("Vender +{n}", {"n": int(entry.get("price", 0))})
+	row.add_child(UI.small_button(label, func(): _shop_sell(key), "red" if armed else "ghost"))
+	return row
+
+
 # ------------------------------------------------------------------ run flow
 func _start_run() -> void:
 	var settings := PbJson.as_dict(Save.store.get("settings", {}))
@@ -344,6 +420,7 @@ func _start_run() -> void:
 	_modal_scrim.visible = false
 	_shop_open = false
 	_shop_scrim.visible = false
+	_sell_armed_key = ""
 	_hud.build(_run)
 	if _fx != null:
 		_fx.set_low_hp(1.0, false)
@@ -398,6 +475,9 @@ func _process(delta: float) -> void:
 		_render(dt)
 		return
 	if _shop_open:
+		if _sell_armed_key != "" and _time - _sell_armed_t > 3.0:
+			_sell_armed_key = ""
+			_render_shop()
 		_render(dt)
 		return
 	if str(_run.get("state", "play")) == "modal":
@@ -493,17 +573,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_toggle_aim()
 		KEY_E:
 			# re keymap: capture throw = KeyE (kS.tryThrow/throwBall @1082671).
+			# The meowth interactable shares the key and wins while the NPC is near.
 			if not modal and not _paused and not over:
-				if PbCapture.throw_ball(_run):
+				if PbRun.meowth_near(_run):
+					_open_shop()
+				elif PbCapture.throw_ball(_run):
 					Audio.sfx("ui")
 		KEY_P:
 			if not over:
 				_toggle_pause()
-		KEY_M:
-			# Shop entry: the web opens it from the meowth interactable (@1303449);
-			# this port has no interactable layer yet -- 待确认.
-			if not modal and not _paused and not over:
-				_open_shop()
 		KEY_ESCAPE:
 			if over:
 				App.back_to_menu()
@@ -694,6 +772,22 @@ func _render(dt: float) -> void:
 		node2.position = Vector3(float(orb["x"]), _ground_y(float(orb["x"]), float(orb["z"])) + 0.4, float(orb["z"]))
 	for i in range(orb_used, _orb_nodes.size()):
 		_orb_nodes[i].visible = false
+
+	# Meowth NPC + `[E]` prompt. The prompt hides while a modal/shop is open.
+	var meowth_here := PbRun.meowth_present(_run)
+	_meowth_node.visible = meowth_here
+	if meowth_here:
+		var mx := float(_run.get("meowthX", 0.0))
+		var mz := float(_run.get("meowthZ", 0.0))
+		_meowth_node.position = Vector3(mx, _ground_y(mx, mz) + 0.9
+			+ sin(_time * 2.0) * 0.08, mz)
+	var play_state := str(_run.get("state", "play")) == "play"
+	var prompt_on := meowth_here and PbRun.meowth_near(_run) and not _shop_open \
+		and not _paused and play_state and not _modal_scrim.visible \
+		and not _settle_scrim.visible
+	_prompt.visible = prompt_on
+	if prompt_on:
+		_prompt.text = "[E] " + App.ui("Tienda de Meowth")
 
 
 # ------------------------------------------------------------------ modals

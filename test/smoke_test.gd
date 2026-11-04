@@ -41,6 +41,7 @@ func _ready() -> void:
 	_terrain_checks()
 	_hazard_checks()
 	_evolution_checks()
+	_shop_checks()
 	_locale_checks()
 	report()
 	get_tree().quit(0 if _failures.is_empty() else 1)
@@ -1185,6 +1186,131 @@ func _evolution_checks() -> void:
 	ok(int(actor.get("species_id", 0)) == 2 and not PbJson.as_array(actor.get("types", [])).is_empty(),
 		"species_id/types swap to the new form")
 	ok(new_max > old_max, "ivysaur maxHp is recomputed above bulbasaur's")
+
+
+# ------------------------------------------------------------------ shop (6f)
+## Covers the systems-spec §1 gaps: mode stock keys, endless scale/reroll,
+## oT sell prices, purchase validation and the meowth NPC timer (@1401011).
+func _shop_checks() -> void:
+	section("shop: Meowth stock, prices, selling, NPC timer")
+	# Fixed seed: the same seed must reproduce the same 4 rows and prices.
+	var run_a := PbRun.create(4, "forest", 999, {})
+	PbShop.open(run_a)
+	var run_b := PbRun.create(4, "forest", 999, {})
+	PbShop.open(run_b)
+	var stock_a := PbShop.stock(run_a)
+	var stock_b := PbShop.stock(run_b)
+	ok(stock_a.size() == 4 and stock_b.size() == 4, "seed 999 rolls four stock rows")
+	var same_stock := true
+	for i in mini(stock_a.size(), stock_b.size()):
+		var ea := PbJson.as_dict(stock_a[i])
+		var eb := PbJson.as_dict(stock_b[i])
+		same_stock = same_stock and str(ea.get("key", "")) == str(eb.get("key", "")) \
+			and int(ea.get("price", 0)) == int(eb.get("price", 0))
+	ok(same_stock, "fixed seed reproduces the same stock and prices (nC @1103831)")
+	# Pool rules from XS @1101219: non-premium (unowned premium is excluded),
+	# below the stack cap and not switched off.
+	var pool_ok := true
+	for raw in stock_a:
+		var def := PbShop.item_def(str(PbJson.as_dict(raw).get("key", "")))
+		if def.is_empty():
+			pool_ok = false
+			continue
+		if bool(def.get("premium", false)):
+			pool_ok = false
+		if int(PbActor.item_power(PbJson.as_dict(run_a["player"]), str(def["key"]))) \
+				>= int(def.get("max", 10)):
+			pool_ok = false
+	ok(pool_ok, "stock only contains available, non-full items")
+
+	# aC @1104019 samples for every rarity at stage 2: 80/130/220/400/750 * 2.2.
+	var samples := {}
+	for raw in PbJson.as_array(PbData.pb_table("items_game")):
+		var def := PbJson.as_dict(raw)
+		var rarity := int(def.get("rarity", 0))
+		if not samples.has(rarity):
+			samples[rarity] = str(def.get("key", ""))
+	run_a["stage"] = 2
+	var web_prices := [176, 286, 484, 880, 1650]
+	for r in 5:
+		ok(PbShop.price_for(run_a, str(samples.get(r, ""))) == int(web_prices[r]),
+			"web aC rarity %d at stage 2 = %d ₽ (Godot matches)" % [r, int(web_prices[r])])
+	run_a["stage"] = 1
+	run_a["shopBuys"] = []
+	ok(PbShop.price_for(run_a, str(samples.get(0, ""))) == 80,
+		"web aC rarity 0 at stage 1 = 80 ₽ (Godot matches)")
+	# Endless rT @1284139: 1.7^floor((time-210)/300) * curse.chest.
+	var er := PbRun.create(4, "forest", 11, {}, "endless")
+	ok(PbShop.shop_key(er) == 100, "endless stock key starts at 100 + shopVisit")
+	er["endless"] = {"shopVisit": 2, "curse": {"chest": 1.0}}
+	ok(PbShop.shop_key(er) == 102, "endless stock key follows shopVisit (100+2)")
+	er["time"] = 210.0
+	ok(PbShop.price_for(er, str(samples.get(0, ""))) == 80,
+		"endless price at t=210 is the base 80")
+	er["time"] = 510.0
+	ok(PbShop.price_for(er, str(samples.get(0, ""))) == 136,
+		"endless price at t=510 is 1.7x (80 -> 136)")
+	er["time"] = 210.0
+	er["endless"]["curse"]["chest"] = 1.5
+	ok(PbShop.price_for(er, str(samples.get(0, ""))) == 120,
+		"endless chest curse multiplies the price (80 -> 120)")
+	er["shop"] = {"stage": 100, "stock": [], "rerolls": 1}
+	er["shopRerolls"] = 5
+	er["endless"]["curse"]["chest"] = 1.0
+	ok(PbShop.reroll_cost(er) == 64,
+		"endless reroll uses 1.6^shop.rerolls, not shopRerolls (40 -> 64)")
+	er["shopBuys"] = [4, 4, 4]
+	ok(absf(PbShop.shop_heat(er) - 1.0) < EPS, "endless shopHeat stays 1")
+
+	# Purchase validation (buyShopItem @1548502): short gold leaves everything untouched.
+	var buy_run := PbRun.create(4, "forest", 999, {})
+	PbShop.open(buy_run)
+	var row_key := str(PbJson.as_dict(PbShop.stock(buy_run)[0]).get("key", ""))
+	var row_price := int(PbJson.as_dict(PbShop.stock(buy_run)[0]).get("price", 0))
+	buy_run["gold"] = float(row_price - 1)
+	ok(not PbShop.buy(buy_run, 0), "gold below the price refuses the purchase")
+	ok(not bool(PbJson.as_dict(PbShop.stock(buy_run)[0]).get("sold", false)),
+		"a refused purchase does not mark the row sold")
+	ok(int(PbActor.item_power(PbJson.as_dict(buy_run["player"]), row_key)) == 0,
+		"a refused purchase grants no item")
+	buy_run["gold"] = float(row_price)
+	ok(PbShop.buy(buy_run, 0) and int(buy_run["gold"]) == 0, "exact gold buys the row")
+	ok(not PbShop.buy(buy_run, 0), "the sold row cannot be bought again")
+
+	# oT @1284315: stage 1 lower bounds win with chestsBought=0.
+	var sell_run := PbRun.create(4, "forest", 999, {})
+	PbShop.open(sell_run)
+	var sell_lower := [10, 18, 30, 50, 90]
+	for r in 5:
+		ok(PbShop.sell_price(sell_run, r) == int(sell_lower[r]),
+			"oT rarity %d at stage 1 = %d ₽" % [r, int(sell_lower[r])])
+	sell_run["stage"] = 2
+	ok(PbShop.sell_price(sell_run, 0) == 20, "oT rarity 0 at stage 2 = 20 ₽ (lower * stage)")
+	var sell_key := str(samples.get(0, ""))
+	PbActor.give_item(PbJson.as_dict(sell_run["player"]), sell_key, 2.0)
+	sell_run["stage"] = 1
+	sell_run["gold"] = 0.0
+	ok(PbShop.sell(sell_run, sell_key) == 10, "selling a rarity-0 item pays 10 ₽")
+	ok(int(sell_run["gold"]) == 10, "selling adds the oT gold")
+	ok(int(PbActor.item_power(PbJson.as_dict(sell_run["player"]), sell_key)) == 1,
+		"selling removes exactly one copy")
+	ok(int(PbJson.as_dict(sell_run["econ"]).get("sold", 0)) == 1, "econ.sold counts sales")
+
+	# Meowth NPC (@1401011/@1407519/@1407893): 210 s arrival, 45 s stay.
+	var np := PbRun.create(4, "forest", 7, {})
+	ok(absf(float(np.get("meowthT", 0.0)) - 210.0) < EPS, "meowthT starts at 210 s")
+	ok(not PbRun.meowth_present(np), "meowth is absent before the first timer")
+	PbRun._tick_meowth(np, 210.0)
+	ok(PbRun.meowth_present(np), "meowth arrives after 210 s")
+	ok(int(np.get("shopVisit", 0)) == 1, "arrival increments shopVisit")
+	ok(absf(float(np.get("meowthLeft", 0.0)) - 45.0) < EPS, "meowth stays 45 s")
+	ok(absf(float(np.get("meowthT", 0.0)) - 300.0) < EPS, "next arrival waits 300 s")
+	PbJson.as_dict(np["player"])["x"] = float(np.get("meowthX", 0.0))
+	PbJson.as_dict(np["player"])["z"] = float(np.get("meowthZ", 0.0))
+	ok(PbRun.meowth_near(np), "standing on the NPC makes it interactable")
+	PbRun._tick_meowth(np, 46.0)
+	ok(not PbRun.meowth_present(np), "meowth leaves after its 45 s stay")
+	ok(not PbRun.meowth_near(np), "the departed NPC can no longer be interacted with")
 
 
 # ------------------------------------------------------------------ language
