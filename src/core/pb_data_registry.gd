@@ -234,6 +234,14 @@ func world_fx() -> Dictionary:
 	return PbJson.as_dict(pb_table("world_fx"))
 
 
+## Hostile terrain (defs + byBiome). world_fx.json is the single runtime source:
+## it carries the same numbers as the bundle plus the four-locale name/say text.
+## data/pb/hazards.json is the flat ingest copy and is only checked by the smoke
+## test for parity.
+func hazards_table() -> Dictionary:
+	return PbJson.as_dict(world_fx().get("hazards"))
+
+
 ## Biome titles come with es/en/zh/zht variants straight from the mirror's locale chunks. The
 ## port is zh-only for now, so zh wins and the Spanish source string is the last resort.
 func biome_label(id: String, locale: String = "zh") -> String:

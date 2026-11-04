@@ -418,7 +418,8 @@ func _move_input(dt: float) -> void:
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
 		dir.y += 1.0
 	if dir != Vector2.ZERO:
-		var speed := float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) * 6.0
+		var speed := float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) * 6.0 \
+			* float(player.get("hazardSlow", 1.0))
 		dir = dir.normalized()
 		var nx := float(player.get("x", 0.0)) + dir.x * speed * dt
 		var nz := float(player.get("z", 0.0)) + dir.y * speed * dt

@@ -17,6 +17,7 @@ const Flag := {
 	"Boss": 4,
 	"Elite": 1,
 	"Alpha": 2,
+	"Flying": 16,
 	"Totem": 4096,
 	"Summoner": 8192,
 	"Treasure": 16384,
@@ -33,7 +34,7 @@ const TIER_WEIGHT := {
 static func create_pool() -> Dictionary:
 	var pool := {}
 	var floats := ["x", "z", "y", "hp", "maxHp", "dmg", "speed", "weight", "scale", "anim", "cd",
-		"xp", "burnDps", "poisonDps"]
+		"xp", "burnDps", "poisonDps", "hazSlow"]
 	for key in floats:
 		pool[key] = []
 	for key in ["species", "tier", "flags", "typeA", "typeB", "gen"]:
@@ -113,6 +114,7 @@ static func spawn(pool: Dictionary, species_id: int, x: float, z: float, stage: 
 	set_field(pool, "xp", index, float(numbers["xp"]))
 	set_field(pool, "scale", index, clampf(float(species.get("height", 10)) / 10.0, 0.6, 3.0))
 	set_field(pool, "cd", index, 0.0)
+	set_field(pool, "hazSlow", index, 1.0)
 	set_field(pool, "species", index, species_id)
 	set_field(pool, "tier", index, tier)
 	set_field(pool, "flags", index, int(Flag["Alive"]) | int(numbers["flags"]))

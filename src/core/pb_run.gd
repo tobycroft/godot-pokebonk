@@ -250,6 +250,10 @@ static func _tick_director(state: Dictionary, dt: float) -> void:
 		state["bossIndex"] = -1
 		state["stageCleared"] = false
 		_message(state, "stage %d" % int(state["stage"]))
+	# Hostile terrain: `schedule`/`update` run every director tick, matching the
+	# web controller (`kw.update`), with no extra play-state gate.
+	PbHazards.schedule(state, dt)
+	PbHazards.update(state, dt)
 
 
 ## Danger meter (bundle director.danger @882422 = 0.5*log2(hpMult*dmgMult*
@@ -656,6 +660,9 @@ static func _tick_enemies(state: Dictionary, dt: float) -> void:
 				speed *= 0.5
 			if PbEnemies.get_field(pool, "sleep", i) > 0.0 or PbEnemies.get_field(pool, "freeze", i) > 0.0:
 				speed = 0.0
+			# Enemy hazards: `S *= hazSlow[h]; hazSlow[h] = 1` in the web move step.
+			speed *= float(PbEnemies.get_field(pool, "hazSlow", i))
+			PbEnemies.set_field(pool, "hazSlow", i, 1.0)
 			PbEnemies.set_field(pool, "x", i, float(PbEnemies.get_field(pool, "x", i)) + dx / dist * speed * dt)
 			PbEnemies.set_field(pool, "z", i, float(PbEnemies.get_field(pool, "z", i)) + dz / dist * speed * dt)
 		if dist < 1.4:
@@ -805,7 +812,8 @@ static func _walk_towards_action(state: Dictionary, dt: float) -> void:
 	var md := sqrt(mx * mx + mz * mz)
 	if md < 0.001:
 		return
-	var speed := float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) * 6.0
+	var speed := float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) * 6.0 \
+		* float(player.get("hazardSlow", 1.0))
 	var step := minf(speed * dt, md)
 	player["x"] = px + mx / md * step
 	player["z"] = pz + mz / md * step
