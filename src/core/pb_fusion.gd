@@ -53,6 +53,15 @@ static func all_recipes() -> Array:
 	return _entries.duplicate()
 
 
+## zw(): the signature recipe owned by a dex member, if any.
+static func signature_for(member_id: int) -> Dictionary:
+	_ensure()
+	for r in _entries:
+		if str(r.get("kind", "")) == "signature" and int(r.get("member", -1)) == member_id:
+			return r
+	return {}
+
+
 static func recipe_id(key: String) -> int:
 	## The web build numbers fused moves from an internal base (VC). The port keeps
 	## its own block above the moves.json id range so fused moves never collide.
@@ -152,7 +161,10 @@ static func fused_def(recipe: Dictionary) -> Dictionary:
 
 
 ## Gw(): every fusion the current move list allows, with what is still missing.
-static func offers(moves: Array) -> Array:
+## `roster_id` adds the dex-signature placeholder offer the web shows for a
+## signature move the player has not unlocked yet; `banished` maps "m<id>" to
+## true for moves banished during the run.
+static func offers(moves: Array, roster_id: int = 0, banished: Dictionary = {}) -> Array:
 	var out := []
 	var eligible := []
 	for i in moves.size():
@@ -174,9 +186,9 @@ static func offers(moves: Array) -> Array:
 				continue
 			var need := []
 			if int(ia[1].get("level", 1)) < MOVE_MAX_LEVEL:
-				need.append("%s Nv. %d/%d" % [da.get("name", "?"), int(ia[1].get("level", 1)), MOVE_MAX_LEVEL])
+				need.append(_level_need(da.get("name", "?"), int(ia[1].get("level", 1))))
 			if int(ib[1].get("level", 1)) < MOVE_MAX_LEVEL:
-				need.append("%s Nv. %d/%d" % [db.get("name", "?"), int(ib[1].get("level", 1)), MOVE_MAX_LEVEL])
+				need.append(_level_need(db.get("name", "?"), int(ib[1].get("level", 1))))
 			out.append({
 				"recipe": recipe,
 				"a": int(ia[0]),
@@ -186,9 +198,72 @@ static func offers(moves: Array) -> Array:
 				"ready": need.is_empty(),
 				"need": need,
 			})
+	# Roster placeholder: a signature move the run's species owns but the player
+	# has not learned yet. The web (Gw) always appends it, ready = false.
+	if roster_id > 0:
+		var signature := signature_for(roster_id)
+		var already_listed := false
+		for o in out:
+			if str(PbJson.as_dict(o.get("recipe", {})).get("key", "")) == str(signature.get("key", "")):
+				already_listed = true
+				break
+		if not signature.is_empty() and not already_listed:
+			var member_defs := []
+			for move_key in PbJson.as_array(signature.get("moves", [])):
+				var movedef := PbData.move_def(str(move_key))
+				if movedef.is_empty():
+					member_defs.clear()
+					break
+				member_defs.append(movedef)
+			if member_defs.size() == 2:
+				var roster_need := []
+				for movedef in member_defs:
+					var move_id := int(movedef.get("id", 0))
+					var owned_level := -1
+					for slot in moves:
+						if slot == null:
+							continue
+						var inst := PbJson.as_dict(slot)
+						if int(PbJson.as_dict(inst.get("def", {})).get("id", -1)) == move_id:
+							owned_level = int(inst.get("level", 1))
+							break
+					var move_name := str(movedef.get("name", "?"))
+					if owned_level > 0:
+						if owned_level < MOVE_MAX_LEVEL:
+							roster_need.append(_level_need(move_name, owned_level))
+					elif _inside_fusion(moves, move_id):
+						roster_need.append(App.ui("{name} ya está dentro de otra fusión", {"name": move_name}))
+					elif banished.has("m%d" % move_id):
+						roster_need.append(App.ui("{name} está desterrado", {"name": move_name}))
+					else:
+						roster_need.append(App.ui("Aprende {name}", {"name": move_name}))
+				out.append({
+					"recipe": signature,
+					"a": -1,
+					"b": -1,
+					"names": [str(member_defs[0].get("name", "")), str(member_defs[1].get("name", ""))],
+					"types": [str(member_defs[0].get("type", "")), str(member_defs[1].get("type", ""))],
+					"ready": false,
+					"need": roster_need,
+				})
 	var rank := {"signature": 0, "reaction": 1, "type": 2, "glitch": 3}
 	out.sort_custom(func(p, q): return _before(p, q, rank))
 	return out
+
+
+## Ww(): "{name} Nv. {lv}/{max}" through the web UI string table.
+static func _level_need(move_name: Variant, level: int) -> String:
+	return App.ui("{name} Nv. {lv}/{max}", {"name": str(move_name), "lv": level, "max": MOVE_MAX_LEVEL})
+
+
+## The move is already a parent of a fused move in the list.
+static func _inside_fusion(moves: Array, move_id: int) -> bool:
+	for slot in moves:
+		if slot == null:
+			continue
+		if PbJson.as_array(PbJson.as_dict(slot).get("parents", [])).has(move_id):
+			return true
+	return false
 
 
 static func _before(p: Dictionary, q: Dictionary, rank: Dictionary) -> bool:

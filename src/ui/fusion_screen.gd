@@ -14,6 +14,7 @@ var _status: Label
 var _max_level := true
 var _filter := "all"
 var _catalogue: Array = []
+var _species_id := 0
 
 
 func _ready() -> void:
@@ -37,6 +38,7 @@ func _ready() -> void:
 	left.add_child(lv)
 	lv.add_child(UI.label(App.ui("Ataques"), 18))
 	var actor := _actor()
+	_species_id = int(actor.get("species_id", 0))
 	_moves = PbJson.as_array(actor.get("moves", []))
 	for i in _moves.size():
 		var m = _moves[i]
@@ -105,6 +107,7 @@ func _toggle_levels() -> void:
 func _reroll_moves() -> void:
 	# Rebuild the actor and (optionally) push every move to the fusion threshold.
 	var actor := _actor()
+	_species_id = int(actor.get("species_id", 0))
 	_moves = PbJson.as_array(actor.get("moves", []))
 	if _max_level:
 		for i in _moves.size():
@@ -139,7 +142,7 @@ func _kind_label(kind: String) -> String:
 func refresh() -> void:
 	for c in _list.get_children():
 		c.queue_free()
-	var offers := PbFusion.offers(_moves)
+	var offers := PbFusion.offers(_moves, _species_id)
 	var shown := 0
 	for raw in offers:
 		var offer := PbJson.as_dict(raw)
