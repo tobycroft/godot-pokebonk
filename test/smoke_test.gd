@@ -254,9 +254,9 @@ func _run_flow() -> void:
 	ok(not PbJson.as_array(run["offers"]).is_empty() or int(run["pendingLevels"]) == 0,
 		"modal state consistent with pending levels")
 	var result := PbRun.finish(run, "exit")
-	# Web semantics (bundle @763264): a kill only marks the species as seen. The
-	# capture list is written exclusively by a successful Poké Ball throw.
-	ok(PbJson.as_array(stats.get("captures", [])).size() == 0,
+	# Web semantics: `seen` is registered when the species appears; the captured
+	# list is written exclusively by a successful Poké Ball throw.
+	ok(PbJson.as_array(stats.get("captured", [])).size() == 0,
 		"kills do not write captures (ball throw only)")
 	ok(PbJson.as_array(stats.get("newSeen", [])).size() > 0, "seen species list filled")
 	ok(PbJson.as_dict(stats.get("killsBy", {})).size() > 0, "per-species kill counts tracked")
@@ -317,7 +317,7 @@ func _run_flow() -> void:
 	ok(float(manual["time"]) > 20.0, "manual-aim run keeps simulating (t=%.0fs)" % float(manual["time"]))
 
 	# --- capture (bundle class kS @1074615): only a successful ball throw writes
-	# the captures list; a kill just marks the species as seen.
+	# the captured list; kills never do (seen is written at spawn).
 	var cap_run := PbRun.create(25, "forest", 777, {})
 	ok(cap_run.has("capture"), "capture encounter state created")
 	PbCapture.data_of(cap_run)["spawnAt"] = 0.0
@@ -352,8 +352,8 @@ func _run_flow() -> void:
 	ok(PbCapture.throw_ball(cap_run), "ball throw accepted inside the 9-unit range")
 	PbCapture.tick(cap_run, 1.0)
 	var cap_family := int(PbCapture.data_of(cap_run).get("family", 0))
-	ok(PbJson.as_array(cap_run["stats"].get("captures", [])).has(cap_family),
-		"successful catch records the family in run captures")
+	ok(PbJson.as_array(cap_run["stats"].get("captured", [])).has(cap_family),
+		"successful catch records the family in run captured")
 	ok(PbJson.as_array(Save.store.get("captured", [])).has(cap_family)
 		and PbJson.as_array(Save.store.get("unlocked", [])).has(cap_family),
 		"catch writes captures + unlocked to the profile (joinLeague @1667709)")
