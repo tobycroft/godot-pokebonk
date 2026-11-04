@@ -1,22 +1,30 @@
 extends Control
-## Main menu, laid out node-for-node like the web build's start screen (v0.8.34, mirrored in
-## pokebonk-re): floating language/fullscreen pills top-left, the trainer bar top-right, the
-## DigiAssault wordmark with its BETA badge, the `.mm-item` grid (a big striped `play` tile plus
-## endless / coop / event / tasks), the five small tiles, the mini row, and the season card on
-## the right -- all painted from the ported CSS tokens (PbTheme) over the page backdrop.
+## Main menu, rebuilt node-for-node from the web build's start screen (v0.8.59,
+## mirrored in pokebonk-web). The absolute layout follows the `.mm` rules:
+##   .mm-top    fixed top-left/top-right pills + trainer bar
+##   .mm-left   left gutter, width `--mm-w`, top 52%, translateY(-50%)
+##   .mm-season right inset `clamp(22,3vw,56)`, width `clamp(340,26vw,400)`,
+##              max-height `min(640, 100dvh - 170)`
+##   .mm-foot   absolute bottom:10, white 12/800 + shadow
+## Every size/colour comes from the extracted CSS tokens (PbTheme); the `_on_resized`
+## handler re-applies the `@media (max-height:760px)` compact set so 720p never overflows,
+## and the left column is wrapped in a ScrollContainer as the fallback for shorter windows.
 ##
-## The port-only extras (derived stats, move list, sliders, locale picker) live in the
-## `Ajustes` modal instead of crowding the menu, which is also where the web puts them.
+## Port-only extras (derived stats, move list, sliders, locale picker, recent runs) live
+## inside the `Ajustes` modal, which is where the web keeps its own secondary content.
 ##
 ## Data flows through the ported API routes exactly as the web client does:
 ## GET /profile, POST /profile/starter, PUT /profile/prefs.
 
+
+const SKEW := 0.10510423526  # tan(6deg): `.mm-item{transform:skew(-6deg)}`
 
 var _wallet: HBoxContainer
 var _wallet_name: Label
 var _wallet_sub: Label
 var _wallet_avatar: TextureRect
 var _play_sub: Label
+var _play_title: Label
 var _play_sprite: PmdSprite
 var _showcase_sprite: PmdSprite
 var _showcase_name: Label
@@ -25,9 +33,40 @@ var _showcase_types: HBoxContainer
 var _stat_grid: GridContainer
 var _moves_box: VBoxContainer
 var _recent: VBoxContainer
-var _hint: Label
 var _settings_scrim: PanelContainer
 var _starter := 4
+
+# --- `.mm` layout nodes (sizes applied in _on_resized) ---
+var _mm: Control
+var _top_row_ctrl: HBoxContainer
+var _left_area: Control
+var _left_scroll: ScrollContainer
+var _left_col: VBoxContainer
+var _brand: Control
+var _logo_node: Control
+var _brand_word: Control
+var _brand_poke: Label
+var _brand_bonk: Label
+var _brand_ball: TextureRect
+var _brand_ver: PanelContainer
+var _nav_box: VBoxContainer
+var _modes_row: HBoxContainer
+var _pair_box: VBoxContainer
+var _today_row: HBoxContainer
+var _tiles_row: HBoxContainer
+var _small_row: HBoxContainer
+var _season_wrap: Control
+var _season_card: PanelContainer
+var _season_box: VBoxContainer
+var _footer: VBoxContainer
+var _legal: Label
+var _hint_row: HBoxContainer
+
+var _tile_store: Array = []
+var _anim_items: Array = []
+var _anim_i := 0
+var _compact := false
+var _viewport := Vector2(1280, 720)
 
 
 func _ready() -> void:
@@ -35,19 +74,18 @@ func _ready() -> void:
 	var root := UI.screen()
 	add_child(root)
 	UI.fill(root)
-	var column := UI.content(root, 22)
+	_mm = Control.new()
+	_mm.name = "MM"
+	root.add_child(_mm)
+	UI.fill(_mm)
 
-	column.add_child(_top_row())
+	_build_top()
+	_build_left()
+	_build_season()
+	_build_footer()
 
-	var body := UI.hbox(18)
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(body)
-	body.add_child(_nav_column())
-	body.add_child(_season_card())
-
-	_hint = UI.paragraph("操作：WASD / 方向键移动 · F 融合（两招满级后）· P 暂停 · 1-3 选卡 · Esc 结算本局", 12, PbTheme.ink_muted(), 1)
-	column.add_child(_hint)
-	column.add_child(_legal_footer())
+	resized.connect(_on_resized)
+	_on_resized()
 
 	_build_settings_modal()
 
@@ -57,6 +95,7 @@ func _ready() -> void:
 	Audio.apply_profile_settings(PbJson.as_dict(Save.store.get("settings", {})))
 	Audio.play_music("menu")
 	refresh()
+	_play_entrance.call_deferred()
 	if "--pb-debug" in OS.get_cmdline_user_args():
 		_debug_layout.call_deferred()
 	# QA hook for screenshots: open the starter picker immediately.
@@ -95,20 +134,124 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_tree().quit()
 
 
+# ------------------------------------------------------------------- layout
+## Re-applies the `.mm` clamps and the `@media (max-height:760px)` compact set.
+func _on_resized() -> void:
+	_viewport = get_viewport_rect().size
+	var vw := _viewport.x
+	var vh := _viewport.y
+	_compact = vh <= 760.0
+
+	var gutter := PbTheme.gutter(vw)                      # clamp(22,5vw,84)
+	var mm_w := minf(520.0, vw - 2.0 * gutter)           # --mm-w
+	var brand_fs := clampf(48.0, 9.0 * vh / 100.0, 70.0) if _compact \
+		else clampf(72.0, 9.5 * vw / 100.0, 156.0)
+
+	# Top bar: absolute top:18 left:22 right:22.
+	_top_row_ctrl.offset_left = 22.0
+	_top_row_ctrl.offset_right = -22.0
+	_top_row_ctrl.offset_top = 18.0
+	_top_row_ctrl.offset_bottom = 18.0
+
+	# Left column area, centred like top:52% / translateY(-50%).
+	_left_area.offset_left = gutter
+	_left_area.offset_right = gutter + mm_w
+	_left_area.offset_top = 84.0
+	_left_area.offset_bottom = -46.0
+	_left_col.custom_minimum_size = Vector2(mm_w, 0)
+	_left_col.add_theme_constant_override("separation", 12 if _compact else 18)
+
+	_layout_brand(brand_fs, mm_w)
+	_nav_box.add_theme_constant_override("separation", 10 if _compact else 12)
+	_modes_row.custom_minimum_size.y = 100.0 if _compact \
+		else clampf(14.0 * vh / 100.0, 100.0, 124.0)
+	_today_row.custom_minimum_size.y = 64.0 if _compact else 72.0
+	_layout_tiles(mm_w)
+
+	# Season column: right:clamp(22,3vw,56), width:clamp(340,26vw,400),
+	# max-height:min(640,100dvh - 170).
+	var season_w := clampf(26.0 * vw / 100.0, 340.0, 400.0)
+	var season_inset := clampf(3.0 * vw / 100.0, 22.0, 56.0)
+	var season_cap := minf(640.0, vh - 170.0)
+	_season_wrap.offset_left = -(season_w + season_inset)
+	_season_wrap.offset_right = -season_inset
+	_season_wrap.offset_top = -season_cap * 0.5
+	_season_wrap.offset_bottom = season_cap * 0.5
+	_season_card.custom_minimum_size = Vector2(season_w, 0)
+	_season_wrap.visible = vw >= 1000.0
+
+	# `.mm-foot{position:absolute;bottom:10px;left:0;right:0}`.
+	_footer.offset_left = 0.0
+	_footer.offset_right = 0.0
+	_footer.offset_bottom = -10.0
+	_footer.offset_top = -10.0
+	_legal.custom_minimum_size.x = minf(980.0, vw - 48.0)
+
+
+## `.logo-word` font clamp + ball/version placements.
+func _layout_brand(fs: float, mm_w: float) -> void:
+	for label in [_brand_poke, _brand_bonk]:
+		label.add_theme_font_size_override("font_size", int(fs))
+		label.add_theme_constant_override("outline_size", 4)
+		label.add_theme_constant_override("shadow_offset_y", 7)
+	var sz1 := _brand_poke.get_combined_minimum_size()
+	var sz2 := _brand_bonk.get_combined_minimum_size()
+	_brand_poke.position = Vector2.ZERO
+	_brand_bonk.position = Vector2(sz1.x, 0.0)
+	var word_h := maxf(sz1.y, sz2.y)
+	var word_w := sz1.x + sz2.x
+	_brand_word.position = Vector2.ZERO
+	_brand_word.size = Vector2(word_w, word_h)
+	_brand_word.pivot_offset = _brand_word.size * 0.5
+	_brand_word.rotation = deg_to_rad(-3.0)
+	# `.logo-ball{width:.6em;top:-.18em;right:-.42em}`.
+	_brand_ball.position = Vector2(word_w - fs * 0.18, -fs * 0.18)
+	_brand_ball.size = Vector2(fs * 0.6, fs * 0.6)
+	_brand_ball.pivot_offset = _brand_ball.size * 0.5
+	_logo_node.size = Vector2(word_w, word_h)
+	_brand_ver.reset_size()
+	_brand_ver.position = Vector2(8.0, word_h - 2.0)
+	_brand_ver.pivot_offset = _brand_ver.size * 0.5
+	_brand.custom_minimum_size = Vector2(mm_w, word_h + 22.0)
+
+
+## `.mm-item.tile` padding/icon/font set: title size = min(14.5, width / (n * .66)).
+func _layout_tiles(mm_w: float) -> void:
+	var tile_w := (mm_w - 4.0 * 8.0) / 5.0
+	var pad_top := 8 if _compact else 10
+	var pad_bottom := 11 if _compact else 13
+	var icon_px := 40 if _compact else 44
+	for rec in _tile_store:
+		var mc: MarginContainer = rec["mc"]
+		mc.add_theme_constant_override("margin_top", pad_top)
+		mc.add_theme_constant_override("margin_bottom", pad_bottom)
+		var ic: PanelContainer = rec["ic"]
+		ic.custom_minimum_size = Vector2(icon_px, icon_px)
+		var font := int(minf(14.5, tile_w / (float(rec["n"]) * 0.66)))
+		font = maxi(font, 10)
+		var title: Label = rec["title"]
+		title.add_theme_font_size_override("font_size", font)
+		var tile: Control = rec["tile"]
+		tile.custom_minimum_size.y = float(pad_top + icon_px + 3 + int(font * 1.20) + 3 + 14 + pad_bottom)
+
+
 # ------------------------------------------------------------------- header
-## The two floating pills on the left (language stays hidden while the port is zh-only) and the
-## trainer bar on the right, exactly where the web puts them.
-func _top_row() -> Control:
-	var row := UI.hbox(10)
+## `.mm-top`: the fullscreen pill on the left (the language pill stays hidden), trainer right.
+func _build_top() -> void:
+	_top_row_ctrl = UI.hbox(10)
+	_top_row_ctrl.name = "MMTop"
+	_top_row_ctrl.grow_vertical = Control.GROW_DIRECTION_END
+	_mm.add_child(_top_row_ctrl)
+	_top_row_ctrl.set_anchors_preset(Control.PRESET_TOP_WIDE)
+
 	var fs := UI.small_button("⛶", _toggle_fullscreen, "blue")
 	fs.name = "FullscreenPill"
-	row.add_child(fs)
+	_top_row_ctrl.add_child(fs)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer)
-	row.add_child(_trainer_bar())
-	return row
+	_top_row_ctrl.add_child(spacer)
+	_top_row_ctrl.add_child(_trainer_bar())
 
 
 ## `.trainer`: avatar + name + subtitle, then the wallet pills and the two actions.
@@ -157,130 +300,654 @@ func _toggle_fullscreen() -> void:
 	win.mode = Window.MODE_FULLSCREEN if win.mode != Window.MODE_FULLSCREEN else Window.MODE_MAXIMIZED
 
 
-## Wordmark + BETA badge, the `.mm-item` grid and the mini row.
-func _nav_column() -> Control:
-	var box := UI.vbox(12)
-	box.custom_minimum_size = Vector2(620, 0)
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+# ------------------------------------------------------------------- wordmark
+## `.logo.hero`: `Poké` + yellow `Bonk` with 4px stroke, 7px shadow, -3deg and the
+## 3.4s float; the `.logo-ver` capsule sits at `top:100%;left:8px`.
+func _build_left() -> void:
+	_left_area = Control.new()
+	_left_area.name = "MMLeft"
+	_left_area.anchor_top = 0.0
+	_left_area.anchor_bottom = 1.0
+	_mm.add_child(_left_area)
 
-	var brand := UI.hbox(10)
-	brand.add_theme_constant_override("separation", 8)
-	var title := UI.title("DigiAssault", 58)
-	brand.add_child(title)
-	brand.add_child(UI.chip("BETA v0.8.34", PbTheme.accent_color("red", "c")))
-	box.add_child(brand)
-	box.add_child(UI.dim("Godot 移植版 · 完全离线 · 数据与世界对齐上游项目镜像"))
+	_left_scroll = UI.scroll()
+	_left_scroll.name = "MMLeftScroll"
+	_left_area.add_child(_left_scroll)
+	UI.fill(_left_scroll)
 
-	# .mm-nav: the play tile is full width (`.mm-item.play` spans the grid), then the four
-	# mode/event tiles two-up, the five small tiles, and the mini row.
-	var nav := UI.vbox(10)
-	nav.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(nav)
-	nav.add_child(_play_tile())
+	# CenterContainer keeps the 52% vertical centring; it grows past the viewport
+	# when the content is taller, which is what makes the ScrollContainer scroll.
+	var center := CenterContainer.new()
+	center.name = "MMLeftCenter"
+	_left_scroll.add_child(center)
 
-	var grid := UI.grid(2, 10)
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	nav.add_child(grid)
-	grid.add_child(UI.mm_tile("moon-stone", App.ui("Supervivencia"), "无尽 · 迁移与首领", PbTheme.accent_color("purple", "c"), _start_endless))
-	grid.add_child(UI.mm_tile("friends", App.ui("Cooperativo"), App.ui("Con amigos · 2-4"), PbTheme.accent_color("green", "c"), _todo_coop))
-	grid.add_child(UI.mm_tile("map-boss", "Lavanda 之夜", "活动 · 14 天后结束", PbTheme.accent_color("orange", "c"), _todo_event))
-	grid.add_child(UI.mm_tile("mission", App.ui("Encargos"), "3 项 · 19 小时后刷新", PbTheme.accent_color("blue", "c"), _todo_tasks))
+	_left_col = UI.vbox(18)
+	_left_col.name = "MMLeftColumn"
+	center.add_child(_left_col)
 
-	var tiles := UI.grid(5, 8)
-	tiles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(tiles)
-	tiles.add_child(_mini_tile("globe", App.ui("Pokédex"), "%d/151" % int(Save.summary().get("captured", 0)),
-		PbTheme.accent_color("blue", "c"), func(): App.goto("dex")))
-	tiles.add_child(_mini_tile("stardust", App.ui("Laboratorio"), "%d" % int(Save.summary().get("lab", 0)),
-		PbTheme.accent_color("green", "c"), func(): App.goto("lab")))
-	tiles.add_child(_mini_tile("crown", App.ui("Logros"), "0/228", PbTheme.accent_color("red", "c"), _todo_achievements))
-	tiles.add_child(_mini_tile("gold", App.ui("Ranking"), "14 d", PbTheme.accent_color("yellow", "c"), _todo_ranking))
-	tiles.add_child(_mini_tile("clan", App.ui("Clan"), App.ui("Sin clan"), PbTheme.accent_color("purple", "c"), _todo_clan))
+	_left_col.add_child(_brand_block())
 
-	var mini := UI.hbox(8)
-	box.add_child(mini)
-	mini.add_child(UI.mm_tile("brush", App.ui("Ajustes"), "", PbTheme.accent_color("blue", "c"), _open_settings))
-	mini.add_child(UI.mm_tile("bug", App.ui("Reportar"), "", PbTheme.accent_color("orange", "c"), _todo_report))
-	mini.add_child(UI.mm_tile("chat", "Discord", "", PbTheme.accent_color("purple", "c"), _todo_discord))
-	mini.add_child(UI.mm_tile("megaphone", "Charcher", "", PbTheme.accent_color("green", "c"), _todo_dev))
-
-	box.add_child(HSeparator.new())
-	box.add_child(UI.dim("最近对局（profile.runs，结算后写入）"))
-	_recent = UI.vbox(2)
-	box.add_child(_recent)
-	return box
+	_nav_box = UI.vbox(12)
+	_nav_box.name = "MMNav"
+	_left_col.add_child(_nav_box)
+	_build_nav()
 
 
-## `.mm-item.play`: red gradient + stripes, the label, the Liga progress line and the current
-## partner's sprite on the right -- the web's hero tile.
-func _play_tile() -> Control:
-	var tile := Button.new()
-	tile.flat = true
-	tile.focus_mode = Control.FOCUS_NONE
-	tile.name = "PlayTile"
-	tile.custom_minimum_size = Vector2(0, 108)
-	var s := PbTheme.stylebox(".mm-item.play", {"--c": "#" + PbTheme.accent_color("red", "c").to_html(false)})
-	s.content_margin_left = 14
-	s.content_margin_top = 12
-	s.content_margin_bottom = 12
-	s.content_margin_right = 12
-	for state in ["normal", "hover", "pressed"]:
-		tile.add_theme_stylebox_override(state, StyleBoxEmpty.new())
-	tile.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	# `.mm-item.play` is a red gradient with stripes -- a StyleBoxFlat cannot express that, so
-	# the band is painted behind the content (same trick as the season header).
+func _brand_block() -> Control:
+	_brand = Control.new()
+	_brand.name = "Logo"
+	_brand.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_logo_node = Control.new()
+	_logo_node.name = "LogoInner"
+	_logo_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_brand.add_child(_logo_node)
+
+	_brand_word = Control.new()
+	_brand_word.name = "LogoWord"
+	_brand_word.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_logo_node.add_child(_brand_word)
+	_brand_poke = _brand_label("Poké", Color.WHITE)
+	_brand_bonk = _brand_label("Bonk", PbTheme.css_color(PbTheme.v("--yellow", "#fc3"), Color("#fc3")))
+	_brand_word.add_child(_brand_poke)
+	_brand_word.add_child(_brand_bonk)
+	_brand_ball = UI.icon_rect("poke-ball", 0)
+	_brand_ball.name = "LogoBall"
+	_brand_ball.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_brand_word.add_child(_brand_ball)
+
+	_brand_ver = _version_pill()
+	_logo_node.add_child(_brand_ver)
+
+	# `.logo{animation:3.4s ease-in-out infinite float}`: translateY(-6) at 50%.
+	var fl := create_tween().set_loops()
+	fl.tween_property(_logo_node, "position:y", -6.0, 1.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	fl.tween_property(_logo_node, "position:y", 0.0, 1.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	# `.logo-ball{animation:2.6s ease-in-out infinite wobble}`.
+	var wob := create_tween().set_loops()
+	wob.tween_interval(1.664)
+	wob.tween_property(_brand_ball, "rotation", deg_to_rad(-16.0), 0.156)
+	wob.tween_property(_brand_ball, "rotation", deg_to_rad(14.0), 0.208)
+	wob.tween_property(_brand_ball, "rotation", deg_to_rad(-6.0), 0.208)
+	wob.tween_property(_brand_ball, "rotation", 0.0, 0.364)
+	return _brand
+
+
+## `.logo-word`: stroke 4px #2a2a7a, shadow 0 7px #2a2a7a, line-height .92.
+func _brand_label(text: String, color: Color) -> Label:
+	var l := UI.label(text, 72, color)
+	l.add_theme_font_override("font", PbTheme.font("title"))
+	l.add_theme_constant_override("outline_size", 4)
+	l.add_theme_color_override("font_outline_color", Color("#2a2a7a"))
+	l.add_theme_color_override("font_shadow_color", Color("#2a2a7a"))
+	l.add_theme_constant_override("shadow_offset_x", 0)
+	l.add_theme_constant_override("shadow_offset_y", 7)
+	l.add_theme_constant_override("shadow_outline_size", 0)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+## `.logo-ver` + `.logo-ver b`: white capsule, orange BETA chip, 15/800.
+func _version_pill() -> PanelContainer:
+	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))
+	var pill := PanelContainer.new()
+	pill.name = "LogoVersion"
+	pill.add_theme_stylebox_override("panel", _pill_style())
+	pill.mouse_filter = Control.MOUSE_FILTER_STOP
+	pill.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	pill.rotation = deg_to_rad(-3.0)
+	pill.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			_show_version(meta))
+
+	var row := UI.hbox(6)
+	pill.add_child(row)
+
+	var beta_label := UI.label(App.ui("Beta").to_upper(), 12, Color.WHITE)
+	beta_label.add_theme_font_override("font", PbTheme.font("title"))
+	var chip := Control.new()
+	chip.custom_minimum_size = Vector2(beta_label.get_combined_minimum_size().x + 18.0, 19.0)
 	var band := PbWidgets.GradRect.new()
 	band.set_anchors_preset(Control.PRESET_FULL_RECT)
-	band.corner = 22.0
-	band.setup(PbTheme.gradient("linear-gradient(135deg, #ff8f94, #ff5a5f 60%, #e0303e)"), null, true)
-	tile.add_child(band)
+	band.corner = 99.0
+	band.setup(PbTheme.gradient("linear-gradient(#ff8a4a,#e84a2a)"), null, false)
+	chip.add_child(band)
+	beta_label.position = Vector2(9.0, (chip.custom_minimum_size.y - beta_label.get_combined_minimum_size().y) * 0.5)
+	chip.add_child(beta_label)
+	row.add_child(chip)
 
-	var row := UI.hbox(12)
-	tile.add_child(row)
-	# Pin the row to the tile: a Button lays its children out by anchors, not by container.
-	row.set_anchors_preset(Control.PRESET_FULL_RECT)
-	row.offset_left = 14
-	row.offset_right = -14
+	var ver := UI.label("v%s" % str(meta.get("site_version", "?")), 15, PbTheme.ink2())
+	ver.add_theme_font_override("font", PbTheme.font("body_bold"))
+	row.add_child(ver)
+	return pill
+
+
+## `.logo-ver`: `background:var(--w94); border-radius:99px; padding:4px 13px 4px 5px;
+## box-shadow:0 3px #2a2a7a59`. The extractor does not ship this selector, so the values
+## are applied here straight from the stylesheet.
+func _pill_style() -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = PbTheme.css_color(PbTheme.v("--w94", "#ffffffef"), Color("#ffffffef"))
+	s.set_corner_radius_all(99)
+	s.corner_detail = 12
+	s.content_margin_top = 4
+	s.content_margin_bottom = 4
+	s.content_margin_left = 5
+	s.content_margin_right = 13
+	s.border_width_bottom = 3
+	s.border_color = Color("#2a2a7a59")
+	s.anti_aliasing = true
+	return s
+
+
+func _show_version(meta: Dictionary) -> void:
+	Audio.sfx("ui")
+	UI.toast(self, "PokéBonk v%s · build %s · Godot 移植版" % [
+		str(meta.get("site_version", "?")), str(meta.get("site_build", "?"))])
+
+
+# ------------------------------------------------------------------- nav
+## DOM: `.mm-modes` (Play + `.mm-pair`) -> `.mm-today` -> `.mm-tiles` (5) -> `.mm-small` (4).
+func _build_nav() -> void:
+	_modes_row = UI.hbox(10)
+	_modes_row.name = "MMModes"
+	_nav_box.add_child(_modes_row)
+	_modes_row.add_child(_play_tile())
+
+	_pair_box = UI.vbox(8)
+	_pair_box.name = "MMPair"
+	_pair_box.custom_minimum_size = Vector2(172, 0)
+	_modes_row.add_child(_pair_box)
+	_register_anim(_pair_box, "dock")
+	var purple := PbTheme.accent_color("purple", "c")
+	_pair_box.add_child(_pair_item("moon-stone", App.ui("Supervivencia"), App.ui("Modo infinito"),
+		purple, Color("#8a7aff"), Color("#5a4cd8"), Color("#2e2070"), Color("#24185a"),
+		Color("#3b2a9a66"), Color("#aa96ff8c"), _start_endless))
+	_pair_box.add_child(_pair_item("friends", App.ui("Cooperativo"), App.ui("Con amigos · 2-4"),
+		PbTheme.accent_color("green", "c"), Color("#5ae0a0"), Color("#1fa86a"), Color("#0e6a48"),
+		Color("#0b4a32"), Color("#148c5a66"), Color("#78ffbe8c"), _todo_coop))
+
+	_today_row = UI.hbox(10)
+	_today_row.name = "MMToday"
+	_nav_box.add_child(_today_row)
+	var event := _event_tile()
+	event.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	event.size_flags_stretch_ratio = 1.45
+	_today_row.add_child(event)
+	var tasks := _tasks_tile()
+	tasks.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_today_row.add_child(tasks)
+
+	_tiles_row = UI.hbox(8)
+	_tiles_row.name = "MMTiles"
+	_nav_box.add_child(_tiles_row)
+	_tiles_row.add_child(_tile("globe", App.ui("Pokédex"), "%d/151" % int(Save.summary().get("captured", 0)),
+		PbTheme.accent_color("blue", "c"), func(): App.goto("dex")))
+	_tiles_row.add_child(_tile("stardust", App.ui("Laboratorio"), "%d" % int(Save.summary().get("league", 0)),
+		PbTheme.accent_color("green", "c"), func(): App.goto("lab")))
+	_tiles_row.add_child(_tile("crown", App.ui("Logros"), "0/228", PbTheme.accent_color("red", "c"),
+		_todo_achievements))
+	_tiles_row.add_child(_tile("gold", App.ui("Ranking"), "14 d", PbTheme.accent_color("yellow", "c"),
+		_todo_ranking))
+	_tiles_row.add_child(_tile("clan", App.ui("Clan"), App.ui("Sin clan"), PbTheme.accent_color("purple", "c"),
+		_todo_clan))
+
+	_small_row = UI.hbox(8)
+	_small_row.name = "MMSmall"
+	_small_row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	_nav_box.add_child(_small_row)
+	_small_row.add_child(_mini("brush", App.ui("Ajustes"), PbTheme.accent_color("blue", "c"), _open_settings))
+	_small_row.add_child(_mini("bug", App.ui("Reportar"), PbTheme.accent_color("orange", "c"), _todo_report))
+	_small_row.add_child(_mini("chat", "Discord", PbTheme.accent_color("purple", "c"), _todo_discord))
+	_small_row.add_child(_mini("megaphone", "Charcher", PbTheme.accent_color("green", "c"), _todo_dev))
+
+
+## `.mm-item.play`: white inner ring 4px, hard red edge 6px, red glow 14px, 70px icon.
+func _play_tile() -> Control:
+	var cfg := {
+		"name": "PlayTile",
+		"grad": "linear-gradient(180deg, #ff7a7e, var(--red) 58%, var(--red-d))",
+		"stripes": true,
+		"strip": PbTheme.accent_color("red", "c"),
+		"inset": Color("#ffffffe6"),
+		"inset_width": 4,
+		"hard": Color("#a81c2c"),
+		"hard_offset": 6,
+		"glow": Color("#e0303e66"),
+		"glow_size": 20.0,
+		"pad": [0, 16, 0, 14],
+		"gap": 16,
+		"icon": "poke-ball",
+		"icon_size": 70,
+		"icon_px": 52,
+		"icon_bg": PbTheme.paper(),
+		"icon_radius": 35,
+		"icon_top_inset": 4,
+		"icon_shadow": Color("#780a144d"),
+		"title": App.ui("Jugar"),
+		"title_size": 34,
+		"title_color": Color.WHITE,
+		"sub": App.ui("Modo clásico · {n}/{total} en tu Liga", {"n": 0, "total": 151}),
+		"sub_size": 13,
+		"sub_color": Color("#fffffff2"),
+		"sub_wrap": true,
+		"expand_h": true,
+		"expand_v": true,
+		"anim": "in",
+		"tip": "",
+	}
+	var tile := _make_item(cfg)
 	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var ic := PanelContainer.new()
-	ic.add_theme_stylebox_override("panel", PbTheme.stylebox(".mm-ic", {"--c": "#ff5a5f"}))
-	ic.custom_minimum_size = Vector2(56, 56)
-	ic.add_child(UI.icon_rect("poke-ball", 42))
-	row.add_child(ic)
-
-	var tx := UI.vbox(2)
-	tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var big := UI.label(App.ui("Jugar"), 30, Color.WHITE)
-	big.add_theme_font_override("font", PbTheme.font("title"))
-	tx.add_child(big)
-	_play_sub = UI.label("", 13, Color(1, 1, 1, 0.92))
-	tx.add_child(_play_sub)
-	row.add_child(tx)
-
+	tile.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_play_title = tile.get_meta("title_label")
+	_play_sub = tile.get_meta("sub_label")
 	_play_sprite = PmdSprite.new()
 	_play_sprite.custom_minimum_size = Vector2(64, 64)
-	row.add_child(_play_sprite)
-
+	var partner := PanelContainer.new()
+	var ps := StyleBoxFlat.new()
+	ps.bg_color = Color("#ffffff38")
+	ps.set_corner_radius_all(18)
+	ps.set_border_width_all(2)
+	ps.border_color = Color("#ffffff59")
+	ps.content_margin_left = 4
+	ps.content_margin_right = 4
+	ps.content_margin_top = 4
+	ps.content_margin_bottom = 4
+	partner.add_theme_stylebox_override("panel", ps)
+	partner.custom_minimum_size = Vector2(64, 64)
+	partner.add_child(_play_sprite)
+	var body: BoxContainer = tile.get_meta("body")
+	body.add_child(partner)
 	tile.pressed.connect(_start_run)
-	tile.mouse_entered.connect(func():
-		tile.pivot_offset = tile.size * 0.5
-		tile.create_tween().tween_property(tile, "scale", Vector2(1.02, 1.02), 0.12))
-	tile.mouse_exited.connect(func():
-		tile.create_tween().tween_property(tile, "scale", Vector2.ONE, 0.12))
+	_register_anim(tile, "in")
 	return tile
 
 
-## `.lb-card`-style season panel on the right: striped header, segmented tabs, the region
-## selector, the empty leaderboard state and the prize ladder.
-func _season_card() -> Control:
-	var card := UI.panel(0)
-	card.name = "SeasonCard"
-	card.custom_minimum_size = Vector2(320, 0)
-	var box := UI.vbox(8)
-	card.add_child(box)
+## `.mm-pair>.mm-item.endless`: 34px circular icon, 13px title, 10px caption.
+func _pair_item(icon_name: String, title_text: String, sub_text: String, accent: Color,
+		c0: Color, c1: Color, c2: Color, hard: Color, glow: Color, icon_glow: Color,
+		on_click: Callable) -> Control:
+	# `linear-gradient(160deg, c0, c1 50%, c2)` from `.mm-item.endless`.
+	var grad := {"type": "linear", "angle": 160.0, "stops": [
+		{"color": c0, "pos": 0.0}, {"color": c1, "pos": 50.0}, {"color": c2, "pos": 100.0}]}
+	var cfg := {
+		"name": "PairItem",
+		"grad_dict": grad,
+		"stripes": true,
+		"hard": hard,
+		"hard_offset": 6,
+		"glow": glow,
+		"glow_size": 18.0,
+		"pad": [4, 10, 4, 6],
+		"gap": 8,
+		"icon": icon_name,
+		"icon_size": 34,
+		"icon_px": 28,
+		"icon_bg": Color("#ffffff2e"),
+		"icon_radius": 17,
+		"icon_ring": Color("#ffffff59"),
+		"icon_glow": icon_glow,
+		"title": title_text,
+		"title_size": 13,
+		"title_color": Color.WHITE,
+		"sub": sub_text,
+		"sub_size": 10,
+		"sub_color": Color("#ffffffeb"),
+		"expand_h": true,
+		"expand_v": true,
+		"anim": "dock",
+		"accent": Color.WHITE,
+	}
+	var tile := _make_item(cfg)
+	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tile.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	if on_click.is_valid():
+		tile.pressed.connect(on_click)
+	return tile
+
+
+## `.mm-item.event`: the `.mm-today` hero (small caption on top of the title).
+func _event_tile() -> Control:
+	var cfg := {
+		"name": "TodayEvent",
+		"grad": "linear-gradient(100deg, #2a1a4ef0, #4a2c82c7 55%, #7a4ac873)",
+		"fill": Color("#3a2668"),
+		"strip": Color(0, 0, 0, 0),
+		"strip_grad": "linear-gradient(#ffb04a,#9a6aff)",
+		"hard": Color("#24164a"),
+		"hard_offset": 5,
+		"glow": Color("#9a6aff66"),
+		"glow_size": 16.0,
+		"pad": [8, 12, 8, 10],
+		"gap": 10,
+		"icon": "map-boss",
+		"icon_size": 50,
+		"icon_px": 38,
+		"icon_bg": Color("#ffffff24"),
+		"icon_radius": 25,
+		"icon_ring": Color("#ffd68c8c"),
+		"icon_glow": Color("#ffb04a73"),
+		"title": "Lavanda 之夜",
+		"title_size": 15,
+		"title_color": Color.WHITE,
+		"sub": "活动 · 14 天后结束",
+		"sub_size": 11,
+		"sub_color": Color("#ffd88a"),
+		"sub_before": true,
+		"expand_h": true,
+		"expand_v": true,
+		"anim": "in",
+		"tip": "",
+	}
+	var tile := _make_item(cfg)
+	tile.pressed.connect(_todo_event)
+	return tile
+
+
+## `.mm-item.tasks`: striped paper card + three `.mm-pips` progress dots.
+func _tasks_tile() -> Control:
+	var cfg := {
+		"name": "TodayTasks",
+		"grad": "linear-gradient(100deg, var(--paper) 55%, var(--k-fff3d0))",
+		"stripes": true,
+		"strip": PbTheme.accent_color("yellow", "c"),
+		"hard": Color("#1a124633"),
+		"hard_offset": 4,
+		"glow": Color(0, 0, 0, 0),
+		"pad": [8, 12, 8, 12],
+		"gap": 10,
+		"icon": "mission",
+		"icon_size": 44,
+		"icon_px": 34,
+		"icon_bg": PbTheme.mix(PbTheme.accent_color("yellow", "c"), PbTheme.paper(), 0.16),
+		"icon_radius": 14,
+		"title": App.ui("Encargos"),
+		"title_size": 16,
+		"title_color": PbTheme.ink(),
+		"sub": "3 项 · 19 小时后刷新",
+		"sub_size": 11,
+		"sub_color": PbTheme.ink2(),
+		"pips": 3,
+		"expand_h": true,
+		"expand_v": true,
+		"anim": "in",
+		"tip": "",
+	}
+	var tile := _make_item(cfg)
+	tile.pressed.connect(_todo_tasks)
+	return tile
+
+
+## `.mm-item.tile`: the five vertical destination tiles.
+func _tile(icon_name: String, title_text: String, value_text: String, accent: Color,
+		on_click: Callable) -> Control:
+	var cfg := {
+		"name": "Tile",
+		"vertical": true,
+		"fill": PbTheme.paper(),
+		"strip": accent,
+		"strip_side": "bottom",
+		"strip_size": 5.0,
+		"hard": Color("#1a124633"),
+		"hard_offset": 4,
+		"glow": Color(0, 0, 0, 0),
+		"pad": [10, 4, 13, 4],
+		"gap": 3,
+		"icon": icon_name,
+		"icon_size": 44,
+		"icon_px": 32,
+		"icon_bg": PbTheme.mix(accent, PbTheme.paper(), 0.16),
+		"icon_radius": 14,
+		"title": title_text,
+		"title_size": 14,
+		"title_color": PbTheme.ink(),
+		"sub": value_text,
+		"sub_size": 11,
+		"sub_color": PbTheme.ink2(),
+		"expand_h": true,
+		"expand_v": true,
+		"anim": "in",
+		"accent": accent,
+		"tip": title_text,
+		"responsive": true,
+		"n": _tile_n(title_text),
+	}
+	var tile := _make_item(cfg)
+	tile.custom_minimum_size = Vector2(0, 100)
+	_tile_store.append({
+		"tile": tile,
+		"mc": tile.get_meta("margins"),
+		"ic": tile.get_meta("icon_box"),
+		"title": tile.get_meta("title_label"),
+		"n": _tile_n(title_text),
+	})
+	if on_click.is_valid():
+		tile.pressed.connect(on_click)
+	return tile
+
+
+## `.mm-item.mini`: 999px pill, 34px round icon, 15px title, no caption.
+func _mini(icon_name: String, title_text: String, accent: Color, on_click: Callable) -> Control:
+	var cfg := {
+		"name": "Mini",
+		"fill": PbTheme.paper(),
+		"radius": 999.0,
+		"pad": [5, 18, 5, 5],
+		"gap": 8,
+		"icon": icon_name,
+		"icon_size": 34,
+		"icon_px": 26,
+		"icon_bg": PbTheme.mix(accent, PbTheme.paper(), 0.16),
+		"icon_radius": 17,
+		"title": title_text,
+		"title_size": 15,
+		"title_color": PbTheme.ink(),
+		"hard": Color("#1a124633"),
+		"hard_offset": 4,
+		"anim": "pop",
+		"accent": accent,
+		"tip": title_text,
+	}
+	var tile := _make_item(cfg)
+	tile.custom_minimum_size = Vector2(0, 44)
+	tile.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if on_click.is_valid():
+		tile.pressed.connect(on_click)
+	return tile
+
+
+func _tile_n(text: String) -> float:
+	var n := 0.0
+	for ch in text:
+		var code := ch.unicode_at(0)
+		var wide := (code >= 0x3000 and code <= 0x9FFF) or (code >= 0xAC00 and code <= 0xD7AF)
+		n += 1.8 if wide else 1.0
+	return maxf(6.0, n)
+
+
+## Shared builder for every `.mm-item` variant.
+func _make_item(cfg: Dictionary) -> SkewTile:
+	var tile := SkewTile.new()
+	tile.name = str(cfg.get("name", "MMItem"))
+	tile.fill = cfg.get("fill", PbTheme.paper())
+	tile.radius = float(cfg.get("radius", 18.0))
+	tile.stripes = bool(cfg.get("stripes", false))
+	tile.strip = cfg.get("strip", Color(0, 0, 0, 0))
+	tile.strip_side = str(cfg.get("strip_side", "left"))
+	tile.strip_size = float(cfg.get("strip_size", 7.0))
+	tile.inset = cfg.get("inset", Color(0, 0, 0, 0))
+	tile.inset_width = float(cfg.get("inset_width", 4.0))
+	tile.hard = cfg.get("hard", Color(0, 0, 0, 0))
+	tile.hard_offset = int(cfg.get("hard_offset", 4))
+	tile.glow = cfg.get("glow", Color(0, 0, 0, 0))
+	tile.glow_size = float(cfg.get("glow_size", 14.0))
+	tile.accent = cfg.get("accent", Color(0, 0, 0, 0))
+	tile.tooltip_text = str(cfg.get("tip", ""))
+	var grad_css := str(cfg.get("grad", ""))
+	if not grad_css.is_empty():
+		tile.grad = PbTheme.gradient(grad_css)
+	elif cfg.has("grad_dict"):
+		tile.grad = cfg["grad_dict"]
+	if tile.stripes:
+		tile.stripe_period = float(PbTheme.stripes().get("period", 20.0))
+	var strip_css := str(cfg.get("strip_grad", ""))
+	if not strip_css.is_empty():
+		tile.strip_grad = PbTheme.gradient(strip_css)
+	if bool(cfg.get("expand_h", false)):
+		tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if bool(cfg.get("expand_v", false)):
+		tile.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	var pad: Array = cfg.get("pad", [10, 14, 10, 12])
+	var mc := MarginContainer.new()
+	mc.name = "Margins"
+	mc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mc.add_theme_constant_override("margin_top", int(pad[0]))
+	mc.add_theme_constant_override("margin_right", int(pad[1]))
+	mc.add_theme_constant_override("margin_bottom", int(pad[2]))
+	mc.add_theme_constant_override("margin_left", int(pad[3]))
+	tile.add_child(mc)
+
+	var vertical := bool(cfg.get("vertical", false))
+	var body: BoxContainer = UI.vbox(int(cfg.get("gap", 12))) if vertical \
+		else UI.hbox(int(cfg.get("gap", 12)))
+	body.name = "Body"
+	mc.add_child(body)
+
+	var icon_name := str(cfg.get("icon", ""))
+	if not icon_name.is_empty():
+		var box := _icon_box(cfg)
+		if vertical:
+			box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		body.add_child(box)
+		tile.set_meta("icon_box", box)
+
+	var tx := UI.vbox(2)
+	tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if not vertical:
+		body.add_child(tx)
+
+	var sub_before := bool(cfg.get("sub_before", false))
+	var sub := str(cfg.get("sub", ""))
+	if sub_before and not sub.is_empty():
+		tx.add_child(_sub_label(cfg))
+	if not str(cfg.get("title", "")).is_empty():
+		var title := UI.label(str(cfg.get("title", "")), int(cfg.get("title_size", 19)),
+			cfg.get("title_color", PbTheme.ink()))
+		title.add_theme_font_override("font", PbTheme.font("title"))
+		title.clip_text = true
+		title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		if vertical:
+			title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tx.add_child(title)
+		tile.set_meta("title_label", title)
+	var pips := int(cfg.get("pips", 0))
+	if pips > 0:
+		tx.add_child(_pips_row(pips))
+	if not sub_before and not sub.is_empty():
+		tx.add_child(_sub_label(cfg))
+	if vertical:
+		tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tx.alignment = BoxContainer.ALIGNMENT_CENTER
+		body.add_child(tx)
+
+	tile.set_meta("margins", mc)
+	tile.set_meta("body", body)
+	tile.set_meta("sub_label", tx.get_child(tx.get_child_count() - 1) if not sub_before and not sub.is_empty() else null)
+	return tile
+
+
+func _sub_label(cfg: Dictionary) -> Label:
+	var label := UI.label(str(cfg.get("sub", "")), int(cfg.get("sub_size", 12)),
+		cfg.get("sub_color", PbTheme.ink2()))
+	label.add_theme_font_override("font", PbTheme.font("body_bold"))
+	if bool(cfg.get("sub_wrap", false)):
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.max_lines_visible = 2
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	else:
+		label.clip_text = true
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	return label
+
+
+## `.mm-ic`: rounded/circular badge behind the item icon.
+func _icon_box(cfg: Dictionary) -> PanelContainer:
+	var size := float(cfg.get("icon_size", 48))
+	var box := PanelContainer.new()
+	box.name = "MMIcon"
+	var style := StyleBoxFlat.new()
+	style.bg_color = cfg.get("icon_bg", PbTheme.paper())
+	var r := float(cfg.get("icon_radius", 14))
+	style.set_corner_radius_all(int(r))
+	if r > 20.0:
+		style.corner_detail = 12
+	if cfg.has("icon_ring"):
+		style.set_border_width_all(int(cfg.get("icon_ring_w", 3)))
+		style.border_color = cfg["icon_ring"]
+	var top_inset := int(cfg.get("icon_top_inset", 0))
+	if top_inset > 0:
+		style.border_width_top = top_inset
+		style.border_color = Color("#00000014")
+	if cfg.has("icon_shadow"):
+		style.shadow_color = cfg["icon_shadow"]
+		style.shadow_size = 8
+		style.shadow_offset = Vector2(0, 3)
+	if cfg.has("icon_glow"):
+		style.shadow_color = cfg["icon_glow"]
+		style.shadow_size = 12
+	box.add_theme_stylebox_override("panel", style)
+	box.custom_minimum_size = Vector2(size, size)
+	box.add_child(UI.icon_rect(str(cfg.get("icon", "")), int(cfg.get("icon_px", 30))))
+	return box
+
+
+## `.mm-pips`: 12px rings, the first `on` dot filled.
+func _pips_row(count: int) -> HBoxContainer:
+	var row := UI.hbox(4)
+	row.name = "MMPips"
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	for i in count:
+		var dot := PanelContainer.new()
+		var s := StyleBoxFlat.new()
+		s.set_corner_radius_all(6)
+		s.corner_detail = 8
+		if i == 0:
+			s.bg_color = PbTheme.accent_color("yellow", "c")
+		else:
+			s.bg_color = Color(0, 0, 0, 0)
+			s.set_border_width_all(2)
+			s.border_color = PbTheme.accent_color("yellow", "c")
+		dot.add_theme_stylebox_override("panel", s)
+		dot.custom_minimum_size = Vector2(12, 12)
+		row.add_child(dot)
+	return row
+
+
+# ------------------------------------------------------------------- season
+## `.mm-season`: width/inset clamps from `_on_resized`; content scrolls inside the cap.
+func _build_season() -> void:
+	_season_wrap = Control.new()
+	_season_wrap.name = "SeasonColumn"
+	_season_wrap.anchor_left = 1.0
+	_season_wrap.anchor_right = 1.0
+	_season_wrap.anchor_top = 0.5
+	_season_wrap.anchor_bottom = 0.5
+	_season_wrap.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_season_wrap.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_mm.add_child(_season_wrap)
+	_season_wrap.add_child(_season_card_node())
+	UI.fill(_season_card)
+
+
+func _season_card_node() -> PanelContainer:
+	_season_card = PanelContainer.new()
+	_season_card.name = "SeasonCard"
+	_season_card.add_theme_stylebox_override("panel", PbTheme.stylebox(".mm-season"))
+	_season_box = UI.vbox(8)
+	_season_card.add_child(_season_box)
 
 	var head := UI.hbox(8)
-	head.add_theme_constant_override("separation", 8)
 	var word := UI.label(App.ui("Temporada {n}", {"n": 2}), 20, Color.WHITE)
 	word.add_theme_font_override("font", PbTheme.font("title"))
 	head.add_child(word)
@@ -288,7 +955,13 @@ func _season_card() -> Control:
 	head_sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(head_sp)
 	head.add_child(UI.label(App.ui("Termina en {time}", {"time": "14 d"}), 12, Color(1, 1, 1, 0.92)))
-	box.add_child(_banner(58, head))
+	_season_box.add_child(_banner(58, head))
+
+	var scroll := UI.scroll()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_season_box.add_child(scroll)
+	var box := UI.vbox(8)
+	scroll.add_child(box)
 
 	box.add_child(UI.segment([
 		{"id": "kills", "text": App.ui("Bajas")},
@@ -297,7 +970,7 @@ func _season_card() -> Control:
 		{"id": "clans", "text": App.ui("Clanes")},
 	], "kills", func(_id): _todo_ranking()))
 	box.add_child(UI.mm_tile("globe", App.ui("Global"), "所有地区合计", PbTheme.accent_color("purple", "c"), _todo_ranking))
-	box.add_child(UI.dim("还没有人打过本赛季 —— 开一局就能直接进前 100。"))
+	box.add_child(_dim_block("还没有人打过本赛季 —— 开一局就能直接进前 100。"))
 
 	var mine := UI.panel(12)
 	mine.name = "SeasonMine"
@@ -307,13 +980,25 @@ func _season_card() -> Control:
 	mbox.add_child(UI.paragraph("游客不计入排行榜。", 14, PbTheme.ink(), 2))
 	box.add_child(mine)
 
-	box.add_child(UI.dim("奖励：前 100 名获得徽章、边框与星尘"))
-	var prizes := UI.hbox(6)
+	box.add_child(_dim_block("奖励：前 100 名获得徽章、边框与星尘"))
+	# Flow layout: six pill chips would force the card past its 340px minimum width;
+	# wrapping keeps `.mm-season{width:clamp(340,26vw,400)}` honest.
+	var prizes := HFlowContainer.new()
+	prizes.add_theme_constant_override("h_separation", 6)
+	prizes.add_theme_constant_override("v_separation", 6)
 	for label_text in ["#1", "#2-3", "#4-10", "#11-25", "#26-50", "#51-100"]:
 		prizes.add_child(UI.chip(label_text, PbTheme.accent_color("yellow", "c")))
 	box.add_child(prizes)
 	box.add_child(UI.button(App.ui("Ver clasificación completa"), _todo_ranking, false, "blue"))
-	return card
+	return _season_card
+
+
+## `UI.dim` has no wrap, so a long CJK line would force the season card wider than its
+## `clamp(340,26vw,400)` width. Wrapping keeps the minimum width at one character.
+func _dim_block(text: String) -> Label:
+	var l := UI.dim(text)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return l
 
 
 ## A striped gradient band (the web's `.lab-top` / season header trick): GradRect fills a fixed
@@ -337,51 +1022,97 @@ func _banner(height: int, content: Control) -> Control:
 	return wrap
 
 
-## `.mm-item.tile`: the small vertical tiles (icon on top, title, value) the web uses for the
-## secondary destinations row.
-func _mini_tile(icon_name: String, title_text: String, value_text: String,
-		accent: Color, on_click: Callable) -> Control:
-	var tile := Button.new()
-	tile.flat = true
-	tile.focus_mode = Control.FOCUS_NONE
-	tile.custom_minimum_size = Vector2(0, 92)
-	var s := PbTheme.stylebox(".mm-item.tile", {"--c": "#" + accent.to_html(false)})
-	for state in ["normal", "hover", "pressed"]:
-		tile.add_theme_stylebox_override(state, s)
-	tile.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var col := UI.vbox(4)
-	col.alignment = BoxContainer.ALIGNMENT_CENTER
-	col.set_anchors_preset(Control.PRESET_FULL_RECT)
-	tile.add_child(col)
-	var ic := PanelContainer.new()
-	ic.add_theme_stylebox_override("panel", PbTheme.stylebox(".mm-ic", {"--c": "#" + accent.to_html(false)}))
-	ic.custom_minimum_size = Vector2(40, 40)
-	ic.add_child(UI.icon_rect(icon_name, 30))
-	col.add_child(ic)
-	var t := UI.label(title_text, 15, PbTheme.ink())
-	t.add_theme_font_override("font", PbTheme.font("title"))
-	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(t)
-	# `.mm-tx small{font-size:12px;font-weight:800}`: body_bold keeps the weight
-	# now that PbTheme.font("body") is the 700 face.
-	var v := UI.label(value_text, PbTheme.font_size("tiny"), PbTheme.ink_muted())
-	v.add_theme_font_override("font", PbTheme.font("body_bold"))
-	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(v)
-	if on_click.is_valid():
-		tile.pressed.connect(on_click)
-	return tile
+# ------------------------------------------------------------------- footer
+## `.mm-foot`: absolute bottom:10, centered, white 12/800 + `0 1px 3px #000c` shadow.
+func _build_footer() -> void:
+	_footer = UI.vbox(6)
+	_footer.name = "MMFoot"
+	_footer.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_footer.alignment = BoxContainer.ALIGNMENT_END
+	_footer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mm.add_child(_footer)
+	_footer.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+
+	_hint_row = UI.hbox(8)
+	_hint_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_hint_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_footer.add_child(_hint_row)
+	# H-16: the captions mirror what run_screen.gd actually binds (R fusion, F reroll...).
+	_add_hint("WASD", "移动")
+	_add_hint("R", "融合")
+	_add_hint("Q", "瞄准")
+	_add_hint("P", "暂停")
+	_add_hint("1-4", "选卡")
+	_add_hint("F", "刷新")
+	_add_hint("X", "跳过")
+	_add_hint("Z", "放逐")
+
+	_legal = _legal_footer()
+	_footer.add_child(_legal)
 
 
-func _legal_footer() -> Control:
+func _add_hint(caption: String, label_text: String) -> void:
+	var kbd := UI.kbd(caption)
+	_hint_row.add_child(kbd)
+	var text := UI.label(label_text, 12, Color.WHITE)
+	text.add_theme_font_override("font", PbTheme.font("body_bold"))
+	text.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	text.add_theme_constant_override("shadow_offset_y", 1)
+	_hint_row.add_child(text)
+
+
+func _legal_footer() -> Label:
 	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))
-	return UI.paragraph(
-		"DigiAssault 是非官方同人作品，无广告、无内购、无盈利意图，与 Nintendo / Creatures / GAME FREAK 无关。"
+	var text := UI.paragraph(
+		"PokéBonk 是非官方同人作品，无广告、无内购、无盈利意图，与 Nintendo / Creatures / GAME FREAK 无关。"
 		+ "宝可梦名称与角色为各自权利所有者的商标 · © 1995-2026 · 精灵图来自 PMD SpriteCollab (CC BY-NC 4.0)。"
 		+ "移植来源：上游 Web 项目 build %s / 版本 %s" % [str(meta.get("site_build", "?")),
-		str(meta.get("site_version", "?"))],
-		11, PbTheme.ink_muted(), 3)
+			str(meta.get("site_version", "?"))],
+		11, Color(1, 1, 1, 0.82), 3)
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	text.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	text.add_theme_constant_override("shadow_offset_x", 0)
+	text.add_theme_constant_override("shadow_offset_y", 1)
+	text.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	return text
+
+
+# ------------------------------------------------------------------- entrance
+func _register_anim(node: Control, kind: String) -> void:
+	_anim_items.append({"node": node, "kind": kind, "i": _anim_i})
+	_anim_i += 1
+
+
+## mmIn / mmPop / mmDock: fade + scale, 0.06s cascade, 0.5s back-ease.
+func _play_entrance() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	for entry in _anim_items:
+		var node: Control = entry["node"]
+		if not is_instance_valid(node) or node.size.x <= 0.0:
+			continue
+		node.pivot_offset = node.size * 0.5
+		var from := 0.94
+		var shift := 16.0
+		match str(entry["kind"]):
+			"pop":
+				from = 0.6
+				shift = 0.0
+			"dock":
+				from = 0.8
+				shift = 0.0
+		node.modulate.a = 0.0
+		node.scale = Vector2(from, from)
+		var tw := node.create_tween()
+		tw.tween_interval(0.06 * float(entry["i"]))
+		tw.tween_property(node, "modulate:a", 1.0, 0.5).set_trans(Tween.TRANS_CUBIC)
+		tw.parallel().tween_property(node, "scale", Vector2.ONE, 0.5) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		if shift > 0.0:
+			var base_y := node.position.y
+			node.position.y = base_y + shift
+			tw.parallel().tween_property(node, "position:y", base_y, 0.5) \
+				.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 # ------------------------------------------------------------------- showcase
@@ -472,8 +1203,14 @@ func _settings_card() -> Control:
 	lang_row.add_child(lang_opt)
 	box.add_child(lang_row)
 
+	# M-15: port-only content (recent runs, port notes) lives here, not in the menu flow.
+	box.add_child(HSeparator.new())
+	box.add_child(UI.subtitle("最近对局"))
+	_recent = UI.vbox(2)
+	box.add_child(_recent)
 	box.add_child(HSeparator.new())
 	var meta := PbJson.as_dict(PbData.pb_table("port_meta"))
+	box.add_child(UI.paragraph("Godot 移植版 · 完全离线 · 数据与世界对齐上游项目镜像", 12, PbTheme.ink_muted(), 2))
 	box.add_child(UI.paragraph("来源：上游 Web 项目 build %s / 版本 %s" % [
 		str(meta.get("site_build", "?")), str(meta.get("site_version", "?"))], 12, PbTheme.ink_muted(), 2))
 	box.add_child(UI.paragraph("公式与数据表由上游项目逆向导出，偏移坐标见 data/pb/constants.json", 12, PbTheme.ink_muted(), 2))
@@ -509,8 +1246,11 @@ func refresh() -> void:
 	_wallet.add_child(UI.stat_pill(App.ui("Polvo Estelar"), _num(int(s.get("stardust", 0))), "yellow"))
 	_wallet.add_child(UI.stat_pill(App.ui("Pokédex"), "%d/151" % int(s.get("captured", 0)), "orange"))
 	if _play_sub != null:
-		_play_sub.text = "经典模式 · %d/151 在你的联盟 · 联盟 %d · 邦币 %d" % [
-			int(s.get("captured", 0)), int(s.get("league", 0)), int(s.get("bonk", 0))]
+		_play_sub.text = App.ui("Modo clásico · {n}/{total} en tu Liga",
+			{"n": int(s.get("captured", 0)), "total": 151})
+	if _play_title != null:
+		_play_title.add_theme_font_size_override("font_size",
+			int(clampf(34.0, 4.6 * _viewport.y / 100.0, 42.0)))
 	for c in _recent.get_children():
 		c.queue_free()
 	var runs: Array = PbJson.as_array(profile.get("runs", []))
@@ -534,23 +1274,27 @@ func _build_settings_modal() -> void:
 	_settings_scrim = PanelContainer.new()
 	_settings_scrim.name = "SettingsScrim"
 	_settings_scrim.add_theme_stylebox_override("panel", PbTheme.modal_scrim())
-	UI.fill(_settings_scrim)
-	_settings_scrim.visible = false
 	add_child(_settings_scrim)
 	UI.fill(_settings_scrim)
+	_settings_scrim.visible = false
 	var col := UI.vbox(12)
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	_settings_scrim.add_child(col)
 	var head := UI.hbox(10)
+	head.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(head)
+	# H-13: `.modal h1{display:inline-block}` -- keep the pill hugging the text.
 	var title := UI.modal_title(App.ui("Ajustes"), false)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	head.add_child(title)
 	head.add_child(UI.button("关闭 (Esc)", _close_settings, false, "ghost", true))
 	var row := UI.hbox(14)
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	col.add_child(row)
+	var row_scroll := UI.scroll()
+	row_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row_scroll.add_child(row)
+	col.add_child(row_scroll)
 	row.add_child(_showcase_card())
 	row.add_child(_settings_card())
 
@@ -722,15 +1466,19 @@ func _open_starter_picker() -> void:
 	var scrim := PanelContainer.new()
 	scrim.name = "StarterPicker"
 	scrim.add_theme_stylebox_override("panel", PbTheme.modal_scrim())
-	UI.fill(scrim)
 	add_child(scrim)
 	UI.fill(scrim)
 	_picker = scrim
 	var col := UI.vbox(16)
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	scrim.add_child(col)
-	col.add_child(UI.modal_title("选择你的初始伙伴", false))
-	col.add_child(UI.paragraph("它将是你 Liga 的第一位成员；确认后不可更改。", 14, Color.WHITE, 1))
+	# H-13: keep the modal title inline instead of stretching it across the column.
+	var title := UI.modal_title("选择你的初始伙伴", false)
+	title.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	col.add_child(title)
+	var blurb := UI.paragraph("它将是你 Liga 的第一位成员；确认后不可更改。", 14, Color.WHITE, 1)
+	blurb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(blurb)
 	var cards := UI.hbox(22)
 	cards.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(cards)
@@ -873,3 +1621,161 @@ static func _thousands(value: int) -> String:
 		if count % 3 == 0 and i > 0:
 			out = "," + out
 	return out
+
+
+# ------------------------------------------------------------------- skew tile
+## `.mm-item`: a Button that paints its CSS background (gradient/stripes/rings/strip)
+## inside a `skew(-6deg)` canvas transform. Children stay upright, exactly like the
+## web's `.mm-item>*{transform:skew(6deg)}` counter-skew.
+class SkewTile:
+	extends Button
+
+	const K := 0.10510423526  # tan(6deg)
+
+	var grad: Dictionary = {}
+	var strip_grad: Dictionary = {}
+	var fill := Color.WHITE
+	var stripes := false
+	var radius := 18.0
+	var strip := Color(0, 0, 0, 0)
+	var strip_side := "left"
+	var strip_size := 7.0
+	var inset := Color(0, 0, 0, 0)
+	var inset_width := 4.0
+	var hard := Color(0, 0, 0, 0)
+	var hard_offset := 4
+	var glow := Color(0, 0, 0, 0)
+	var glow_size := 14.0
+	var accent := Color(0, 0, 0, 0)
+	var hovered := false
+	var stripe_period := 20.0
+
+	func _init() -> void:
+		flat = true
+		focus_mode = Control.FOCUS_NONE
+		clip_contents = false
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+			add_theme_stylebox_override(state, StyleBoxEmpty.new())
+		mouse_entered.connect(_hover.bind(true))
+		mouse_exited.connect(_hover.bind(false))
+		resized.connect(queue_redraw)
+
+	func _hover(on: bool) -> void:
+		hovered = on
+		queue_redraw()
+		pivot_offset = size * 0.5
+		var tw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(self, "scale", Vector2(1.03, 1.03) if on else Vector2.ONE, 0.18)
+
+	func _draw() -> void:
+		if size.x <= 1.0 or size.y <= 1.0:
+			return
+		var r := minf(radius, minf(size.x, size.y) * 0.5)
+		draw_set_transform_matrix(Transform2D(Vector2(1, 0), Vector2(-K, 1),
+			Vector2(K * size.y * 0.5, 0)))
+		if hovered and accent.a > 0.0:
+			_rrect_draw(Rect2(Vector2(-3, -3), size + Vector2(6, 6)), r + 3.0, accent)
+		if glow.a > 0.0:
+			for i in range(4, 0, -1):
+				var grow := glow_size * float(i) / 4.0
+				var c := glow
+				c.a = glow.a * 0.30 / float(i)
+				_rrect_draw(Rect2(Vector2(-grow, -grow + 6.0),
+					size + Vector2(grow * 2.0, grow * 2.0)), r + grow, c)
+		if hard.a > 0.0:
+			_rrect_draw(Rect2(Vector2(0, float(hard_offset)), size), r, hard)
+		_paint_body(Rect2(Vector2.ZERO, size), r)
+		if inset.a > 0.0:
+			# `inset 0 0 0 4px #ffffffe6`: ring, then repaint the interior.
+			_rrect_draw(Rect2(Vector2.ZERO, size), r, inset)
+			var inner := Rect2(Vector2(inset_width, inset_width),
+				size - Vector2(inset_width * 2.0, inset_width * 2.0))
+			_paint_body(inner, maxf(r - inset_width, 0.0))
+		if strip_side == "left" and (strip.a > 0.0 or not strip_grad.is_empty()):
+			var sr := Rect2(0, 0, strip_size, size.y)
+			var sr_r := minf(r, strip_size * 0.5)
+			if not strip_grad.is_empty():
+				_linear(sr, sr_r, strip_grad)
+			elif strip.a > 0.0:
+				_rrect_draw(sr, sr_r, strip)
+		elif strip_side == "bottom" and strip.a > 0.0:
+			var sb_rect := Rect2(0, size.y - strip_size, size.x, strip_size)
+			_rrect_draw(sb_rect, minf(r, strip_size * 0.5), strip)
+		draw_set_transform_matrix(Transform2D.IDENTITY)
+
+	func _paint_body(rect: Rect2, r: float) -> void:
+		if not grad.is_empty() and str(grad.get("type", "")) == "linear":
+			_linear(rect, r, grad)
+		else:
+			_rrect_draw(rect, r, fill)
+		if stripes:
+			var pts := _rrect(rect, r)
+			var uvs := PackedVector2Array()
+			for p in pts:
+				uvs.append(p / stripe_period)
+			draw_colored_polygon(pts, Color.WHITE, uvs, PbWidgets.stripes_texture())
+
+	func _rrect_draw(rect: Rect2, r: float, color: Color) -> void:
+		draw_colored_polygon(_rrect(rect, r), color)
+
+	func _linear(rect: Rect2, r: float, g: Dictionary) -> void:
+		var pts := _rrect(rect, r)
+		var angle := deg_to_rad(float(g.get("angle", 180.0)))
+		var dir := Vector2(sin(angle), -cos(angle))
+		var proj := []
+		var lo := INF
+		var hi := -INF
+		for p in pts:
+			var t := (p - rect.get_center()).dot(dir)
+			proj.append(t)
+			lo = minf(lo, t)
+			hi = maxf(hi, t)
+		var span := maxf(hi - lo, 0.001)
+		var cols := PackedColorArray()
+		for t in proj:
+			cols.append(_sample(g, clampf((t - lo) / span, 0.0, 1.0)))
+		draw_polygon(pts, cols)
+
+	func _sample(g: Dictionary, t: float) -> Color:
+		var stops: Array = g.get("stops", [])
+		if stops.is_empty():
+			return Color.WHITE
+		var offs := []
+		for i in stops.size():
+			var pos := float(stops[i]["pos"])
+			if pos < 0.0:
+				pos = float(i) / maxf(1.0, float(stops.size() - 1)) * 100.0
+			offs.append(clampf(pos / 100.0, 0.0, 1.0))
+		if t <= float(offs[0]):
+			return stops[0]["color"]
+		for i in range(1, stops.size()):
+			if t <= float(offs[i]):
+				var s2 := maxf(float(offs[i]) - float(offs[i - 1]), 0.0001)
+				var f := clampf((t - float(offs[i - 1])) / s2, 0.0, 1.0)
+				return (stops[i - 1]["color"] as Color).lerp(stops[i]["color"], f)
+		return stops[stops.size() - 1]["color"]
+
+	func _rrect(rect: Rect2, r: float) -> PackedVector2Array:
+		var rr := minf(r, minf(rect.size.x, rect.size.y) * 0.5)
+		if rr <= 0.5:
+			return PackedVector2Array([rect.position,
+				rect.position + Vector2(rect.size.x, 0),
+				rect.position + rect.size,
+				rect.position + Vector2(0, rect.size.y)])
+		var pts := PackedVector2Array()
+		var steps := 8
+		var corners := [
+			{"c": Vector2(rect.size.x - rr, rr), "a0": -90.0, "a1": 0.0},
+			{"c": Vector2(rect.size.x - rr, rect.size.y - rr), "a0": 0.0, "a1": 90.0},
+			{"c": Vector2(rr, rect.size.y - rr), "a0": 90.0, "a1": 180.0},
+			{"c": Vector2(rr, rr), "a0": 180.0, "a1": 270.0},
+		]
+		for corner_def in corners:
+			var center: Vector2 = corner_def["c"]
+			var a0 := deg_to_rad(float(corner_def["a0"]))
+			var a1 := deg_to_rad(float(corner_def["a1"]))
+			for i in steps + 1:
+				var ang := lerpf(a0, a1, float(i) / float(steps))
+				pts.append(rect.position + center + Vector2(cos(ang), sin(ang)) * rr)
+		return pts

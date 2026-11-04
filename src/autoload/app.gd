@@ -105,6 +105,23 @@ func goto(view: String) -> void:
 	# scene created before the first frame still inherits the ported Theme.
 	await get_tree().process_frame
 	get_tree().root.theme = PbTheme.build()
+	_fade_in()
+
+
+## `.screen{animation:.25s ease-out fadeIn}`: the incoming view paints over the page
+## colour and fades in. A CanvasLayer keeps this working for Node3D roots (Run).
+func _fade_in() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 100
+	var veil := ColorRect.new()
+	veil.color = PbTheme.page_bg()
+	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(veil)
+	get_tree().root.add_child(layer)
+	var tw := veil.create_tween()
+	tw.tween_property(veil, "modulate:a", 0.0, 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_callback(layer.queue_free)
 
 
 func back_to_menu() -> void:
