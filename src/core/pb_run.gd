@@ -70,6 +70,12 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"shop": {},
 		"shopBuys": [],
 		"shopRerolls": 0,
+		"shopVisit": 0,
+		"meowth": false,
+		"meowthT": PbShop.npc_num("first_arrival", 210.0),
+		"meowthLeft": 0.0,
+		"meowthX": 0.0,
+		"meowthZ": 0.0,
 		"goldSpent": 0.0,
 		"econ": {"shop": 0, "sold": 0},
 	}
@@ -125,6 +131,7 @@ static func tick(state: Dictionary, dt: float) -> void:
 	var player: Dictionary = state["player"]
 	state["time"] = float(state["time"]) + dt
 	state["stageT"] = float(state["stageT"]) + dt
+	_tick_meowth(state, dt)
 	# siegeMult (offset 1399900): after 300s the endless director ramps up damage
 	# while the player stays put -- `v(max(camp, idle))` with grace 20 / ramp 40 /
 	# floor .3. `idle` grows while still; `camp` grows while inside the 12-unit
@@ -299,6 +306,60 @@ static func player_x(state: Dictionary) -> float:
 
 static func player_z(state: Dictionary) -> float:
 	return float(PbJson.as_dict(state["player"]).get("z", 0.0))
+
+
+## ------------------------------------------------ meowth shop NPC (@1401011)
+static func meowth_present(state: Dictionary) -> bool:
+	return bool(state.get("meowth", false))
+
+
+## The web shows the interactable prompt when the player is close; the exact
+## radius is not in the recovered fragment -- 4 units (估计).
+static func meowth_near(state: Dictionary, radius: float = -1.0) -> bool:
+	if not meowth_present(state):
+		return false
+	var reach := radius if radius > 0.0 else PbShop.npc_num("interact_radius", 4.0)
+	var dx := player_x(state) - float(state.get("meowthX", 0.0))
+	var dz := player_z(state) - float(state.get("meowthZ", 0.0))
+	return dx * dx + dz * dz <= reach * reach
+
+
+## update: `meowth ? (meowthLeft-=dt)<=0 && play && leaves()
+##                  : (meowthT-=dt)<=0 && (meowthT=300, arrives())`.
+static func _tick_meowth(state: Dictionary, dt: float) -> void:
+	if meowth_present(state):
+		state["meowthLeft"] = float(state.get("meowthLeft", 0.0)) - dt
+		if float(state["meowthLeft"]) <= 0.0 and str(state.get("state", "play")) == "play":
+			meowth_leaves(state)
+		return
+	state["meowthT"] = float(state.get("meowthT", 0.0)) - dt
+	if float(state["meowthT"]) <= 0.0:
+		state["meowthT"] = PbShop.npc_num("respawn", 300.0)
+		meowth_arrives(state)
+
+
+## meowthArrives(): shopVisit++, spawn 12-18 units from the player, stay 45 s.
+static func meowth_arrives(state: Dictionary) -> void:
+	# 超梦事件激活时只把重试计时拨到 30 s，不生成 NPC、不递增 shopVisit。
+	# 天气事件层尚未移植 -- 待确认.
+	if bool(state.get("mewtwoActive", false)):
+		state["meowthT"] = PbShop.npc_num("mewtwo_retry", 30.0)
+		return
+	state["shopVisit"] = int(state.get("shopVisit", 0)) + 1
+	var angle := PbRng.randf_range(0.0, TAU)
+	var dist := PbRng.randf_range(PbShop.npc_num("spawn_radius_min", 12.0),
+		PbShop.npc_num("spawn_radius_max", 18.0))
+	state["meowthX"] = player_x(state) + cos(angle) * dist
+	state["meowthZ"] = player_z(state) + sin(angle) * dist
+	state["meowth"] = true
+	state["meowthLeft"] = PbShop.npc_num("stay", 45.0)
+	_message(state, App.ui("¡Meowth ha venido con su tienda! Se irá en 45 s"))
+
+
+static func meowth_leaves(state: Dictionary) -> void:
+	state["meowth"] = false
+	state["meowthLeft"] = 0.0
+	_message(state, App.ui("Meowth se ha marchado"))
 
 
 static func _pick_wild_species(state: Dictionary) -> int:

@@ -36,29 +36,29 @@ static func randf() -> float:
 
 
 static func chance(p: float) -> bool:
-	return randf() < p
+	return PbRng.randf() < p
 
 
 static func randf_range(from: float, to: float) -> float:
-	return from + randf() * (to - from)
+	return from + PbRng.randf() * (to - from)
 
 
 static func randi_range(from: int, to: int) -> int:
 	if to <= from:
 		return from
-	return from + int(randf() * float(to - from + 1))
+	return from + int(PbRng.randf() * float(to - from + 1))
 
 
 static func pick(array: Array) -> Variant:
 	if array.is_empty():
 		return null
-	return array[randi_range(0, array.size() - 1)]
+	return array[PbRng.randi_range(0, array.size() - 1)]
 
 
 static func shuffled(array: Array) -> Array:
 	var out := array.duplicate()
 	for i in range(out.size() - 1, 0, -1):
-		var j := randi_range(0, i)
+		var j := PbRng.randi_range(0, i)
 		var tmp = out[i]
 		out[i] = out[j]
 		out[j] = tmp
@@ -72,7 +72,7 @@ static func weighted(entries: Array) -> Variant:
 		total += maxf(0.0, float(e[0]))
 	if total <= 0.0:
 		return entries[0][1] if not entries.is_empty() else null
-	var roll := randf() * total
+	var roll := PbRng.randf() * total
 	var acc := 0.0
 	for e in entries:
 		acc += maxf(0.0, float(e[0]))
