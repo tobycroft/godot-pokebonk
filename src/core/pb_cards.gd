@@ -24,10 +24,11 @@ const STAT_POOL := [
 
 ## Card rarity (5 tiers): offer roll `GS` @1096835 and its multiplier table
 ## news `ie` (exported as `er`) = [1, 1.2, 1.45, 1.75, 2.1].
-## The kind weights mirror the web offer composition in `KS` @1079932:
-## new moves are pushed 3x, owned-move upgrades 2x, owned-vitamin upgrades 2x
-## and brand-new vitamins get a .45 chance. The port's "stat"/"type" cards are
-## its stand-ins for vitamin upgrades, so they inherit 2.0 / .45.
+## The offer composition is `KS` @1097400: it pushes **2 candidates per owned
+## move under cap**, **2 per owned vitamin under vitCap**, **.45 per unowned
+## vitamin while a slot is free**, and its new-move block only exists while an
+## empty move slot is open. kind_weights() reproduces those counts.
+
 const RARITY_MULT := [1.0, 1.2, 1.45, 1.75, 2.1]
 
 ## Stats whose card form is additive rather than multiplicative.
@@ -54,20 +55,98 @@ static func type_cards() -> Dictionary:
 ## One random card from the pool; exclude keys lets the caller avoid duplicates
 ## and the run's banished set.
 static func roll(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
-	var kind := PbRng.weighted([[2.0, "stat"], [0.45, "type"], [2.0, "move_upgrade"],
-		[3.0, "new_move"]])
-	match str(kind):
-		"type":
-			return roll_type_card(exclude)
-		"move_upgrade":
-			var up := roll_move_upgrade(actor, exclude)
+	var weights := kind_weights(actor, exclude)
+	if weights.is_empty():
+		return roll_stat_card(exclude, actor)
+	var kind := str(PbRng.weighted(weights))
+	match kind:
+		"up_vit":
+			var up := roll_vitamin(actor, exclude, false)
 			if not up.is_empty():
 				return up
+		"new_vit":
+			var nv := roll_vitamin(actor, exclude, true)
+			if not nv.is_empty():
+				return nv
+		"move_upgrade":
+			var up_move := roll_move_upgrade(actor, exclude)
+			if not up_move.is_empty():
+				return up_move
 		"new_move":
 			var nm := roll_new_move(actor, exclude)
 			if not nm.is_empty():
 				return nm
+	# Vitamins / moves unavailable (everything at cap, no free slot, or all
+	# candidates banned): fall back to the stand-in stat card.
 	return roll_stat_card(exclude, actor)
+
+
+## `KS` candidate counts: [weight, kind]. The web builds a flat candidate list
+## and shuffles it, so each kind's share is proportional to these counts.
+static func kind_weights(actor: Dictionary, exclude: Dictionary = {}) -> Array:
+	var entries := []
+	var up_vit := _vitamin_candidates(actor, exclude, false).size()
+	if up_vit > 0:
+		entries.append([2.0 * float(up_vit), "up_vit"])
+	var new_vit := _vitamin_candidates(actor, exclude, true).size()
+	if new_vit > 0:
+		entries.append([0.45 * float(new_vit), "new_vit"])
+	var move_up := _upgradeable_slots(actor, exclude).size()
+	if move_up > 0:
+		entries.append([2.0 * float(move_up), "move_upgrade"])
+	# The web only rolls new-move candidates while an empty move slot is open.
+	if PbActor.free_slot(actor) >= 0:
+		entries.append([3.0, "new_move"])
+	return entries
+
+
+## Vitamin card: `KS` @1099962 gives 2 upVit offers per owned vitamin below
+## vitCap, and a .45 chance of a newVit per unowned one while a slot is free.
+static func roll_vitamin(actor: Dictionary, exclude: Dictionary = {}, brand_new: bool = false) -> Dictionary:
+	var candidates := _vitamin_candidates(actor, exclude, brand_new)
+	if candidates.is_empty():
+		return {}
+	var key := str(PbRng.pick(candidates))
+	var def := PbVitamins.def_of(key)
+	var rarity := _roll_rarity(actor)
+	var value := float(RARITY_MULT[clampi(rarity, 0, RARITY_MULT.size() - 1)])
+	var preview := PbVitamins.preview(actor, key, value)
+	var current_level := PbVitamins.level_of(actor, key)
+	return {
+		"kind": "new_vit" if brand_new else "up_vit",
+		"vit": key,
+		"rarity": rarity,
+		"level": current_level,
+		"next_level": int(preview.get("level", 1)),
+		"cap": int(preview.get("cap", PbVitamins.LEVEL_CAP)),
+		"mods": PbJson.as_array(preview.get("mods", [])),
+		"label": App.ui(str(def.get("name", key))),
+		"icon": str(def.get("icon", "")),
+		"estimated": false,
+	}
+
+
+## Owned vitamins under vitCap (upVit) or unowned ones while a slot is free
+## (newVit). `KS` keys the banished set by `v`+vitamin key.
+static func _vitamin_candidates(actor: Dictionary, exclude: Dictionary, brand_new: bool) -> Array:
+	var owned := PbVitamins.entries(actor)
+	var slot_open := PbVitamins.can_offer_new(actor)
+	var out := []
+	for key in PbVitamins.defs().keys():
+		var key_s := str(key)
+		if exclude.has("v" + key_s):
+			continue
+		var owned_entry := PbJson.as_dict(owned.get(key_s, {}))
+		if not owned_entry.is_empty():
+			if brand_new:
+				continue
+			# Owned vitamins stop being offered at the cap (vitCap, not 10).
+			if int(owned_entry.get("level", 0)) >= PbVitamins.cap_for(actor):
+				continue
+			out.append(key_s)
+		elif brand_new and slot_open:
+			out.append(key_s)
+	return out
 
 
 static func roll_stat_card(exclude: Dictionary = {}, actor: Dictionary = {}) -> Dictionary:
@@ -134,8 +213,7 @@ static func roll_type_card(exclude: Dictionary = {}) -> Dictionary:
 
 
 static func roll_move_upgrade(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
-	var slots := _owned_slots(actor)
-	slots = slots.filter(func(s): return not exclude.has("mv:" + str(s["key"])))
+	var slots := _upgradeable_slots(actor, exclude)
 	if slots.is_empty():
 		return {}
 	var slot := PbJson.as_dict(PbRng.pick(slots))
@@ -206,9 +284,24 @@ static func offer(actor: Dictionary, count: int = 3, banished: Dictionary = {}) 
 		var card := roll(actor, used)
 		if card.is_empty():
 			break
-		used[str(card.get("kind", "")) + ":" + str(card.get("stat", card.get("type", card.get("move_key", guard))))] = true
+		used[_card_key(card, out.size())] = true
 		out.append(card)
 	return out
+
+
+## Dedupe key for one offered card, matching the exclude keys roll_* consume.
+static func _card_key(card: Dictionary, fallback: int) -> String:
+	var kind := str(card.get("kind", ""))
+	match kind:
+		"new_vit", "up_vit":
+			return "v" + str(card.get("vit", ""))
+		"new_move":
+			return "new:" + str(card.get("move_key", ""))
+		"move_upgrade":
+			return "mv:" + str(card.get("move_key", ""))
+		"type":
+			return "type:" + str(card.get("type", ""))
+	return "stat:" + str(card.get("stat", fallback))
 
 
 ## Applies a chosen card to the actor; returns a human-readable result line.
@@ -220,6 +313,10 @@ static func take(actor: Dictionary, card: Dictionary) -> String:
 		"move_upgrade":
 			PbActor.upgrade_move(actor, int(card["slot"]), card)
 			return "move upgraded"
+		"new_vit", "up_vit":
+			PbVitamins.add(actor, str(card.get("vit", "")),
+				float(RARITY_MULT[clampi(int(card.get("rarity", 0)), 0, RARITY_MULT.size() - 1)]))
+			return "vitamin"
 		_:
 			PbActor.add_mods(actor, PbJson.as_array(card.get("mods", [])))
 			return "stats"
@@ -237,7 +334,19 @@ static func _owned_slots(actor: Dictionary) -> Array:
 		if def.is_empty():
 			continue
 		out.append({"slot": i, "key": str(def.get("key", "")), "name": str(def.get("name", "")),
-			"arch": str(def.get("arch", ""))})
+			"arch": str(def.get("arch", "")), "level": int(PbJson.as_dict(m).get("level", 1))})
+	return out
+
+
+## Owned moves the web still offers upgrades for (level below capOf, not banned).
+static func _upgradeable_slots(actor: Dictionary, exclude: Dictionary = {}) -> Array:
+	var out := []
+	for slot in _owned_slots(actor):
+		if int(slot.get("level", 1)) >= PbActor.MOVE_MAX_LEVEL:
+			continue
+		if exclude.has("mv:" + str(slot["key"])):
+			continue
+		out.append(slot)
 	return out
 
 
@@ -274,6 +383,7 @@ static func _label(stat: String) -> String:
 		"critChance": "Prob. crítico", "critDamage": "Daño crítico", "gold": "Pokédólares",
 		"xpGain": "Experiencia", "luck": "Suerte", "armor": "Armadura", "regen": "Regeneración",
 		"eliteDamage": "Daño a élites", "healing": "Curación", "evasion": "Evasión",
+		"difficulty": "Dificultad",
 	}
 	return App.ui(str(labels.get(stat, stat)))
 
