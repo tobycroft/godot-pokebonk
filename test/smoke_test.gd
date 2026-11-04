@@ -254,11 +254,11 @@ func _run_flow() -> void:
 	ok(not PbJson.as_array(run["offers"]).is_empty() or int(run["pendingLevels"]) == 0,
 		"modal state consistent with pending levels")
 	var result := PbRun.finish(run, "exit")
-	# Web semantics: `seen` is registered when the species appears; the captured
-	# list is written exclusively by a successful Poké Ball throw.
+	# Web tally @766688: a normal kill pushes `seen`; the captured list is written
+	# exclusively by a successful Poké Ball throw.
 	ok(PbJson.as_array(stats.get("captured", [])).size() == 0,
 		"kills do not write captures (ball throw only)")
-	ok(PbJson.as_array(stats.get("newSeen", [])).size() > 0, "seen species list filled")
+	ok(PbJson.as_array(stats.get("newSeen", [])).size() > 0, "seen species list filled by kills")
 	ok(PbJson.as_dict(stats.get("killsBy", {})).size() > 0, "per-species kill counts tracked")
 	ok(result.has("species") and result.has("kills") and result.has("splits"),
 		"settlement payload has the api-core.js fields")
@@ -316,8 +316,8 @@ func _run_flow() -> void:
 	ok(str(manual.get("aimMode", "")) == "manual", "manual aim mode survives the tick loop")
 	ok(float(manual["time"]) > 20.0, "manual-aim run keeps simulating (t=%.0fs)" % float(manual["time"]))
 
-	# --- capture (bundle class kS @1074615): only a successful ball throw writes
-	# the captured list; kills never do (seen is written at spawn).
+	# --- capture (bundle class kS @1074615): a league spawn writes `seen` on
+	# appearance; only a successful ball throw writes the captured list.
 	var cap_run := PbRun.create(25, "forest", 777, {})
 	ok(cap_run.has("capture"), "capture encounter state created")
 	PbCapture.data_of(cap_run)["spawnAt"] = 0.0
@@ -325,6 +325,8 @@ func _run_flow() -> void:
 	var cap_index := PbCapture.index(cap_run)
 	ok(cap_index >= 0 and PbEnemies.is_alive(cap_run["enemies"], cap_index),
 		"capture encounter spawned (kS.spawnEncounter @1078302)")
+	ok(PbJson.as_array(cap_run["stats"].get("newSeen", [])).has(PbCapture.species(cap_run)),
+		"special league spawn marks seen before it is caught")
 	var cap_pool: Dictionary = cap_run["enemies"]
 	ok(int(PbEnemies.get_field(cap_pool, "flags", cap_index)) & int(PbEnemies.Flag["Capture"]) != 0,
 		"capture encounter carries the R.Capture flag")

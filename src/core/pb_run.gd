@@ -234,8 +234,6 @@ static func _tick_director(state: Dictionary, dt: float) -> void:
 			stage, diff, tier, hp_multiplier, dmg_multiplier, 1.0, stage_t)
 		if index >= 0:
 			alive += 1
-			# Dex "seen" is registered when the species appears, not on the kill.
-			_mark_seen(state, species)
 		state["_last_spawn_species"] = species
 	state["spawnAllowance"] = allowance
 	state["credits"] = maxf(0.0, credits)
@@ -476,7 +474,8 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 					return
 
 
-## Dex "seen" is written the moment a species appears in the arena.
+## Dex "seen": normal enemies write it from the kill path (`tally` @766688),
+## while special individuals write it when they enter the arena.
 static func _mark_seen(state: Dictionary, species: int) -> void:
 	var stats: Dictionary = state["stats"]
 	var seen: Array = stats.get("newSeen", [])
@@ -507,8 +506,10 @@ static func _on_kill_info(state: Dictionary, info: Dictionary) -> void:
 	# credit() @765300: the orb carries the enemy's own xp value; run.diff.xpMul
 	# is applied again when the orb is collected (addXp @843900).
 	_drop_orb(state, float(info.get("xp", 1.0)), float(info["x"]), float(info["z"]))
-	# No dex write on a kill: `seen` is registered at spawn and `captured`
-	# exclusively by a successful Poké Ball throw in PbCapture.
+	# tally @766688: a normal kill pushes `seen`. Special individuals (shiny /
+	# legendary / league weakened spawn) already wrote it on appearance, and
+	# `_mark_seen` de-duplicates, so the dex count stays one per species.
+	_mark_seen(state, species)
 
 
 ## XP candies: the web build drops collectible orbs; the run simulates them as
