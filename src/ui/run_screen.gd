@@ -20,6 +20,7 @@ var _player_node: Node3D
 var _camera: Camera3D
 var _terrain: PbTerrain
 var _view: PbWorldView
+var _hazard_view: PbHazardView
 var _sun: DirectionalLight3D
 var _enemy_nodes: Array[MeshInstance3D] = []
 var _orb_nodes: Array[MeshInstance3D] = []
@@ -88,6 +89,10 @@ func _build_world() -> void:
 	_view = PbWorldView.new()
 	_view.name = "World"
 	add_child(_view)
+
+	_hazard_view = PbHazardView.new()
+	_hazard_view.name = "Hazards"
+	add_child(_hazard_view)
 
 	_player_node = Node3D.new()
 	add_child(_player_node)
@@ -357,6 +362,9 @@ func _build_terrain() -> void:
 		return
 	var started := Time.get_ticks_msec()
 	_terrain = PbTerrain.create(biome_dict, PbData.world_pack(biome_id), seed_value)
+	# PbHazards needs the height field for flat-spot sampling; it stays in-memory
+	# only (runs are not persisted mid-stage).
+	_run["terrain"] = _terrain
 	var palette_all := PbData.world_palettes()
 	var palette := PbJson.as_dict(PbJson.as_dict(palette_all.get("by_pack")).get(biome_id))
 	_view.setup(_terrain, biome_dict, PbData.world_pack(biome_id), palette, PbData.world_fx())
@@ -585,6 +593,8 @@ func _render(dt: float) -> void:
 	_player_node.position = Vector3(px, py, pz)
 	if _view != null:
 		_view.tick(dt, Vector3(px, py, pz), _camera)
+	if _hazard_view != null:
+		_hazard_view.sync(_run, _terrain)
 	if _player_node.get_child_count() == 0:
 		_player_node.add_child(PbVisuals.avatar(int(player.get("species_id", 1))))
 	else:
