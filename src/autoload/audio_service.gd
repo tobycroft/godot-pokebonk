@@ -50,7 +50,7 @@ func play_music(track: String = "menu") -> void:
 		_:
 			# TODO(asset): boss/level tracks are not available offline.
 			path = "res://assets/audio/music/menu_theme.wav"
-	if _music.stream != null and _music.playing and String(_music.stream.resource_path) == path:
+	if _music.stream != null and _music.playing and str(_music.stream.resource_path) == path:
 		return
 	if not ResourceLoader.exists(path):
 		push_warning("Audio: music track missing %s" % path)

@@ -39,7 +39,7 @@ func lab_table() -> Array:
 func lab_max(id: String) -> int:
 	for row in lab_table():
 		var entry := PbJson.as_dict(row)
-		if String(entry.get("id", "")) == id:
+		if str(entry.get("id", "")) == id:
 			return int(entry.get("max", 1))
 	return 1
 
@@ -125,7 +125,7 @@ func full_profile() -> Dictionary:
 	p["biomes"] = BIOMES.duplicate()
 	for row in lab_table():
 		var entry := PbJson.as_dict(row)
-		p["lab"][String(entry["id"])] = int(entry["max"])
+		p["lab"][str(entry["id"])] = int(entry["max"])
 	p["bag"] = {"rare-candy": 99, "lucky-egg": 1, "amulet-coin": 1}
 	p["itemsOwned"] = ["toxic-orb"]
 	return p
@@ -139,7 +139,7 @@ func _kanto() -> Array:
 
 
 func normalize(p: Variant) -> Dictionary:
-	var base := base_profile(String(PbJson.as_dict(p).get("name", "Entrenador")) if p != null else "Entrenador")
+	var base := base_profile(str(PbJson.as_dict(p).get("name", "Entrenador")) if p != null else "Entrenador")
 	var incoming := PbJson.as_dict(p)
 	var out := base.duplicate(true)
 	for key in incoming.keys():
@@ -218,7 +218,7 @@ func reset(to_full: bool = true) -> Dictionary:
 func apply_actions(actions: Array) -> void:
 	for raw in actions:
 		var a := PbJson.as_dict(raw)
-		match String(a.get("t", "")):
+		match str(a.get("t", "")):
 			"addStardust":
 				store["stardust"] = int(store.get("stardust", 0)) + int(a.get("v", 0))
 				store["totalStardust"] = int(store.get("totalStardust", 0)) + int(a.get("v", 0))
@@ -235,7 +235,7 @@ func apply_actions(actions: Array) -> void:
 				var ids = a.get("id", [])
 				store["itemsOwned"] = _union(store["itemsOwned"], ids if ids is Array else [ids])
 			"bag":
-				var key := String(a.get("id", ""))
+				var key := str(a.get("id", ""))
 				store["bag"][key] = int(store["bag"].get(key, 0)) + int(a.get("v", 0))
 			"league":
 				store["league"] = maxi(int(store.get("league", 1)), int(a.get("v", 0)))
@@ -259,7 +259,7 @@ func _union(list: Variant, add: Variant) -> Array:
 ## Port of applyRunResult(): same record shape, same reward formulas.
 func apply_run_result(result: Dictionary, run_id: String = "") -> Dictionary:
 	var r := result
-	var id := run_id if not run_id.is_empty() else String(r.get("id", "r%d" % _now_ms()))
+	var id := run_id if not run_id.is_empty() else str(r.get("id", "r%d" % _now_ms()))
 	var rec := {
 		"id": id,
 		"date": _now_ms(),
@@ -279,7 +279,7 @@ func apply_run_result(result: Dictionary, run_id: String = "") -> Dictionary:
 		"items": PbJson.as_array(r.get("items", [])),
 		"splits": PbJson.as_array(r.get("splits", [])),
 		"ranked": true,
-		"mode": String(r.get("mode", "standard")),
+		"mode": str(r.get("mode", "standard")),
 	}
 	var runs: Array = PbJson.as_array(store.get("runs", []))
 	runs.insert(0, rec)
@@ -378,18 +378,18 @@ func handle(method: String, path: String, query: Dictionary = {}, body: Dictiona
 		return {"build": _build_id(), "version": _version()}
 	if method == "POST" and path == "/auth/guest":
 		guest_session = true
-		if String(store.get("name", "")).is_empty() or store.get("name") == "Entrenador":
+		if str(store.get("name", "")).is_empty() or store.get("name") == "Entrenador":
 			store["name"] = "Invitado%04d" % (randi() % 10000)
 		save()
 		return _account()
 	if method == "GET" and path == "/auth/me":
 		return _account()
 	if method == "GET" and path == "/auth/name":
-		var name := String(query.get("name", "")).strip_edges()
+		var name := str(query.get("name", "")).strip_edges()
 		var ok := name.length() >= 3
 		return {"ok": ok, "free": ok, "taken": not ok, "available": ok, "name": name}
 	if method == "POST" and path in ["/auth/register", "/auth/login", "/auth/guest-name"]:
-		var new_name := String(body.get("name", "")).strip_edges()
+		var new_name := str(body.get("name", "")).strip_edges()
 		if not new_name.is_empty():
 			store["name"] = new_name.substr(0, mini(16, new_name.length()))
 		guest_session = false
@@ -458,11 +458,11 @@ func _account() -> Dictionary:
 
 
 func _build_id() -> String:
-	return String(_pb_meta().get("build", "godot-port"))
+	return str(_pb_meta().get("build", "godot-port"))
 
 
 func _version() -> String:
-	return String(_pb_meta().get("version", "0.0.0"))
+	return str(_pb_meta().get("version", "0.0.0"))
 
 
 static var _meta_cache := {}
@@ -521,7 +521,7 @@ func list_backups() -> Array:
 				sum = {"name": p.get("name"), "stardust": p.get("stardust"),
 					"league": p.get("league") if not (p.get("league") is Array) else PbJson.as_array(p["league"]).size()}
 			out.append({"id": id, "time": id.trim_prefix(BACKUP_PREFIX), "summary": sum})
-	out.sort_custom(func(a, b): return String(a["time"]) > String(b["time"]))
+	out.sort_custom(func(a, b): return str(a["time"]) > str(b["time"]))
 	return out
 
 
@@ -535,7 +535,7 @@ func _prune_backups() -> void:
 			ids.append(f)
 	ids.sort()
 	while ids.size() > MAX_BACKUPS:
-		var oldest := String(ids.pop_front())
+		var oldest := str(ids.pop_front())
 		dir.remove(oldest)
 
 
@@ -581,7 +581,7 @@ func export_to_file(path: String = "") -> String:
 	var s := summary()
 	var target := path
 	if target.is_empty():
-		var who := String(s.get("name", "save")).replace(" ", "-")
+		var who := str(s.get("name", "save")).replace(" ", "-")
 		target = "user://pokebonk-save-%s-%s.json" % [who, _stamp()]
 	_write_text(target, export_string())
 	return target

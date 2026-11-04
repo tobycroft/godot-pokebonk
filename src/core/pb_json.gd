@@ -40,11 +40,11 @@ static func as_array(value: Variant) -> Array:
 	return value if typeof(value) == TYPE_ARRAY else []
 
 
-## String() cannot convert null (it raises a parse-time constructor error), and
+## str() cannot convert null (it raises a parse-time constructor error), and
 ## the JSON tables are full of explicit nulls (e.g. type_status.dragon = null),
 ## so every string read goes through here.
 static func as_string(value: Variant, fallback: String = "") -> String:
-	return fallback if value == null else String(value)
+	return fallback if value == null else str(value)
 
 
 static func as_float(value: Variant, fallback: float = 0.0) -> float:

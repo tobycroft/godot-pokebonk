@@ -25,7 +25,7 @@ static var _frame_cache := {}
 
 
 static func color_for(species: Dictionary) -> Color:
-	var raw := String(species.get("color", "gray")).to_lower()
+	var raw := str(species.get("color", "gray")).to_lower()
 	if raw.begins_with("#"):
 		return Color.from_string(raw, Color(0.6, 0.6, 0.6))
 	var hex = COLOR_NAMES.get(raw, null)
@@ -76,7 +76,7 @@ static func front_texture(species_id: int) -> Texture2D:
 ## A Node3D representing the species in the arena.
 static func avatar(species_id: int, key: String = "") -> Node3D:
 	var species := PbData.species(species_id)
-	var model_key := key if not key.is_empty() else String(species.get("key", ""))
+	var model_key := key if not key.is_empty() else str(species.get("key", ""))
 	var glb_path := "res://assets/models/%s.glb" % model_key
 	if ResourceLoader.exists(glb_path):
 		var packed = load(glb_path)

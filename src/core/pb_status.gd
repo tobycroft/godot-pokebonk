@@ -59,6 +59,6 @@ static func dps_ratio(kind: String) -> float:
 
 ## Status a hit inflicts, given the move's status and its rolled chance.
 static func roll(status: Variant, chance: float) -> bool:
-	if status == null or String(status).is_empty():
+	if status == null or str(status).is_empty():
 		return false
 	return PbRng.chance(chance)

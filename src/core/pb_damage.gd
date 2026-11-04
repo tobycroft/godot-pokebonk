@@ -31,10 +31,10 @@ static func effectiveness(atk_type: String, def_types: Array) -> float:
 		return 1.0
 	var mult := 1.0
 	for dt in def_types:
-		var di := PbData.type_index(String(dt))
+		var di := PbData.type_index(str(dt))
 		if di < 0:
 			continue
-		var cell := PbData.chart_cell(atk_type, String(dt))
+		var cell := PbData.chart_cell(atk_type, str(dt))
 		if cell >= 2.0:
 			mult *= 1.35
 		elif cell == 0.0:
@@ -70,10 +70,10 @@ static func fusion_area_scale(area: float) -> float:
 static func move_instance(movedef: Dictionary, actor: Dictionary, level: int = 1, mods: Dictionary = {}) -> Dictionary:
 	var inst_mods := mods if not mods.is_empty() else level_mods(level)
 	var stats: Dictionary = actor.get("stats", {})
-	var arch := String(movedef.get("arch", "bolt"))
+	var arch := str(movedef.get("arch", "bolt"))
 	var arch_stats := PbJson.as_array(movedef.get("stats", []))
 	var types: Array = actor.get("types", [])
-	var move_type := String(movedef.get("type", "normal"))
+	var move_type := str(movedef.get("type", "normal"))
 	var adaptability := bool(actor.get("adaptability", false))
 
 	var base := float(movedef.get("dmg", 10)) * 1.3 * float(inst_mods.get("dmg", 1.0)) * (1.0 + float(level - 1) * 0.04)
@@ -81,7 +81,7 @@ static func move_instance(movedef: Dictionary, actor: Dictionary, level: int = 1
 	if types.has(move_type):
 		stab = STAB_ADAPTABILITY if adaptability else STAB
 	var real := base * float(stats.get("damage", 1.0)) \
-		* (float(stats.get("physical", 1.0)) if String(movedef.get("cls", "physical")) == "physical" else float(stats.get("special", 1.0))) \
+		* (float(stats.get("physical", 1.0)) if str(movedef.get("cls", "physical")) == "physical" else float(stats.get("special", 1.0))) \
 		* stab * float(PbJson.as_dict(stats.get("typeBoost", {})).get(move_type, 1.0))
 
 	var count := maxi(1, int(float(movedef.get("count", 1)) + float(inst_mods.get("count", 0)) \
@@ -136,7 +136,7 @@ static func move_instance(movedef: Dictionary, actor: Dictionary, level: int = 1
 ## bA(): expected damage of one activation -- the game's card-ranking heuristic.
 static func expected_use(movedef: Dictionary, inst: Dictionary) -> float:
 	var real := float(inst.get("real", 0.0))
-	match String(movedef.get("arch", "")):
+	match str(movedef.get("arch", "")):
 		"bolt", "drain", "homing", "orb", "lob", "barrage", "smite", "meteor", "strike":
 			return real * float(inst.get("count", 1))
 		"dash", "boomerang", "wave", "aura", "chain":
@@ -180,16 +180,16 @@ static func strike(ctx: Dictionary) -> Dictionary:
 	if not fixed:
 		# STAB and typeBoost are already inside inst.real (see move_instance), so the
 		# strike stage only adds the layers that depend on the *defender* or the run.
-		if String(movedef.get("cls", "")) == "physical" and items.has("thick-club"):
+		if str(movedef.get("cls", "")) == "physical" and items.has("thick-club"):
 			dmg *= 1.0 + minf(0.5, maxf(0.0, float(stats.get("armor", 0.0))) / 200.0) * float(items["thick-club"])
-		eff = effectiveness(String(movedef.get("type", "")), def_types)
+		eff = effectiveness(str(movedef.get("type", "")), def_types)
 		dmg *= eff
 		if eff > 1.01:
 			dmg *= float(stats.get("superEffective", 1.0))
-		var w := PbWeather.of(String(ctx.get("weather", "clear")))
-		if w.boosts.has(String(movedef.get("type", ""))):
+		var w := PbWeather.of(str(ctx.get("weather", "clear")))
+		if w.boosts.has(str(movedef.get("type", ""))):
 			dmg *= WEATHER_BOOST
-		if w.nerfs.has(String(movedef.get("type", ""))):
+		if w.nerfs.has(str(movedef.get("type", ""))):
 			dmg *= WEATHER_NERF
 		if bool(ctx.get("elite", false)) or bool(ctx.get("boss", false)):
 			dmg *= float(stats.get("eliteDamage", 1.0))
@@ -204,7 +204,7 @@ static func strike(ctx: Dictionary) -> Dictionary:
 
 		# Crit roll: critChance + megaCrit + move critBonus + pickup's gold synergy.
 		var pickup_bonus := minf(0.15, float(stats.get("gold", 0.0)) / 10000.0) \
-			if String(actor.get("ability", "")) == "pickup" else 0.0
+			if str(actor.get("ability", "")) == "pickup" else 0.0
 		var chance := float(stats.get("critChance", 0.0)) + float(stats.get("megaCrit", 0.0)) \
 			+ float(movedef.get("critBonus", 0.0)) + pickup_bonus + float(inst.get("critBonusOnly", 0.0))
 		if PbRng.chance(chance):
@@ -225,17 +225,17 @@ static func strike(ctx: Dictionary) -> Dictionary:
 	var frozen := int(ctx.get("frozen", 0))
 	if frozen > 0:
 		dmg *= float(PbStatus.VERIFIED["frozen_damage_taken"])
-	if int(ctx.get("paralysed", 0)) > 0 and String(actor.get("ability", "")) == "beacon":
+	if int(ctx.get("paralysed", 0)) > 0 and str(actor.get("ability", "")) == "beacon":
 		dmg *= float(PbStatus.VERIFIED["paralysis_beacon_bonus"])
 	if int(ctx.get("asleep", 0)) > 0:
 		dmg *= float(PbStatus.VERIFIED["asleep_damage_taken"])
-		if String(movedef.get("type", "")) in ["ghost", "dark"]:
+		if str(movedef.get("type", "")) in ["ghost", "dark"]:
 			dmg *= float(PbStatus.VERIFIED["asleep_ghost_dark_bonus"])
 
 	var absorbed := 0.0
 	var shield := float(ctx.get("shield", 0.0))
 	if shield > 0.0:
-		var breaker := 3.0 if String(movedef.get("type", "")) == "fighting" else 1.0
+		var breaker := 3.0 if str(movedef.get("type", "")) == "fighting" else 1.0
 		absorbed = minf(shield, dmg * breaker)
 		shield -= absorbed
 		dmg = maxf(0.0, dmg - absorbed / breaker)

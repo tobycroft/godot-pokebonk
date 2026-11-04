@@ -21,17 +21,19 @@ static var _loaded := false
 static func _ensure() -> void:
 	if _loaded:
 		return
-	var raw := PbJson.as_dict(PbData.pb_table("weather"))
+	# data/pb/weather.json is the map-event table (fog/storm/eclipse/meowth);
+	# the damage multipliers live in weather_damage.json (`pr` in the bundle).
+	var raw := PbJson.as_dict(PbData.pb_table("weather_damage"))
 	for key in raw.keys():
 		var entry := PbJson.as_dict(raw[key])
 		var w := PbWeather.new()
-		w.key = String(key)
-		w.display_name = String(entry.get("name", key))
+		w.key = str(key)
+		w.display_name = str(entry.get("name", key))
 		for t in PbJson.as_array(entry.get("boost", [])):
-			w.boosts[String(t)] = true
+			w.boosts[str(t)] = true
 		for t in PbJson.as_array(entry.get("nerf", [])):
-			w.nerfs[String(t)] = true
-		_table[String(key)] = w
+			w.nerfs[str(t)] = true
+		_table[str(key)] = w
 	_loaded = true
 
 

@@ -30,7 +30,7 @@ static func _ensure() -> void:
 		var raw := PbJson.as_dict(PbData.pb_table(table))
 		for e in PbJson.as_array(raw.get("entries", [])):
 			var entry := PbJson.as_dict(e)
-			var key := String(entry.get("key", ""))
+			var key := str(entry.get("key", ""))
 			if key.is_empty() or _by_key.has(key):
 				continue
 			_by_key[key] = entry
@@ -59,7 +59,7 @@ static func recipe_id(key: String) -> int:
 	_ensure()
 	var index := 0
 	for e in _entries:
-		if String(e["key"]) == key:
+		if str(e["key"]) == key:
 			return FUSION_PLACEHOLDER_ID_BASE + index
 		index += 1
 	return -1
@@ -67,28 +67,28 @@ static func recipe_id(key: String) -> int:
 
 ## Hw(): weather/buff/fusion moves cannot be fused.
 static func is_eligible(movedef: Dictionary) -> bool:
-	var arch := String(movedef.get("arch", ""))
+	var arch := str(movedef.get("arch", ""))
 	return arch != "weather" and arch != "buff" and arch != "fusion"
 
 
 ## Uw(): pick the recipe for two move definitions.
 static func recipe_for(a: Dictionary, b: Dictionary) -> Dictionary:
 	_ensure()
-	var a_key := String(a.get("key", ""))
-	var b_key := String(b.get("key", ""))
+	var a_key := str(a.get("key", ""))
+	var b_key := str(b.get("key", ""))
 	for r in _entries:
-		if String(r.get("kind", "")) != "signature":
+		if str(r.get("kind", "")) != "signature":
 			continue
 		var moves: Array = PbJson.as_array(r.get("moves", []))
 		if moves.size() < 2:
 			continue
-		if (String(moves[0]) == a_key and String(moves[1]) == b_key) \
-				or (String(moves[0]) == b_key and String(moves[1]) == a_key):
+		if (str(moves[0]) == a_key and str(moves[1]) == b_key) \
+				or (str(moves[0]) == b_key and str(moves[1]) == a_key):
 			return r
-	var a_type := String(a.get("type", ""))
-	var b_type := String(b.get("type", ""))
+	var a_type := str(a.get("type", ""))
+	var b_type := str(b.get("type", ""))
 	for r in _entries:
-		if String(r.get("kind", "")) != "reaction":
+		if str(r.get("kind", "")) != "reaction":
 			continue
 		var pair: Array = PbJson.as_array(r.get("pair", []))
 		if pair.size() < 2:
@@ -99,10 +99,10 @@ static func recipe_for(a: Dictionary, b: Dictionary) -> Dictionary:
 			return r
 	if a_type == b_type:
 		for r in _entries:
-			if String(r.get("kind", "")) == "type" and String(r.get("type", "")) == a_type:
+			if str(r.get("kind", "")) == "type" and str(r.get("type", "")) == a_type:
 				return r
 	for r in _entries:
-		if String(r.get("kind", "")) == "glitch":
+		if str(r.get("kind", "")) == "glitch":
 			return r
 	return {}
 
@@ -115,12 +115,12 @@ static func fused_def(recipe: Dictionary) -> Dictionary:
 	var fusion_base := PbJson.as_dict(archetype.get("fusion", {}))
 	var status = recipe.get("status")
 	var def := {
-		"id": recipe_id(String(recipe.get("key", ""))),
-		"key": String(recipe.get("key", "")),
-		"name": String(recipe.get("name", "")),
-		"type": String(recipe.get("type", "normal")),
+		"id": recipe_id(str(recipe.get("key", ""))),
+		"key": str(recipe.get("key", "")),
+		"name": str(recipe.get("name", "")),
+		"type": str(recipe.get("type", "normal")),
 		"type2": recipe.get("type2"),
-		"cls": String(recipe.get("cls", "special")),
+		"cls": str(recipe.get("cls", "special")),
 		"arch": "fusion",
 		"dmg": float(fusion_base.get("dmg", 17)) * float(recipe.get("power", 1)),
 		"cd": float(recipe.get("cd", 3)),
@@ -135,15 +135,15 @@ static func fused_def(recipe: Dictionary) -> Dictionary:
 		"critBonus": 0.0,
 		"flinch": 0.0,
 		"power": 100,
-		"desc": String(recipe.get("desc", "")),
+		"desc": str(recipe.get("desc", "")),
 		"stats": PbJson.as_array(fusion_base.get("stats", [])),
-		"archLabel": String(fusion_base.get("label", "Fusión")),
-		"archDesc": String(fusion_base.get("desc", "")),
+		"archLabel": str(fusion_base.get("label", "Fusión")),
+		"archDesc": str(fusion_base.get("desc", "")),
 		"fusion": {
-			"key": String(recipe.get("key", "")),
+			"key": str(recipe.get("key", "")),
 			"hits": float(recipe.get("hits", 1)),
 			"repeats": bool(recipe.get("repeats", false)),
-			"kind": String(recipe.get("kind", "generic")),
+			"kind": str(recipe.get("kind", "generic")),
 			"members": PbJson.as_array(recipe.get("moves", [])),
 			"range": float(recipe.get("range", 0)),
 		},
@@ -196,8 +196,8 @@ static func _before(p: Dictionary, q: Dictionary, rank: Dictionary) -> bool:
 	var qr := 1 if bool(q.get("ready", false)) else 0
 	if pr != qr:
 		return pr > qr
-	var pk := int(rank.get(String(PbJson.as_dict(p.get("recipe", {})).get("kind", "")), 9))
-	var qk := int(rank.get(String(PbJson.as_dict(q.get("recipe", {})).get("kind", "")), 9))
+	var pk := int(rank.get(str(PbJson.as_dict(p.get("recipe", {})).get("kind", "")), 9))
+	var qk := int(rank.get(str(PbJson.as_dict(q.get("recipe", {})).get("kind", "")), 9))
 	return pk < qk
 
 
@@ -223,7 +223,7 @@ static func apply(moves: Array, offer: Dictionary) -> Dictionary:
 		"parents": parents,
 		"timer": INHERIT_TIMER,
 		"cooldown": 0.0,
-		"fused_from": [String(PbJson.as_dict(a).get("def", {}).get("key", "")), String(PbJson.as_dict(b).get("def", {}).get("key", ""))],
+		"fused_from": [str(PbJson.as_dict(a).get("def", {}).get("key", "")), str(PbJson.as_dict(b).get("def", {}).get("key", ""))],
 	}
 	var target := mini(int(offer["a"]), int(offer["b"]))
 	moves[int(offer["a"])] = null

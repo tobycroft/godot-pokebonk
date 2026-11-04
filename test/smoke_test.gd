@@ -97,7 +97,7 @@ func _formula_parity() -> void:
 	section("type effectiveness vs golden")
 	for raw in PbJson.as_array(_golden.get("effectiveness", [])):
 		var c := PbJson.as_dict(raw)
-		close(PbDamage.effectiveness(String(c["atk"]), PbJson.as_array(c["def"])),
+		close(PbDamage.effectiveness(str(c["atk"]), PbJson.as_array(c["def"])),
 			float(c["want"]), "effectiveness %s -> %s" % [c["atk"], str(c["def"])])
 
 	section("stat derivation (Qy port)")
@@ -106,11 +106,11 @@ func _formula_parity() -> void:
 	var got := PbStats.stats_from_species(bulba, 0.0)
 	ok(got.keys().has("typeBoost"), "derived stats carry the per-type boost map")
 	for key in PbStats.STAT_KEYS:
-		ok(got.has(String(key)), "stat block exposes %s" % String(key))
+		ok(got.has(str(key)), "stat block exposes %s" % str(key))
 	for key in want.keys():
 		if typeof(want[key]) == TYPE_ARRAY or typeof(want[key]) == TYPE_DICTIONARY:
 			continue
-		close(float(got.get(key, -1)), float(want[key]), "bulbasaur %s" % String(key))
+		close(float(got.get(key, -1)), float(want[key]), "bulbasaur %s" % str(key))
 	var g9 := PbJson.as_dict(PbJson.as_dict(_golden.get("stats", {})).get("bulbasaur_g9", {}))
 	var got9 := PbStats.stats_from_species(bulba, 9.0)
 	close(float(got9.get("maxHp", 0)), float(g9.get("maxHp", 0)), "bulbasaur growth9 maxHp")
@@ -131,11 +131,11 @@ func _formula_parity() -> void:
 	ok(defs.size() > 15, "golden move set present (%d)" % defs.size())
 	for key in defs.keys():
 		var want_def := PbJson.as_dict(defs[key])
-		var got_def := PbMoves.resolve(String(key))
+		var got_def := PbMoves.resolve(str(key))
 		ok(not got_def.is_empty(), "resolve(%s) produced a definition" % key)
 		if got_def.is_empty():
 			continue
-		ok(String(got_def.get("arch", "")) == String(want_def.get("arch", "")),
+		ok(str(got_def.get("arch", "")) == str(want_def.get("arch", "")),
 			"%s arch %s==%s" % [key, got_def.get("arch"), want_def.get("arch")])
 		close(float(got_def.get("dmg", 0)), float(want_def.get("dmg", 0)), "%s dmg" % key)
 		close(float(got_def.get("cd", 0)), float(want_def.get("cd", 0)), "%s cd" % key)
@@ -150,7 +150,7 @@ func _formula_parity() -> void:
 	var actor_data := PbActor.actor_for_damage(actor)
 	for key in inst.keys():
 		var want_inst := PbJson.as_dict(inst[key])
-		var def := PbMoves.resolve(String(key))
+		var def := PbMoves.resolve(str(key))
 		if def.is_empty():
 			_fail("instance golden move %s unresolved" % key)
 			continue
@@ -181,23 +181,23 @@ func _fusion_checks() -> void:
 	var golden_fusion := PbJson.as_dict(_golden.get("fusion", {}))
 	var sig := PbJson.as_dict(golden_fusion.get("signature", {}))
 	var recipe := PbFusion.recipe_for(PbMoves.resolve("razor-leaf"), PbMoves.resolve("solar-beam"))
-	ok(String(recipe.get("key", "")) == String(sig.get("recipe_key", "")), "signature recipe fu-1 found")
+	ok(str(recipe.get("key", "")) == str(sig.get("recipe_key", "")), "signature recipe fu-1 found")
 	var fused := PbFusion.fused_def(recipe)
 	var want := PbJson.as_dict(sig.get("def", {}))
 	for field in ["dmg", "cd", "area", "power"]:
 		close(float(fused.get(field, -1)), float(want.get(field, -1)), "fused %s" % field)
-	ok(String(fused.get("arch", "")) == "fusion", "fused archetype is fusion")
+	ok(str(fused.get("arch", "")) == "fusion", "fused archetype is fusion")
 	ok(int(fused.get("pierce", 0)) == 99, "fused pierce 99")
 	ok(fused.get("fusion") != null, "fused payload present")
 	close(float(PbJson.as_dict(fused.get("fusion", {})).get("hits", 0)), float(want.get("hits", 0)), "fused hits")
 
 	var cross := PbFusion.recipe_for(PbMoves.resolve("flamethrower"), PbMoves.resolve("thunderbolt"))
-	ok(String(cross.get("kind", "")) == String(PbJson.as_dict(golden_fusion.get("cross_type", {})).get("kind", "")),
+	ok(str(cross.get("kind", "")) == str(PbJson.as_dict(golden_fusion.get("cross_type", {})).get("kind", "")),
 		"unrelated types fall back to %s" % PbJson.as_dict(golden_fusion.get("cross_type", {})).get("kind", ""))
 
 	var same := PbFusion.recipe_for(PbMoves.resolve("flamethrower"), PbMoves.resolve("ember"))
 	if not same.is_empty():
-		ok(String(same.get("kind", "")) in ["signature", "reaction", "type"],
+		ok(str(same.get("kind", "")) in ["signature", "reaction", "type"],
 			"same-type pair resolves to a type/reaction recipe (got %s)" % same.get("kind"))
 
 	# Fusion area clamp (My) and the min cd for fusions.
@@ -236,13 +236,13 @@ func _run_flow() -> void:
 	ok(PbActor.move_keys(player).size() >= 3, "auto-assigned moves (%d)" % PbActor.move_keys(player).size())
 	ok(float(player.get("maxHp", 0)) > 0.0, "player stats derived")
 	var before_damage := 0.0
-	ok(String(run.get("aimMode", "")) == "auto", "run defaults to the web's auto aim mode")
+	ok(str(run.get("aimMode", "")) == "auto", "run defaults to the web's auto aim mode")
 	PbRun.simulate(run, 150.0)
 	var stats: Dictionary = run["stats"]
 	print("   simulated %.0fs: stage=%d kills=%d damage=%.0f level=%d gold=%.0f state=%s" % [
 		float(run["time"]), int(run["stage"]), int(stats.get("kills", 0)),
 		float(stats.get("damage", 0.0)), int(player.get("level", 1)),
-		float(run.get("gold", 0)), String(run.get("state", "play"))])
+		float(run.get("gold", 0)), str(run.get("state", "play"))])
 	before_damage = float(stats.get("damage", 0.0))
 	ok(before_damage > 0.0, "the player dealt damage (damage pipeline works)")
 	ok(int(stats.get("kills", 0)) > 0, "enemies died (kill/loot pipeline works)")
@@ -287,13 +287,13 @@ func _run_flow() -> void:
 			"ready": true, "need": []}
 		var inst2 := PbFusion.apply(PbJson.as_array(p2["moves"]), synthetic_offer)
 		ok(not inst2.is_empty(), "fusion apply works on a synthetic offer")
-		ok(String(PbJson.as_dict(inst2.get("def", {})).get("arch", "")) == "fusion",
+		ok(str(PbJson.as_dict(inst2.get("def", {})).get("arch", "")) == "fusion",
 			"synthetic fused move carries the fusion archetype")
 		ok(PbJson.as_array(p2["moves"])[1] == null, "one source slot was freed by the fusion")
 	else:
 		var fused_inst := PbRun.fuse(run2, PbJson.as_dict(ready2[0]))
 		ok(not fused_inst.is_empty(), "in-run fusion produced a move")
-		ok(String(PbJson.as_dict(fused_inst.get("def", {})).get("arch", "")) == "fusion",
+		ok(str(PbJson.as_dict(fused_inst.get("def", {})).get("arch", "")) == "fusion",
 			"fused move uses the fusion archetype")
 		ok(PbJson.as_array(run2["fusions"]).size() == 1, "fusion recorded on the run")
 
@@ -310,7 +310,7 @@ func _run_flow() -> void:
 	var manual := PbRun.create(6, "forest", 4242, {})
 	manual["aimMode"] = "manual"
 	PbRun.simulate(manual, 25.0)
-	ok(String(manual.get("aimMode", "")) == "manual", "manual aim mode survives the tick loop")
+	ok(str(manual.get("aimMode", "")) == "manual", "manual aim mode survives the tick loop")
 	ok(float(manual["time"]) > 20.0, "manual-aim run keeps simulating (t=%.0fs)" % float(manual["time"]))
 
 
@@ -325,22 +325,22 @@ func _save_flow() -> void:
 	var schema := PbJson.as_dict(PbData.pb_table("profile_schema"))
 	var missing := []
 	for key in PbJson.as_array(schema.get("arrays", [])):
-		if not before.has(String(key)):
-			missing.append(String(key))
+		if not before.has(str(key)):
+			missing.append(str(key))
 	for key in PbJson.as_array(schema.get("dicts", [])):
-		if not before.has(String(key)):
-			missing.append(String(key))
+		if not before.has(str(key)):
+			missing.append(str(key))
 	ok(missing.is_empty(), "profile has every api-core array/dict field (missing %s)" % str(missing))
 	for key in PbJson.as_array(schema.get("counters", [])):
-		ok(PbJson.as_dict(before.get("counters", {})).has(String(key)), "counters.%s" % key)
+		ok(PbJson.as_dict(before.get("counters", {})).has(str(key)), "counters.%s" % key)
 	var settings := PbJson.as_dict(schema.get("settings_default", {}))
 	for key in settings.keys():
-		ok(PbJson.as_dict(before.get("settings", {})).has(String(key)), "settings.%s" % key)
+		ok(PbJson.as_dict(before.get("settings", {})).has(str(key)), "settings.%s" % key)
 
 	section("lab purchase + routes")
 	Save.reset(false)          # fresh profile: empty lab, no stardust
 	var broke := Save.handle("POST", "/lab/dmg/buy", {}, {})
-	ok(String(broke.get("error", "")) == "NO_STARDUST", "purchase blocked without stardust")
+	ok(str(broke.get("error", "")) == "NO_STARDUST", "purchase blocked without stardust")
 	Save.store["stardust"] = 500
 	Save.save()
 	var rank_before := Save.lab("dmg")
@@ -354,18 +354,18 @@ func _save_flow() -> void:
 	Save.store["lab"]["dmg"] = Save.lab_max("dmg")
 	Save.save()
 	var again := Save.handle("POST", "/lab/dmg/buy", {}, {})
-	ok(String(again.get("error", "")) == "MAX", "lab buy caps with MAX")
+	ok(str(again.get("error", "")) == "MAX", "lab buy caps with MAX")
 	var poor := Save.fresh_profile()
 	poor["stardust"] = 5
 	Save.store = poor
 	Save.save()
 	var denied := Save.handle("POST", "/lab/dmg/buy", {}, {})
-	ok(String(denied.get("error", "")) == "NO_STARDUST", "lab buy denied without stardust")
+	ok(str(denied.get("error", "")) == "NO_STARDUST", "lab buy denied without stardust")
 
 	section("status / profile / starter routes")
 	var status := Save.handle("GET", "/status", {}, {})
 	ok(bool(status.get("ok", false)) and bool(status.get("offline", false)), "GET /status")
-	ok(not String(status.get("build", "")).is_empty(), "GET /status reports the ported build id")
+	ok(not str(status.get("build", "")).is_empty(), "GET /status reports the ported build id")
 	var prof := Save.handle("GET", "/profile", {}, {})
 	ok(prof.get("profile") is Dictionary, "GET /profile")
 	var starter := Save.handle("POST", "/profile/starter", {}, {"id": 25})
@@ -375,10 +375,10 @@ func _save_flow() -> void:
 	ok(bool(prefs.get("ok", false)), "PUT /profile/prefs")
 	ok(is_equal_approx(float(PbJson.as_dict(PbJson.as_dict(prefs.get("profile", {})).get("settings", {})).get("music", 0.0)), 0.4),
 		"music setting persisted")
-	ok(String(PbJson.as_dict(PbJson.as_dict(prefs.get("profile", {})).get("settings", {})).get("aimMode", "")) == "manual",
+	ok(str(PbJson.as_dict(PbJson.as_dict(prefs.get("profile", {})).get("settings", {})).get("aimMode", "")) == "manual",
 		"aimMode setting persisted")
 	var guest := Save.handle("POST", "/auth/guest", {}, {})
-	ok(String(guest.get("name", "")).begins_with("Invitado"), "POST /auth/guest names the guest")
+	ok(str(guest.get("name", "")).begins_with("Invitado"), "POST /auth/guest names the guest")
 
 	section("run finish writes a record")
 	Save.reset(true)
@@ -412,7 +412,7 @@ func _save_flow() -> void:
 	var backups := Save.list_backups()
 	ok(ids.size() == 8, "eight backup calls produced eight ids (got %d)" % ids.size())
 	ok(backups.size() == 5, "backups pruned to 5 (got %d)" % backups.size())
-	ok(Save.restore_backup(String(PbJson.as_dict(backups[0]).get("id", ""))), "restore latest backup")
+	ok(Save.restore_backup(str(PbJson.as_dict(backups[0]).get("id", ""))), "restore latest backup")
 
 	section("round trip through disk")
 	Save.reset(true)
@@ -420,7 +420,7 @@ func _save_flow() -> void:
 	Save.save()
 	var raw := JSON.parse_string(FileAccess.get_file_as_string(Save.save_path()))
 	var envelope := PbJson.as_dict(raw)
-	ok(String(PbJson.as_dict(envelope.get("profile", {})).get("name", "")) == "验证员", "name survived the round trip")
+	ok(str(PbJson.as_dict(envelope.get("profile", {})).get("name", "")) == "验证员", "name survived the round trip")
 	ok(int(envelope.get("v", 0)) == 1, "envelope version 1")
 	ok(float(Save.stale_seconds()) < 5.0, "stale_seconds reports a fresh save")
 
@@ -497,17 +497,17 @@ func _theme_ui_checks() -> void:
 	for i in 5:
 		seen[PbTheme.rarity_color(i).to_html()] = true
 	ok(seen.size() == 5, "five distinct rarity colours")
-	ok(PbTheme.rarity_color(0) == PbTheme.css_color(String(PbTheme.vars().get("--r0", ""))), "rarity0 == --r0")
+	ok(PbTheme.rarity_color(0) == PbTheme.css_color(str(PbTheme.vars().get("--r0", ""))), "rarity0 == --r0")
 	var th := PbTheme.danger_thresholds()
 	ok(th.size() == 7 and float(th[0]) == 0.0 and float(th[6]) == 7.0, "danger thresholds [0..7]")
 	ok(PbTheme.danger_colors().size() == 7, "danger has 7 segment colours")
 	ok(PbTheme.danger_level(7.0) == 6 and PbTheme.danger_level(0.5) == 0, "danger_level bucketing")
 	ok(PbTheme.rarity_labels().size() == 5, "rarity labels table")
 	# gradient + keyframe parsing
-	var btn_g := PbTheme.gradient(String(PbTheme.decls(".btn").get("background", "")))
+	var btn_g := PbTheme.gradient(str(PbTheme.decls(".btn").get("background", "")))
 	ok(btn_g.get("type", "") == "linear" and PbJson.as_array(btn_g.get("stops", [])).size() == 3, ".btn gradient 3 stops")
 	ok(PbTheme.keyframe_frames("cardIn").size() >= 1, "cardIn keyframe parsed")
-	ok(String(PbTheme.anim_of(".card", "cardIn")["name"]) == "cardIn", ".card anim name")
+	ok(str(PbTheme.anim_of(".card", "cardIn")["name"]) == "cardIn", ".card anim name")
 	var st := PbTheme.stripes()
 	ok(absf(float(st["angle"]) + 45.0) < 0.1 and int(st["period"]) == 20, "--stripes parsed")
 	ok(PbTheme.stylebox(".hud-top") != null, "stylebox(.hud-top) builds")
@@ -632,7 +632,7 @@ func _terrain_checks() -> void:
 		return
 	var reference := {}
 	for w in worlds:
-		if String(w.get("biome")) == "graveyard" and int(w.get("seed")) == 2026:
+		if str(w.get("biome")) == "graveyard" and int(w.get("seed")) == 2026:
 			reference = w
 	if reference.is_empty():
 		_fail("golden graveyard/2026 case missing")
@@ -663,7 +663,7 @@ func _terrain_checks() -> void:
 	for i in mini(first_props.size(), t.props.size()):
 		var p: Dictionary = t.props[i]
 		var r: Array = first_props[i]
-		if String(p["kind"].get("name")) != String(r[0]) or absf(float(p["x"]) - float(r[1])) > 1e-5 \
+		if str(p["kind"].get("name")) != str(r[0]) or absf(float(p["x"]) - float(r[1])) > 1e-5 \
 				or absf(float(p["z"]) - float(r[3])) > 1e-5 or bool(p["flip"]) != bool(r[4]):
 			prop_match = false
 	ok(prop_match, "the first %d props land in the same spots with the same flips" % first_props.size())
@@ -694,7 +694,7 @@ func _locale_checks() -> void:
 	add_child(menu)
 	var pills: Array[String] = []
 	for node in menu.get_children():
-		if String(node.name) == "LangPill":
-			pills.append(String(node.name))
+		if str(node.name) == "LangPill":
+			pills.append(str(node.name))
 	menu.queue_free()
 	ok(pills.is_empty(), "no LangPill in the main menu")

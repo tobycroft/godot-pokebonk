@@ -53,7 +53,7 @@ static func type_cards() -> Dictionary:
 ## and the run's banished set.
 static func roll(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
 	var kind := PbRng.weighted([[3.0, "stat"], [1.4, "type"], [2.4, "move_upgrade"], [1.2, "new_move"]])
-	match String(kind):
+	match str(kind):
 		"type":
 			return roll_type_card(exclude)
 		"move_upgrade":
@@ -68,7 +68,7 @@ static func roll(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
 
 
 static func roll_stat_card(exclude: Dictionary = {}) -> Dictionary:
-	var stat := String(PbRng.pick(STAT_POOL))
+	var stat := str(PbRng.pick(STAT_POOL))
 	var tier := PbRng.weighted(TIERS.map(func(t): return [float(t["weight"]), t]))
 	var mod := {}
 	if ADDITIVE_STATS.has(stat):
@@ -87,31 +87,31 @@ static func roll_stat_card(exclude: Dictionary = {}) -> Dictionary:
 
 static func roll_type_card(exclude: Dictionary = {}) -> Dictionary:
 	var cards := type_cards()
-	var keys := cards.keys().filter(func(k): return not exclude.has("type:" + String(k)))
+	var keys := cards.keys().filter(func(k): return not exclude.has("type:" + str(k)))
 	if keys.is_empty():
 		keys = cards.keys()
-	var pick_type := String(PbRng.pick(keys))
+	var pick_type := str(PbRng.pick(keys))
 	var card := PbJson.as_dict(cards.get(pick_type, {}))
 	return {
 		"kind": "type",
 		"type": pick_type,
 		"mods": PbJson.as_array(card.get("mods", [])),
-		"label": String(card.get("label", pick_type)),
+		"label": str(card.get("label", pick_type)),
 		"estimated": false,
 	}
 
 
 static func roll_move_upgrade(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
 	var slots := _owned_slots(actor)
-	slots = slots.filter(func(s): return not exclude.has("mv:" + String(s["key"])))
+	slots = slots.filter(func(s): return not exclude.has("mv:" + str(s["key"])))
 	if slots.is_empty():
 		return {}
 	var slot := PbJson.as_dict(PbRng.pick(slots))
-	var arch := String(slot.get("arch", "bolt"))
+	var arch := str(slot.get("arch", "bolt"))
 	var stats := _arch_stats(arch)
 	if stats.is_empty():
 		return {}
-	var stat := String(PbRng.pick(stats))
+	var stat := str(PbRng.pick(stats))
 	var amount := PbJson.as_dict(ARCH_STAT_AMOUNTS.get(stat, {"mul": 1.1}))
 	var mod := amount.duplicate(true)
 	mod["stat"] = stat
@@ -119,11 +119,11 @@ static func roll_move_upgrade(actor: Dictionary, exclude: Dictionary = {}) -> Di
 		mod["add"] = 1
 	return {
 		"kind": "move_upgrade",
-		"move_key": String(slot["key"]),
+		"move_key": str(slot["key"]),
 		"slot": int(slot["slot"]),
 		"stat": stat,
 		"mods": [mod],
-		"label": "%s · %s" % [String(slot.get("name", "")), stat],
+		"label": "%s · %s" % [str(slot.get("name", "")), stat],
 		"estimated": true,
 	}
 
@@ -135,21 +135,21 @@ static func roll_new_move(actor: Dictionary, exclude: Dictionary = {}) -> Dictio
 	for key in PbMoves.learnable_moves(species_id):
 		if owned.has(key):
 			continue
-		if exclude.has("new:" + String(key)):
+		if exclude.has("new:" + str(key)):
 			continue
-		var def := PbMoves.resolve(String(key))
+		var def := PbMoves.resolve(str(key))
 		if def.is_empty():
 			continue
-		candidates.append(String(key))
+		candidates.append(str(key))
 	if candidates.is_empty():
 		return {}
-	var pick_key := String(PbRng.pick(candidates))
+	var pick_key := str(PbRng.pick(candidates))
 	var def := PbMoves.resolve(pick_key)
 	return {
 		"kind": "new_move",
 		"move_key": pick_key,
 		"mods": [],
-		"label": String(def.get("name", pick_key)),
+		"label": App.t("moves", int(def.get("id", 0)), str(def.get("name", pick_key))),
 		"estimated": false,
 	}
 
@@ -163,16 +163,16 @@ static func offer(actor: Dictionary, count: int = 3, banished: Dictionary = {}) 
 		var card := roll(actor, used)
 		if card.is_empty():
 			break
-		used[String(card.get("kind", "")) + ":" + String(card.get("stat", card.get("type", card.get("move_key", guard))))] = true
+		used[str(card.get("kind", "")) + ":" + str(card.get("stat", card.get("type", card.get("move_key", guard))))] = true
 		out.append(card)
 	return out
 
 
 ## Applies a chosen card to the actor; returns a human-readable result line.
 static func take(actor: Dictionary, card: Dictionary) -> String:
-	match String(card.get("kind", "")):
+	match str(card.get("kind", "")):
 		"new_move":
-			var ok := PbActor.learn(actor, String(card["move_key"]), PbActor.free_slot(actor))
+			var ok := PbActor.learn(actor, str(card["move_key"]), PbActor.free_slot(actor))
 			return "learned" if ok else "no free slot"
 		"move_upgrade":
 			PbActor.upgrade_move(actor, int(card["slot"]), card)
@@ -193,8 +193,8 @@ static func _owned_slots(actor: Dictionary) -> Array:
 		var def := PbJson.as_dict(PbJson.as_dict(m).get("def", {}))
 		if def.is_empty():
 			continue
-		out.append({"slot": i, "key": String(def.get("key", "")), "name": String(def.get("name", "")),
-			"arch": String(def.get("arch", ""))})
+		out.append({"slot": i, "key": str(def.get("key", "")), "name": str(def.get("name", "")),
+			"arch": str(def.get("arch", ""))})
 	return out
 
 
@@ -232,7 +232,7 @@ static func _label(stat: String) -> String:
 		"xpGain": "Experiencia", "luck": "Suerte", "armor": "Armadura", "regen": "Regeneración",
 		"eliteDamage": "Daño a élites", "healing": "Curación", "evasion": "Evasión",
 	}
-	return String(labels.get(stat, stat))
+	return App.ui(str(labels.get(stat, stat)))
 
 
 static func _fmt(mod: Dictionary) -> String:

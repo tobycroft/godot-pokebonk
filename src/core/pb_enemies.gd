@@ -184,8 +184,8 @@ static func damage(pool: Dictionary, index: int, amount: float) -> Dictionary:
 
 
 static func types_of(pool: Dictionary, index: int) -> Array:
-	var out: Array = [String(get_field(pool, "typeA", index))]
-	var second := String(get_field(pool, "typeB", index))
+	var out: Array = [str(get_field(pool, "typeA", index))]
+	var second := str(get_field(pool, "typeB", index))
 	if not second.is_empty() and second != out[0]:
 		out.append(second)
 	return out

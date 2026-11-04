@@ -46,6 +46,7 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"bossIndex": -1,
 		"stageCleared": false,
 		"weather": "clear",
+		"baseWeather": "clear",
 		"weatherT": 0.0,
 		"victory": false,
 		"endHow": null,
@@ -64,6 +65,17 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"messages": [],
 	}
 	state["player"]["pendingLevels"] = 0
+	# Bundle @1513275: base weather = F.pick(biome.weather) for regular stages
+	# (sanctuaries/towers stay clear), then weather abilities override it.
+	# `standard` is the port's regular-stage mode.
+	var base_weather := "clear"
+	if mode == "standard":
+		var weather_pool := PbJson.as_array(PbData.biome(biome).get("weather", []))
+		if not weather_pool.is_empty():
+			base_weather = str(PbRng.pick(weather_pool))
+	base_weather = _ability_weather(str(actor.get("ability", "")), base_weather)
+	state["baseWeather"] = base_weather
+	state["weather"] = base_weather
 	# The run's growth index follows the player's level (estimated mapping).
 	_apply_lab(state, lab_deltas)
 	return state
@@ -75,13 +87,30 @@ static func _apply_lab(state: Dictionary, lab: Dictionary) -> void:
 	state["banishes"] = int(lab.get("banish", 0))
 
 
+## Weather abilities overwrite the biome's base weather (bundle `sb(ability)`).
+static func _ability_weather(ability: String, base: String) -> String:
+	var map := {
+		"drizzle": "rain",
+		"drought": "sun",
+		"sand-stream": "sand",
+		"snow-warning": "hail",
+	}
+	return str(map.get(ability, base))
+
+
 ## ------------------------------------------------------------------ tick
 static func tick(state: Dictionary, dt: float) -> void:
-	if String(state.get("state", "play")) != "play":
+	if str(state.get("state", "play")) != "play":
 		return
 	var player: Dictionary = state["player"]
 	state["time"] = float(state["time"]) + dt
 	state["stageT"] = float(state["stageT"]) + dt
+	# Weather moves set a temporary weather (bundle: setWeather); once the timer
+	# runs out the stage's base weather comes back.
+	if float(state.get("weatherT", 0.0)) > 0.0:
+		state["weatherT"] = maxf(0.0, float(state["weatherT"]) - dt)
+		if float(state["weatherT"]) <= 0.0:
+			state["weather"] = str(state.get("baseWeather", "clear"))
 	_tick_director(state, dt)
 	_tick_player(state, dt)
 	_tick_enemies(state, dt)
@@ -185,7 +214,7 @@ static func _try_revive(state: Dictionary) -> bool:
 	player["hp"] = float(player.get("maxHp", 100.0)) * 0.6
 	player["dead"] = false
 	player["iframes"] = 3.0
-	_message(state, "¡Revivir Máximo! Vuelves con el 60% de PS")
+	_message(state, App.ui("¡Revivir Máximo!"))
 	return true
 
 
@@ -262,7 +291,7 @@ static func _tick_player(state: Dictionary, dt: float) -> void:
 		# aimMode 'auto' (the web default) lets every move snap to the closest
 		# target within reach; 'manual' restricts acquisition to the move's own reach.
 		var radius := maxf(9.0, float(built.get("reach", 0.0))) \
-			if String(state.get("aimMode", "auto")) == "auto" else maxf(1.0, float(built.get("reach", 0.0)))
+			if str(state.get("aimMode", "auto")) == "auto" else maxf(1.0, float(built.get("reach", 0.0)))
 		var target := PbEnemies.nearest(pool_of(state), player_x(state), player_z(state), radius)
 		if target < 0:
 			inst["cooldown"] = 0.0
@@ -284,7 +313,7 @@ static func _move_mods(inst: Dictionary, player: Dictionary) -> Dictionary:
 	var mods := PbDamage.level_mods(level)
 	for raw in PbJson.as_array(inst.get("mods", [])):
 		var mod := PbJson.as_dict(raw)
-		var stat := String(mod.get("stat", ""))
+		var stat := str(mod.get("stat", ""))
 		if stat.is_empty():
 			continue
 		if mod.has("add"):
@@ -295,6 +324,12 @@ static func _move_mods(inst: Dictionary, player: Dictionary) -> Dictionary:
 
 
 static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target: int) -> void:
+	# Weather archetype (rain dance / sunny day / sandstorm / hail): the web
+	# applies it on cast (case 'weather'), before any damage roll.
+	var cast_weather := str(def.get("weather", ""))
+	if not cast_weather.is_empty():
+		state["weather"] = cast_weather
+		state["weatherT"] = float(built.get("dur", 0.0))
 	var pool := pool_of(state)
 	var player: Dictionary = state["player"]
 	var count := maxi(1, int(built.get("count", 1)))
@@ -305,7 +340,7 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 			"inst": built,
 			"actor": PbActor.actor_for_damage(player),
 			"def_types": PbEnemies.types_of(pool, target),
-			"weather": String(state.get("weather", "clear")),
+			"weather": str(state.get("weather", "clear")),
 			"elite": PbEnemies.is_elite(pool, target),
 			"boss": PbEnemies.is_boss(pool, target),
 			"exhaust": 1.0,
@@ -331,7 +366,7 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 		if bool(out["mega"]):
 			state["stats"]["megaCrits"] = int(state["stats"].get("megaCrits", 0)) + 1
 		if out["status"] != null and PbStatus.roll(out["status"], float(out["statusChance"])):
-			PbEnemies.apply_status(pool, target, String(out["status"]))
+			PbEnemies.apply_status(pool, target, str(out["status"]))
 		var drain := float(out["drain"])
 		if drain > 0.0:
 			PbActor.heal(player, dealt * drain)
@@ -398,7 +433,7 @@ static func _tick_orbs(state: Dictionary, dt: float) -> void:
 		orb["life"] = float(orb["life"]) - dt
 		var d := sqrt(pow(float(orb["x"]) - px, 2.0) + pow(float(orb["z"]) - pz, 2.0))
 		if d <= pickup:
-			if String(orb.get("kind", "xp")) == "xp":
+			if str(orb.get("kind", "xp")) == "xp":
 				add_xp(state, float(orb["xp"]))
 		elif float(orb["life"]) > 0.0:
 			kept.append(orb)
@@ -410,7 +445,7 @@ static func add_xp(state: Dictionary, amount: float) -> int:
 	var diff: Dictionary = state["diff"]
 	var gained := PbXp.grant(player, amount,
 		float(PbJson.as_dict(player.get("stats", {})).get("xpGain", 1.0)),
-		float(diff.get("xpMult", 1.0)), String(state.get("mode", "")) == "endless")
+		float(diff.get("xpMult", 1.0)), str(state.get("mode", "")) == "endless")
 	if gained > 0:
 		PbActor.recompute(player)
 		state["pendingLevels"] = int(state["pendingLevels"]) + gained
@@ -469,7 +504,7 @@ static func banish(state: Dictionary, index: int) -> bool:
 	if index < 0 or index >= offers.size():
 		return false
 	var card := PbJson.as_dict(offers[index])
-	var tag := "%s:%s" % [String(card.get("kind", "")), String(card.get("stat", card.get("type", card.get("move_key", ""))))]
+	var tag := "%s:%s" % [str(card.get("kind", "")), str(card.get("stat", card.get("type", card.get("move_key", ""))))]
 	state["banished"][tag] = true
 	state["banishes"] = int(state["banishes"]) - 1
 	open_offers(state)
@@ -485,8 +520,8 @@ static func fuse(state: Dictionary, offer: Dictionary) -> Dictionary:
 	var player: Dictionary = state["player"]
 	var inst := PbFusion.apply(PbJson.as_array(player.get("moves", [])), offer)
 	if not inst.is_empty():
-		state["fusions"].append(String(PbJson.as_dict(offer.get("recipe", {})).get("key", "")))
-		_message(state, "fused %s" % String(inst.get("def", {}).get("name", "?")))
+		state["fusions"].append(str(PbJson.as_dict(offer.get("recipe", {})).get("key", "")))
+		_message(state, "fused %s" % str(inst.get("def", {}).get("name", "?")))
 	return inst
 
 
@@ -521,9 +556,9 @@ static func _tick_enemies(state: Dictionary, dt: float) -> void:
 				if float(player.get("iframes", 0.0)) > 0.0:
 					continue
 				var raw := float(PbEnemies.get_field(pool, "dmg", i))
-				var types: Array = [String(PbEnemies.get_field(pool, "typeA", i))]
+				var types: Array = [str(PbEnemies.get_field(pool, "typeA", i))]
 				var taken := PbDamage.incoming_to_player(raw, types[0],
-					PbJson.as_array(player.get("types", [])), stats, false, String(player.get("ability", "")))
+					PbJson.as_array(player.get("types", [])), stats, false, str(player.get("ability", "")))
 				# evasion
 				if PbRng.chance(float(stats.get("evasion", 0.0))):
 					state["stats"]["dodges"] = int(state["stats"].get("dodges", 0)) + 1
@@ -560,7 +595,7 @@ static func result(state: Dictionary) -> Dictionary:
 		"id": "run-%x" % int(state.get("seed", 0)),
 		"species": int(player.get("species_id", 0)),
 		"finalSpecies": int(player.get("species_id", 0)),
-		"biome": String(state.get("biome", "forest")),
+		"biome": str(state.get("biome", "forest")),
 		"tier": int(state.get("stage", 1)),
 		"stage": int(state.get("stage", 1)),
 		"time": float(state.get("time", 0.0)),
@@ -573,7 +608,7 @@ static func result(state: Dictionary) -> Dictionary:
 		"moves": moves,
 		"items": PbJson.as_dict(player.get("items", {})).keys(),
 		"splits": PbJson.as_array(state.get("splits", [])),
-		"mode": String(state.get("mode", "standard")),
+		"mode": str(state.get("mode", "standard")),
 		"bosses": int(stats.get("bosses", 0)),
 		"legendaries": int(stats.get("legendaries", 0)),
 		"econ": {"gold": int(state.get("gold", 0))},
@@ -602,12 +637,12 @@ static func simulate(state: Dictionary, seconds: float, dt: float = 1.0 / 12.0) 
 	for s in steps:
 		_walk_towards_action(state, dt)
 		tick(state, dt)
-		if String(state.get("state", "play")) == "modal":
+		if str(state.get("state", "play")) == "modal":
 			choose_offer(state, 0)
 		if s % log_every == 0 and s > 0:
 			print("   ... t=%.0fs stage=%d kills=%d level=%d" % [float(state["time"]),
 				int(state["stage"]), int(state["stats"]["kills"]), int(state["player"]["level"])])
-		if String(state.get("state", "")) == "over":
+		if str(state.get("state", "")) == "over":
 			return
 
 

@@ -24,8 +24,8 @@ static func create(species_id: int, lab_deltas: Dictionary = {}, level: int = 1)
 	var defaults := PbJson.as_dict(PbData.const_of("player_defaults", {}))
 	var state := {
 		"species_id": int(data.get("id", species_id)),
-		"species_key": String(data.get("key", "")),
-		"name": String(data.get("name", "")),
+		"species_key": str(data.get("key", "")),
+		"name": str(data.get("name", "")),
 		"data": data,
 		"types": PbJson.as_array(data.get("types", ["normal"])),
 		"ability": _first_ability(data),
@@ -70,7 +70,7 @@ static func _first_ability(data: Dictionary) -> String:
 	if ids.is_empty():
 		return ""
 	var ab := PbData.ability(int(ids[0]))
-	return String(ab.get("key", ""))
+	return str(ab.get("key", ""))
 
 
 ## Full stat block: species base stats * growth + lab + every collected card mod.
@@ -89,7 +89,7 @@ static func recompute(state: Dictionary) -> void:
 	if old_max > 0.0 and new_max > old_max:
 		# Growth heals by the amount the cap rose, like the web recompute.
 		state["hp"] = minf(new_max, old_hp + (new_max - old_max))
-	var ability := String(state.get("ability", ""))
+	var ability := str(state.get("ability", ""))
 	stats["adaptability"] = ability == "adaptability"
 
 
@@ -97,9 +97,9 @@ static func actor_for_damage(state: Dictionary) -> Dictionary:
 	return {
 		"stats": PbJson.as_dict(state.get("stats", {})),
 		"types": PbJson.as_array(state.get("types", [])),
-		"adaptability": String(state.get("ability", "")) == "adaptability",
+		"adaptability": str(state.get("ability", "")) == "adaptability",
 		"items": PbJson.as_dict(state.get("items", {})),
-		"ability": String(state.get("ability", "")),
+		"ability": str(state.get("ability", "")),
 		"species_id": int(state.get("species_id", 0)),
 	}
 
@@ -109,7 +109,7 @@ static func move_keys(state: Dictionary) -> Array:
 	var out := []
 	for m in PbJson.as_array(state.get("moves", [])):
 		if m != null:
-			out.append(String(PbJson.as_dict(m).get("def", {}).get("key", "")))
+			out.append(str(PbJson.as_dict(m).get("def", {}).get("key", "")))
 	return out
 
 
@@ -131,7 +131,7 @@ static func learn(state: Dictionary, move_key: String, slot: int = -1) -> bool:
 	if target < 0 or target >= MAX_MOVES:
 		return false
 	var existing = PbJson.as_array(state["moves"])[target]
-	if existing != null and String(PbJson.as_dict(existing).get("def", {}).get("key", "")) == move_key:
+	if existing != null and str(PbJson.as_dict(existing).get("def", {}).get("key", "")) == move_key:
 		return level_up_move(state, target)
 	PbJson.as_array(state["moves"])[target] = {
 		"def": def,
@@ -194,11 +194,11 @@ static func auto_assign_moves(state: Dictionary) -> void:
 		if wanted.size() >= slots:
 			break
 		if not wanted.has(key):
-			wanted.append(String(key))
+			wanted.append(str(key))
 	for key in wanted:
 		if free_slot(state) < 0:
 			break
-		learn(state, String(key))
+		learn(state, str(key))
 
 
 ## ---------------------------------------------------------------- resources
@@ -289,7 +289,7 @@ static func tick(state: Dictionary, dt: float) -> void:
 static func summary(state: Dictionary) -> String:
 	var stats := PbJson.as_dict(state.get("stats", {}))
 	return "%s Lv%d  HP %d/%d  DMGx%.2f  ARM %.1f  CRIT %.0f%%  %d moves" % [
-		String(state.get("name", "?")), int(state.get("level", 1)),
+		str(state.get("name", "?")), int(state.get("level", 1)),
 		int(state.get("hp", 0)), int(state.get("maxHp", 0)),
 		float(stats.get("damage", 1.0)), float(stats.get("armor", 0.0)),
 		float(stats.get("critChance", 0.0)) * 100.0, move_keys(state).size(),

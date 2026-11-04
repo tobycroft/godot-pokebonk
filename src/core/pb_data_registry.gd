@@ -36,7 +36,7 @@ func pokemon_list() -> Array:
 	if _by_key.is_empty():
 		for p in list:
 			_by_key[int(p["id"])] = p
-			_by_key[String(p["key"])] = p
+			_by_key[str(p["key"])] = p
 			var from = p.get("evoFrom")
 			if from != null:
 				var parent := int(from)
@@ -50,7 +50,7 @@ func moves_list() -> Array:
 	var list := _cached_array("moves", "res://data/moves.json")
 	if _move_by_key.is_empty():
 		for m in list:
-			_move_by_key[String(m["key"])] = m
+			_move_by_key[str(m["key"])] = m
 			_move_by_id[int(m["id"])] = m
 	return list
 
@@ -111,7 +111,7 @@ func ability(id_or_key: Variant) -> Dictionary:
 	var table := abilities_map()
 	if typeof(id_or_key) == TYPE_STRING:
 		for key in table.keys():
-			if String(table[key].get("key", "")) == String(id_or_key):
+			if str(table[key].get("key", "")) == str(id_or_key):
 				return table[key]
 		return {}
 	return PbJson.as_dict(table.get(str(int(id_or_key)), {}))
@@ -156,7 +156,7 @@ func type_index(type_name: String) -> int:
 	if _type_index.is_empty():
 		var names: Array = PbJson.as_array(types_table().get("types", []))
 		for i in names.size():
-			_type_index[String(names[i])] = i
+			_type_index[str(names[i])] = i
 	return _type_index.get(type_name, -1)
 
 
@@ -178,7 +178,7 @@ func chart_cell(atk: String, def: String) -> float:
 
 
 func type_label(type_name: String) -> String:
-	return String(PbJson.as_dict(types_table().get("names", {})).get(type_name, type_name))
+	return str(PbJson.as_dict(types_table().get("names", {})).get(type_name, type_name))
 
 
 # ------------------------------------------------------------------ sprite data
@@ -196,7 +196,7 @@ func world_biomes() -> Array:
 func biome(id: String) -> Dictionary:
 	for b in world_biomes():
 		var entry := PbJson.as_dict(b)
-		if String(entry.get("id", "")) == id:
+		if str(entry.get("id", "")) == id:
 			return entry
 	push_warning("Data: unknown biome %s" % id)
 	return world_biomes()[0] if not world_biomes().is_empty() else {}
@@ -243,15 +243,21 @@ func biome_text(id: String, key: String, locale: String = "zh") -> String:
 
 # ------------------------------------------------------------------ i18n
 func i18n(locale: String) -> Dictionary:
-	return _cached_dict("i18n_" + locale, "res://data/i18n/%s.json" % locale)
+	# The web ships no data/i18n chunk for `es` (Spanish is the source text) or
+	# `ko` (UI-only translation); missing files fall back to the original names
+	# instead of logging an error.
+	var path := "res://data/i18n/%s.json" % locale
+	if not FileAccess.file_exists(path):
+		return {}
+	return _cached_dict("i18n_" + locale, path)
 
 
 ## `locale` defaults to the port's pinned language.
 func localized_name(kind: String, id_or_key: Variant, locale: String = "zh") -> String:
 	var table := i18n(locale)
 	var section := PbJson.as_dict(table.get(kind, {}))
-	var key := str(int(id_or_key)) if typeof(id_or_key) != TYPE_STRING else String(id_or_key)
-	return String(section.get(key, ""))
+	var key := str(int(id_or_key)) if typeof(id_or_key) != TYPE_STRING else str(id_or_key)
+	return str(section.get(key, ""))
 
 
 # ------------------------------------------------------------------ plumbing

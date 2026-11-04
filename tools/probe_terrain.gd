@@ -18,12 +18,12 @@ func _initialize() -> void:
 	var worlds: Array = PbJson.as_array(golden_doc.get("worlds"))
 
 	var user_args := OS.get_cmdline_user_args()
-	var want_biome := String(user_args[0]) if user_args.size() > 0 else ""
+	var want_biome := str(user_args[0]) if user_args.size() > 0 else ""
 	var want_seed := int(user_args[1]) if user_args.size() > 1 else -1
 
 	var cases: Array = []
 	for w in worlds:
-		if want_biome != "" and String(w["biome"]) != want_biome:
+		if want_biome != "" and str(w["biome"]) != want_biome:
 			continue
 		if want_seed >= 0 and int(w["seed"]) != want_seed:
 			continue
@@ -37,12 +37,12 @@ func _initialize() -> void:
 	for reference in cases:
 		var biome_dict := {}
 		for b in biomes:
-			if String(b["id"]) == String(reference["biome"]):
+			if str(b["id"]) == str(reference["biome"]):
 				biome_dict = b
 				break
 		var t: PbTerrain = PbTerrain.new()
 		var started := Time.get_ticks_msec()
-		t.setup(biome_dict, PbJson.as_dict(packs.get(String(reference["biome"]))), int(reference["seed"]))
+		t.setup(biome_dict, PbJson.as_dict(packs.get(str(reference["biome"]))), int(reference["seed"]))
 		var ms := Time.get_ticks_msec() - started
 		var problems := compare(t, reference)
 		var status := "OK" if problems.is_empty() else "FAIL"
@@ -110,7 +110,7 @@ func compare(t: PbTerrain, reference: Dictionary) -> Array[String]:
 		_check(out, "prop[%d].x" % i, float(p["x"]), float(ref[1]))
 		_check(out, "prop[%d].z" % i, float(p["z"]), float(ref[3]))
 		_check(out, "prop[%d].s" % i, float(p["s"]), float(ref[5]))
-		if String(p["kind"].get("name")) != String(ref[0]):
+		if str(p["kind"].get("name")) != str(ref[0]):
 			out.append("prop[%d].kind: %s != %s" % [i, p["kind"].get("name"), ref[0]])
 		if bool(p["flip"]) != bool(ref[4]):
 			out.append("prop[%d].flip mismatch" % i)

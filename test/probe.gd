@@ -18,7 +18,7 @@ func _dump(node: Node, depth: int) -> void:
 		return
 	var c := node as Control
 	var line := "%s%s %s rect=%s anchors=(%.2f,%.2f,%.2f,%.2f) size_flags=%d" % [
-		String("  ").repeat(depth), c.name, c.get_class(), c.get_rect(),
+		str("  ").repeat(depth), c.name, c.get_class(), c.get_rect(),
 		c.anchor_right, c.anchor_bottom, c.anchor_left, c.anchor_top,
 		c.size_flags_horizontal]
 	print(line)

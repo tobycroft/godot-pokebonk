@@ -37,28 +37,28 @@ static func _ensure_tables() -> void:
 	_weather_moves = PbJson.as_dict(rules.get("weather_moves", {}))
 	_buff_moves = {}
 	for key in rules.get("buff_moves", []):
-		_buff_moves[String(key)] = true
+		_buff_moves[str(key)] = true
 	_hazard_moves = {}
 	for key in rules.get("hazard_moves", []):
-		_hazard_moves[String(key)] = true
+		_hazard_moves[str(key)] = true
 	_rules = PbJson.as_array(rules.get("rules", []))
 	_arch_regex.clear()
 	for pair in _rules:
 		var entry := PbJson.as_array(pair)
 		if entry.size() < 2:
 			continue
-		var re := RegEx.create_from_string(String(entry[0]))
+		var re := RegEx.create_from_string(str(entry[0]))
 		if re != null:
-			_arch_regex.append([re, String(entry[1])])
+			_arch_regex.append([re, str(entry[1])])
 	_move_arch = PbJson.as_dict(PbData.pb_table("move_arch"))
 	# qv (status/shape tweaks, offset 768229) and dy (projectile shape, offset 787515)
 	# are merged into one override table in the web build (Object.assign(dy, ...));
 	# dy is applied last so it wins where both name the same move.
 	_move_overrides = {}
 	for k in PbJson.as_dict(PbData.pb_table("move_status")).keys():
-		_move_overrides[String(k)] = PbJson.as_dict(PbData.pb_table("move_status")[k])
+		_move_overrides[str(k)] = PbJson.as_dict(PbData.pb_table("move_status")[k])
 	for k in PbJson.as_dict(PbData.pb_table("move_shape")).keys():
-		_move_overrides[String(k)] = PbJson.as_dict(PbData.pb_table("move_shape")[k])
+		_move_overrides[str(k)] = PbJson.as_dict(PbData.pb_table("move_shape")[k])
 	_tables_loaded = true
 
 
@@ -117,7 +117,7 @@ static func archetype_for(move: Dictionary) -> String:
 		return "homing"
 	var pair := PbJson.as_array(_type_arch.get(PbJson.as_string(move.get("type"), "normal"), ["strike", "bolt"]))
 	var fallback: Variant = "bolt" if pair.size() < 2 else (pair[0] if cls == "physical" else pair[1])
-	return String(fallback)
+	return str(fallback)
 
 
 ## vy(): build the real-time definition. Returns {} for moves the game cannot use
@@ -142,7 +142,7 @@ static func resolve(move_key: String) -> Dictionary:
 	var status := normalize_ailment(move.get("ailment", null))
 	var chance := 0.0
 	if status.is_empty():
-		status = PbJson.as_string(_type_status.get(String(move.get("type", "")), ""), "")
+		status = PbJson.as_string(_type_status.get(str(move.get("type", "")), ""), "")
 		chance = 0.12
 	else:
 		chance = clampf(PbJson.as_float(move.get("ailmentChance"), 30.0) / 100.0 * 1.6, 0.15, 0.8)
@@ -173,8 +173,8 @@ static func resolve(move_key: String) -> Dictionary:
 		"weather": _weather_moves.get(move_key, null),
 		"buff": move_key if _buff_moves.has(move_key) else null,
 		"stats": PbJson.as_array(base.get("stats", [])),
-		"archLabel": String(base.get("label", arch)),
-		"archDesc": String(base.get("desc", "")),
+		"archLabel": str(base.get("label", arch)),
+		"archDesc": str(base.get("desc", "")),
 		"desc": "",
 	}
 	if PbJson.as_string(move.get("cls"), "") == "status" and arch == "trap":
@@ -204,30 +204,41 @@ static func resolve(move_key: String) -> Dictionary:
 ## The web strings were baked into the Spanish build; kept verbatim so the port
 ## stays comparable, and localised later through data/i18n when keys exist.
 static func describe(def: Dictionary) -> String:
-	var arch := String(def.get("arch", ""))
-	var text := String(def.get("archDesc", ""))
+	var arch := str(def.get("arch", ""))
+	var text := str(def.get("archDesc", ""))
 	if def.get("weather") != null:
 		text = {
 			"rain": "Invoca lluvia: potencia Agua y Eléctrico, moja a los enemigos.",
 			"sun": "Invoca sol: potencia Fuego y Planta.",
 			"sand": "Tormenta de arena: daña a los enemigos y potencia Roca/Tierra.",
 			"hail": "Granizo: daña y congela poco a poco a los enemigos.",
-		}.get(String(def["weather"]), text)
+		}.get(str(def["weather"]), text)
 	if def.get("buff") != null:
 		text = "Te potencia: +daño, +velocidad de ataque y +velocidad durante unos segundos."
 	if arch == "random":
-		return text
+		return App.ui(text)
 	if def.get("pulses") != null and int(def["pulses"]) > 1:
-		text = "Libera %d ondas expansivas seguidas a tu alrededor." % int(def["pulses"])
+		text = App.ui("Libera {n} ondas expansivas seguidas a tu alrededor.", {"n": int(def["pulses"])})
 	if int(def.get("count", 1)) > 1 and arch == "boomerang":
-		text = "Lanza %d proyectiles en abanico que van y vuelven atravesando enemigos." % int(def["count"])
+		text = App.ui("Lanza {n} proyectiles en abanico que van y vuelven atravesando enemigos.", {"n": int(def["count"])})
 	if def.get("status") != null and float(def.get("statusChance", 0)) >= 0.12 and arch != "weather" and arch != "buff":
-		text += " Puede causar %s." % String(def["status"])
+		text += " " + App.ui("Puede causar {status}.", {"status": App.ui(_status_label(str(def["status"])))})
 	if float(def.get("drain", 0)) > 0.0 and arch != "drain":
-		text += " Roba vida."
+		text += " " + App.ui("Roba vida.")
 	if float(def.get("critBonus", 0)) > 0.0:
-		text += " Crítico elevado."
-	return text
+		text += " " + App.ui("Crítico elevado.")
+	return App.ui(text)
+
+
+## Web Hv: the status keys used by `Puede causar {status}.`.
+static func _status_label(status: String) -> String:
+	var labels := {
+		"burn": "Quemado", "poison": "Envenenado", "paralysis": "Paralizado",
+		"freeze": "Congelado", "sleep": "Dormido", "confusion": "Confuso",
+		"wet": "Mojado", "curse": "Maldito", "healblock": "Anticura",
+		"charm": "Encantado", "root": "Enraizado", "knock": "Retroceso", "stun": "Aturdido",
+	}
+	return str(labels.get(status, status))
 
 
 ## by(): every move key the species' evolution line can learn that resolves to a
@@ -289,7 +300,7 @@ static func best_move_for(species_id: int) -> String:
 		var rt := resolve(mk)
 		if rt.is_empty():
 			continue
-		var arch := String(rt["arch"])
+		var arch := str(rt["arch"])
 		if arch in ["weather", "buff", "trap"]:
 			continue
 		var score := (100.0 if types.has(PbJson.as_string(move.get("type"), "")) else 0.0) \

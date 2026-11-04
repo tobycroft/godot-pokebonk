@@ -77,14 +77,14 @@ static func apply_mod_groups(stats: Dictionary, mods_groups: Array) -> void:
 	for group in groups:
 		for mod in group:
 			if mod.get("add") != null:
-				var stat := String(mod["stat"])
+				var stat := str(mod["stat"])
 				stats[stat] = float(stats.get(stat, 0)) + float(mod["add"])
 	for group in groups:
 		var pending := {}
 		for mod in group:
 			if mod.get("mul") == null:
 				continue
-			var stat := String(mod["stat"])
+			var stat := str(mod["stat"])
 			var mul := float(mod["mul"])
 			if mul < 1.0:
 				stats[stat] = float(stats.get(stat, 0)) * mul

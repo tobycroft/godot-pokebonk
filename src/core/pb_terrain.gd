@@ -98,7 +98,7 @@ func setup(biome_dict: Dictionary, pack_dict: Dictionary, seed: int) -> void:
 	biome = biome_dict
 	pack = pack_dict
 	seed_value = seed & 0xFFFFFFFF
-	biome_id = String(biome.get("id", "forest"))
+	biome_id = str(biome.get("id", "forest"))
 	world = PbJson.as_float(biome.get("size"), DEFAULT_WORLD)
 	var is_arena := false
 	res = js_roundf(world / GRID)
@@ -641,13 +641,13 @@ func plan_landmarks() -> void:
 		reserve(float(l["x"]), float(l["z"]), float(l["r"]))
 	var massif_kinds := ["grove", "fairy"]
 	for i in mini(2, massifs.size()):
-		var kind: String = String(massif_kinds[i])
+		var kind: String = str(massif_kinds[i])
 		_add_landmark(kind, float(massifs[i]["x"]), float(massifs[i]["z"]), PbJson.as_float(radii.get(kind, 6.0)))
 	var pool: Array = []
 	for k in ["arch", "hollow", "meadow", "boulders", "fairy"]:
 		var taken := false
 		for l in landmarks:
-			if String(l["kind"]) == k:
+			if str(l["kind"]) == k:
 				taken = true
 				break
 		if not taken:
@@ -674,7 +674,7 @@ func plan_landmarks() -> void:
 				best_gap = gap
 				best = {"x": pt.x, "z": pt.z}
 		if not best.is_empty():
-			_add_landmark(String(k), float(best["x"]), float(best["z"]), r)
+			_add_landmark(str(k), float(best["x"]), float(best["z"]), r)
 
 
 func _add_landmark(kind: String, x: float, z: float, r: float) -> void:
@@ -713,7 +713,7 @@ func _kind_by_name(name: String) -> Dictionary:
 	for list_key in ["trees", "big", "small", "landmarks"]:
 		for k in PbJson.as_array(pack.get(list_key)):
 			var kind: Dictionary = PbJson.as_dict(k)
-			if String(kind.get("name", "")) == name:
+			if str(kind.get("name", "")) == name:
 				return kind
 	return {}
 
@@ -774,11 +774,11 @@ func _place_landmark_clusters(_e: PbJsRng) -> void:
 		for _i in count:
 			var ang := n.range_f(0.0, TAU)
 			var rad := rmin + sqrt(n.next()) * (rmax - rmin)
-			var pick_name := String(n.pick(names))
+			var pick_name := str(n.pick(names))
 			put.call(_kind_by_name(pick_name), cx + cos(ang) * rad, cz + sin(ang) * rad, n.range_f(lo, hi))
 	var flowers := ["flowersA", "flowersB", "sunflower", "tallgrass", "fern"]
 	for l in landmarks:
-		var kind := String(l["kind"])
+		var kind := str(l["kind"])
 		var lx: float = float(l["x"])
 		var lz: float = float(l["z"])
 		match kind:
@@ -787,7 +787,7 @@ func _place_landmark_clusters(_e: PbJsRng) -> void:
 				var base_ang := n.range_f(0.0, 6.28)
 				var candidates: Array = []
 				for t in PbJson.as_array(pack.get("trees")):
-					if String(PbJson.as_dict(t).get("name", "")) != "tree2":
+					if str(PbJson.as_dict(t).get("name", "")) != "tree2":
 						candidates.append(t)
 				for i in 7:
 					var ang := base_ang + float(i) / 7.0 * TAU + n.range_f(-0.2, 0.2)
@@ -827,7 +827,7 @@ func _place_landmark_clusters(_e: PbJsRng) -> void:
 func _build_pads(e: PbJsRng) -> void:
 	pads.clear()
 	for l in landmarks:
-		if String(l["kind"]) != "pond":
+		if str(l["kind"]) != "pond":
 			continue
 		var lr: float = float(l["r"])
 		var tries := 0
