@@ -33,6 +33,7 @@ func _ready() -> void:
 	_run_flow()
 	_save_flow()
 	_asset_checks()
+	_avatar_fallback_checks()
 	_theme_ui_checks()
 	_revive_checks()
 	_danger_golden_checks()
@@ -454,6 +455,29 @@ func _asset_checks() -> void:
 	var en := PbData.localized_name("pokemon", 1, "en")
 	var zh := PbData.localized_name("pokemon", 1, "zh")
 	ok(not en.is_empty() and not zh.is_empty() and en != zh, "i18n name lookup works (en=%s zh=%s)" % [en, zh])
+
+
+## ------------------------------------------------------------------ 1b. avatar fallback chain
+## The run screen must never show an untextured (white) quad. PbVisuals.avatar falls back
+## pmd-billboard -> front-billboard (re's front/<id>.png) -> tinted color-box.
+func _avatar_fallback_checks() -> void:
+	section("avatar fallback chain (front/ + color-box)")
+	var f1 := PbVisuals.front_texture(1)
+	ok(f1 != null, "front_texture(1) loads the static portrait")
+	var a1 := PbVisuals.avatar(1)
+	ok(a1 != null, "avatar(1) builds")
+	var k1 := ""
+	if a1 is Node:
+		k1 = a1.get_meta("avatar_kind", "")
+	ok(k1 == "pmd-billboard" or k1 == "front-billboard",
+		"avatar(1) is a textured billboard (got %s)" % k1)
+	var a_bad := PbVisuals.avatar(999999)
+	var k_bad := ""
+	if a_bad is Node:
+		k_bad = a_bad.get_meta("avatar_kind", "")
+	ok(k_bad == "color-box", "unknown species falls back to color-box (got %s)" % k_bad)
+	a1.free()
+	a_bad.free()
 
 
 ## ------------------------------------------------------------------ 7. theme tokens
