@@ -390,7 +390,8 @@ func _shop_row(index: int, entry: Dictionary) -> Control:
 		row.add_child(UI.icon_rect(icon_name, 36))
 	var col := UI.vbox(2)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_child(UI.label(App.t("items", int(meta.get("id", 0)), str(meta.get("name", key))), 18))
+	col.add_child(UI.label(App.t("items", int(meta.get("id", 0)), str(meta.get("name", key))), 18,
+		PbTheme.ink()))
 	var desc := str(meta.get("desc", ""))
 	if not desc.is_empty():
 		col.add_child(UI.dim(desc))
@@ -1296,6 +1297,7 @@ func _settle_card(title_text: String, value_text: String, sub_text: String, rc: 
 	var s := PbTheme.card_style()
 	s.content_margin_left = 14
 	s.content_margin_right = 14
+	panel.add_theme_stylebox_override("panel", s)
 	var body := UI.vbox(2)
 	panel.add_child(body)
 	var head := UI.hbox(6)
