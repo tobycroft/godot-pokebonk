@@ -497,8 +497,9 @@ class Segment:
 		b.add_theme_stylebox_override("normal", PbTheme.pill_seg_style(on))
 		b.add_theme_stylebox_override("hover", PbTheme.pill_seg_style(on))
 		b.add_theme_stylebox_override("pressed", PbTheme.pill_seg_style(true))
-		# M-09: `.pill{font-weight:900;font-size:13px}` in every state.
-		b.add_theme_font_override("font", PbTheme.font("title"))
+		# M-09: `.pill{font-weight:900;font-size:13px}` in every state; the
+		# family is `--font` (Nunito), not the title face.
+		b.add_theme_font_override("font", PbTheme.font("body_black"))
 		b.add_theme_font_size_override("font_size", 13)
 		b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 		b.add_theme_color_override("font_color", PbTheme.ink() if on else PbTheme.ink_muted())

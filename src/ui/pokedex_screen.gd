@@ -428,7 +428,7 @@ func _tile(species_id: int) -> Dictionary:
 	# `.dx-tile small`: bottom 3px left 7px, 10px/900.
 	var num := UI.label("%03d" % species_id, int(_px(".dx-tile small", "font-size", 10.0)), PbTheme.ink_muted())
 	num.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	num.add_theme_font_override("font", PbTheme.font("body_bold"))
+	num.add_theme_font_override("font", PbTheme.font("body_black"))
 	num.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	num.offset_left = 7
 	num.offset_top = -16

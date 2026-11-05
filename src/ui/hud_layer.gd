@@ -92,7 +92,7 @@ func _build_top() -> void:
 	wicon.visible = false
 	wbox.add_child(wicon)
 	var wlabel := UI.label("", 11, _weather_ink())
-	wlabel.add_theme_font_override("font", PbTheme.font("body_bold"))
+	wlabel.add_theme_font_override("font", PbTheme.font("body_black"))
 	wbox.add_child(wlabel)
 	weather.add_theme_stylebox_override("panel", PbTheme.stylebox(".ht-weather"))
 	weather.visible = false

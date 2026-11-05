@@ -29,6 +29,9 @@ const FONT_TITLE := "res://assets/fonts/MPLUSRounded-900.ttf"
 const FONT_TITLE_BOLD := "res://assets/fonts/MPLUSRounded-800.ttf"
 const FONT_BODY := "res://assets/fonts/Nunito-800.ttf"
 const FONT_BODY_REGULAR := "res://assets/fonts/Nunito-700.ttf"
+## `font-weight:900` elements (`.ht-weather`, `.pill`, `.dx-tile small`, the
+## `.logo-ver b` chip) read Nunito's Black face off `--font`.
+const FONT_BODY_BLACK := "res://assets/fonts/Nunito-900.ttf"
 
 ## The page itself is dark in both web themes: `html,body{background:#1a1630}`.
 ## It is a plain declaration rather than a :root custom property, so it cannot
@@ -824,7 +827,8 @@ static func type_color(type_name: String) -> Color:
 	return css_color(hex, Color("#9aa4b8"))
 
 
-static func font(weight: String = "body") -> Font:
+static func font(weight: Variant = "body") -> Font:
+	var role := _weight_role(weight)
 	if _fonts.is_empty():
 		var cjk := _cjk_fallback()
 		var paths := {
@@ -835,6 +839,8 @@ static func font(weight: String = "body") -> Font:
 			"body": FONT_BODY_REGULAR,
 			"body_bold": FONT_BODY,
 			"body_regular": FONT_BODY_REGULAR,
+			# CSS `font-weight:900` on the body family (see FONT_BODY_BLACK).
+			"body_black": FONT_BODY_BLACK,
 		}
 		for key in paths.keys():
 			var path := str(paths[key])
@@ -845,7 +851,20 @@ static func font(weight: String = "body") -> Font:
 				_fonts[key] = loaded
 			else:
 				push_warning("Theme: font missing at %s (run the import step)" % path)
-	return _fonts.get(weight, ThemeDB.fallback_font)
+	return _fonts.get(role, ThemeDB.fallback_font)
+
+
+## CSS numeric weights -> body-family roles, so a caller that parsed
+## `font-weight:900` off a rule can ask for the face directly.
+static func _weight_role(weight: Variant) -> String:
+	if weight is int or weight is float:
+		var value := int(weight)
+		if value >= 900:
+			return "body_black"
+		if value >= 800:
+			return "body_bold"
+		return "body"
+	return str(weight)
 
 
 static func _cjk_fallback() -> Font:

@@ -402,8 +402,10 @@ func _version_pill() -> PanelContainer:
 	var row := UI.hbox(6)
 	pill.add_child(row)
 
+	# `.logo-ver{font-family:var(--font);font-weight:800}` + UA `b{bolder}` ->
+	# the BETA chip computes to 900, still on the Nunito family.
 	var beta_label := UI.label(App.ui("Beta").to_upper(), 12, Color.WHITE)
-	beta_label.add_theme_font_override("font", PbTheme.font("title"))
+	beta_label.add_theme_font_override("font", PbTheme.font("body_black"))
 	var chip := Control.new()
 	chip.custom_minimum_size = Vector2(beta_label.get_combined_minimum_size().x + 18.0, 19.0)
 	var band := PbWidgets.GradRect.new()
