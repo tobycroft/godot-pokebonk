@@ -114,6 +114,11 @@ static func icon_rect(name: String, px: int = 22) -> TextureRect:
 	t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	t.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# Web item defs carry a full sub-path ("items/poison-barb.png"), while move
+	# types / vitamins carry a bare stem ("grass", "protein") -> try both.
+	if ResourceLoader.exists("res://assets/" + name):
+		t.texture = load("res://assets/" + name)
+		return t
 	for base in PackedStringArray(["res://assets/ui/icons/", "res://assets/items/"]):
 		var path := base + name + ".png"
 		if ResourceLoader.exists(path):
