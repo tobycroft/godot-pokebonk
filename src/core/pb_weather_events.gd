@@ -185,8 +185,9 @@ static func end(state: Dictionary, silent: bool = false) -> void:
 	c["meowth"] = -1
 	# Only release a weather override the event itself installed; a weather move
 	# cast during the event keeps its own timer.
-	if was != "meowth" and str(state.get("weather", "")) == was:
-		state["weather"] = str(state.get("baseWeather", "clear"))
+	if was != "meowth" and PbJson.as_string(state.get("weather"), "") == was:
+		var base := PbJson.as_string(state.get("baseWeather"), "clear")
+		state["weather"] = "clear" if base == "<null>" else base
 		state["weatherT"] = 0.0
 	# The look keeps fading out through `lookKind` until k reaches 0.
 

@@ -119,8 +119,80 @@ static func _ability_weather(ability: String, base: String) -> String:
 	return str(map.get(ability, base))
 
 
+## `state.weather` is a plain id string. GDScript's `str(null)` is the literal
+## "<null>", so any null read (a move def without a `weather` key, a save that
+## predates the field) must not reach the state -- the HUD echoes it verbatim.
+static func _weather_id(value: Variant, fallback: String = "clear") -> String:
+	var w := PbJson.as_string(value, "")
+	return fallback if w.is_empty() or w == "<null>" else w
+
+
+## Fill a restored/imported run state with the defaults the web's run init
+## (@1506897: weather/baseWeather `clear`, weatherT 0) and the later systems
+## need. A state built by create() already has all of them; this keeps an older
+## save playable instead of letting a null weather/stage leak into the tick.
+static func ensure_state(state: Dictionary) -> Dictionary:
+	var base := _weather_id(state.get("baseWeather"))
+	state["baseWeather"] = base
+	state["weather"] = _weather_id(state.get("weather"), base)
+	if typeof(state.get("weatherT")) != TYPE_FLOAT and typeof(state.get("weatherT")) != TYPE_INT:
+		state["weatherT"] = 0.0
+	if not (state.get("weatherDone") is Array):
+		state["weatherDone"] = []
+	if (typeof(state.get("stage")) != TYPE_FLOAT and typeof(state.get("stage")) != TYPE_INT) \
+			or int(state.get("stage", 0)) <= 0:
+		state["stage"] = 1
+	if typeof(state.get("stageT")) != TYPE_FLOAT and typeof(state.get("stageT")) != TYPE_INT:
+		state["stageT"] = 0.0
+	if typeof(state.get("shopVisit")) != TYPE_FLOAT and typeof(state.get("shopVisit")) != TYPE_INT:
+		state["shopVisit"] = 0
+	if not (state.get("shop") is Dictionary):
+		state["shop"] = {}
+	if not (state.get("shopBuys") is Array):
+		state["shopBuys"] = []
+	if typeof(state.get("shopRerolls")) != TYPE_FLOAT and typeof(state.get("shopRerolls")) != TYPE_INT:
+		state["shopRerolls"] = 0
+	if not (state.get("fusions") is Array):
+		state["fusions"] = []
+	var player := PbJson.as_dict(state.get("player", {}))
+	if not player.is_empty():
+		if typeof(player.get("evo_stage")) != TYPE_FLOAT and typeof(player.get("evo_stage")) != TYPE_INT:
+			player["evo_stage"] = 0
+		if not (player.get("vitamins") is Dictionary):
+			player["vitamins"] = {}
+		player["pendingLevels"] = int(player.get("pendingLevels", 0))
+		state["player"] = player
+		if state.get("nextEvo") == null:
+			state["nextEvo"] = PbEvo.plan_evolution(player, int(player.get("level", 1)))
+	var stats := {
+		"kills": 0, "damage": 0.0, "damageTaken": 0.0, "hits": 0, "dodges": 0,
+		"crits": 0, "megaCrits": 0, "bosses": 0, "legendaries": 0, "powerUps": 0,
+		"movesLearned": 0, "evolutions": 0, "captured": [], "allies": [],
+		"newSeen": [], "killsBy": {}, "splits": [],
+	}
+	for key in PbJson.as_dict(state.get("stats", {})).keys():
+		stats[key] = state["stats"][key]
+	if not (stats.get("captured") is Array):
+		stats["captured"] = []
+	state["stats"] = stats
+	if str(state.get("mode", "standard")) == "standard" and not (state.get("capture") is Dictionary):
+		PbCapture.create(state)
+	PbHazards.ensure(state)
+	PbWeatherEvents.ensure(state)
+	return state
+
+
+static func _needs_restore(state: Dictionary) -> bool:
+	var w := PbJson.as_string(state.get("weather"), "")
+	return int(state.get("stage", 0)) <= 0 or w.is_empty() or w == "<null>" \
+		or not (state.get("stats") is Dictionary)
+
+
 ## ------------------------------------------------------------------ tick
 static func tick(state: Dictionary, dt: float) -> void:
+	# A resumed run (or an imported state) may not carry the newer fields yet.
+	if _needs_restore(state):
+		ensure_state(state)
 	var mode := str(state.get("state", "play"))
 	# Evolution cinematic (startEvolution @1543295) pauses gameplay; the 3.6s
 	# timer and the completion settlement run in PbEvo.
@@ -162,7 +234,7 @@ static func tick(state: Dictionary, dt: float) -> void:
 	if float(state.get("weatherT", 0.0)) > 0.0:
 		state["weatherT"] = maxf(0.0, float(state["weatherT"]) - dt)
 		if float(state["weatherT"]) <= 0.0:
-			state["weather"] = str(state.get("baseWeather", "clear"))
+			state["weather"] = _weather_id(state.get("baseWeather"))
 	_tick_director(state, dt)
 	# Boss.exhaust() fight clock: only ticks while the current boss is alive.
 	if bool(state.get("bossSpawned", false)) \
@@ -478,7 +550,9 @@ static func _move_mods(inst: Dictionary, player: Dictionary) -> Dictionary:
 static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target: int) -> void:
 	# Weather archetype (rain dance / sunny day / sandstorm / hail): the web
 	# applies it on cast (case 'weather'), before any damage roll.
-	var cast_weather := str(def.get("weather", ""))
+	# def["weather"] exists on every move and is null for non-weather moves;
+	# `str(null)` would be "<null>", so read it through the null-aware helper.
+	var cast_weather := _weather_id(def.get("weather"), "")
 	if not cast_weather.is_empty():
 		state["weather"] = cast_weather
 		state["weatherT"] = float(built.get("dur", 0.0))
@@ -492,7 +566,7 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 			"inst": built,
 			"actor": PbActor.actor_for_damage(player),
 			"def_types": PbEnemies.types_of(pool, target),
-			"weather": str(state.get("weather", "clear")),
+			"weather": _weather_id(state.get("weather")),
 			"flags": PbEnemies.flags(pool, target),
 			"elite": PbEnemies.is_elite(pool, target),
 			"boss": PbEnemies.is_boss(pool, target),
@@ -508,7 +582,7 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 			"scope": 1.0,
 			"status_count": 0,
 			# Ob.bonusDamageMult() @841430 / siegeMult @749555.
-			"bonusDamage": PbCombat.bonus_damage_mult(player, state, str(state.get("weather", "clear"))),
+			"bonusDamage": PbCombat.bonus_damage_mult(player, state, _weather_id(state.get("weather"))),
 			"ice_heal": str(player.get("ability", "")) == "ice-heal",
 			"siege": PbCombat.siege_mult(maxf(float(state.get("camp", 0.0)),
 				float(state.get("siegeIdle", 0.0))),
