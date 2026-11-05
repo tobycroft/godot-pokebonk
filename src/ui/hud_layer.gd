@@ -678,10 +678,14 @@ func sync(state: Dictionary, dt: float) -> void:
 	(_els["biome"] as Label).text = _biome_name(str(state.get("biome", "forest")))
 	_sync_pips(stage)
 	var weather := str(state.get("weather", "clear"))
+	var wname := _weather_name(weather)
 	var wpill := _els["weather"] as PanelContainer
-	wpill.visible = weather != "clear"
-	if weather != "clear":
-		(_els["weather_label"] as Label).text = _weather_name(weather)
+	# Only show the pill for a weather we can actually name. A null/unknown id
+	# used to leak straight into the label (`<null>`), which is what showed as a
+	# stray badge next to the biome name.
+	wpill.visible = weather != "clear" and not wname.is_empty()
+	if wpill.visible:
+		(_els["weather_label"] as Label).text = wname
 
 	# wallet + kills
 	(_els["gold"] as Label).text = UI.fmt_num(float(state.get("gold", 0.0)))
@@ -773,10 +777,18 @@ func _biome_name(id: String) -> String:
 	return str(names.get(id, id))
 
 
+## Naming a weather id. Unknown or empty ids (a resumed run can carry a null)
+## resolve to "" so the HUD hides the pill instead of echoing the raw value.
+## Weather *events* (storm/eclipse/meowth, PbWeatherEvents) also write into
+## `state.weather`, so they are named from data/pb/weather.json.
 func _weather_name(key: String) -> String:
 	var names := {"rain": App.ui("Lluvia"), "sun": App.ui("Sol"), "sand": App.ui("Tormenta de arena"),
 		"hail": App.ui("Granizo"), "fog": App.ui("Niebla"), "ash": App.ui("Ceniza")}
-	return str(names.get(key, key))
+	if names.has(key):
+		return str(names[key])
+	var event := PbJson.as_dict(PbWeatherEvents.table().get(key))
+	var event_name := str(event.get("name", ""))
+	return App.ui(event_name) if not event_name.is_empty() else ""
 
 
 func _sync_pips(stage: int) -> void:
