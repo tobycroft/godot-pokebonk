@@ -696,6 +696,11 @@ func sync(state: Dictionary, dt: float) -> void:
 	var portrait := _els["portrait"] as PmdSprite
 	if portrait.species_id != species:
 		portrait.setup(species, "idle", 0.7)
+		# setup() resets the TextureRect to its native pixel size; the ring only
+		# re-fits the portrait from its own _draw(), so trigger a redraw here.
+		# Without this the portrait shrinks into the ring's top-left corner after
+		# evolution (species change) until some unrelated relayout happens.
+		(portrait.get_parent() as Control).queue_redraw()
 	var ring := _els["xp_ring"] as HudXpRing
 	var xp_next := maxf(1.0, float(player.get("xpNext", 1)))
 	ring.progress = clampf(float(player.get("xp", 0)) / xp_next * 100.0, 0.0, 100.0)
@@ -1005,19 +1010,33 @@ func _sync_boss(state: Dictionary) -> void:
 ## .pw-row: current card buffs as small pills (data is on the actor's mods).
 func _sync_pw(player: Dictionary) -> void:
 	var row := _els["pw_row"] as HBoxContainer
-	var mods := PbJson.as_array(player.get("mods", []))
-	var signature := str(mods.slice(maxi(0, mods.size() - 6)))
+	# actor.mods is a list of mod groups (each group is a list of mod dicts);
+	# flatten it before showing the pills, otherwise every group renders as "?".
+	var flat := []
+	for group in PbJson.as_array(player.get("mods", [])):
+		for raw in PbJson.as_array(group):
+			flat.append(raw)
+	var signature := str(flat.slice(maxi(0, flat.size() - 6)))
 	if str(_els.get("pw_key", "")) == signature:
 		return
 	_els["pw_key"] = signature
 	for c in row.get_children():
 		c.queue_free()
-	row.visible = not mods.is_empty()
-	var recent := mods.slice(maxi(0, mods.size() - 6))
+	row.visible = not flat.is_empty()
+	var recent := flat.slice(maxi(0, flat.size() - 6))
 	for raw in recent:
 		var mod := PbJson.as_dict(raw)
 		var stat := str(mod.get("stat", "?"))
-		var delta := "×%.2f" % float(mod.get("mul", 1.0)) if mod.has("mul") else "+%.2f" % float(mod.get("add", 0.0))
+		# card mods use {"mode":"add|mul","amount":x}; item mods may use add/mul.
+		var mode := str(mod.get("mode", "add"))
+		var amount := float(mod.get("amount", 0.0))
+		if mod.has("mul"):
+			amount = float(mod.get("mul", 1.0))
+			mode = "mul"
+		elif mod.has("add"):
+			amount = float(mod.get("add", 0.0))
+			mode = "add"
+		var delta := ("×%.2f" % amount) if mode == "mul" else ("+%.2f" % amount)
 		var chip := UI.chip("%s %s" % [stat, delta], PbTheme.accent_color("blue", "c"))
 		(chip.get_child(0) as Label).add_theme_font_size_override("font_size", 10)
 		row.add_child(chip)
