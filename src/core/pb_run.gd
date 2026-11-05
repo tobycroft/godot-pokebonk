@@ -12,15 +12,25 @@ extends RefCounted
 ##
 ## Numbers marked "estimated" are ours; everything else is the recovered formula.
 
-## Web has no fixed stage timer: the guardian is awakened at an altar and the
-## stage ends when the portal is taken (Ab.update @884400). The port keeps a
-## timed guardian to stay playable headlessly -- 待确认.
-const STAGE_TIME := 60.0
-const STAGES := 5
+## Web has no fixed stage timer. The guardian is awakened from a `boss` altar
+## (interactable @1303414) and the stage ends when the guardian dies and the
+## portal is taken (onBossKilled @1529103 / enterPortal @1532894). The one
+## stage-time milestone in the bundle is the final swarm at 600 s (@1558002);
+## the port has no altar interaction yet, so it wakes the guardian at that same
+## horizon instead of on a 60 s guess.
+const STAGE_TIME := 600.0
 const MAX_SPAWNS_PER_SEC := 1800.0  # Ab.MAX_SPAWNS_PER_SEC @876500
 const SPAWN_ALLOWANCE_CAP := 180.0  # 0.1 * MAX_SPAWNS_PER_SEC
 ## credit() @765300: goldFrac += .2 * stats.gold * weight
 const GOLD_PER_KILL := 0.2
+
+
+## Web stage count is per biome: `stage>=4 || stage>=3 && !biome.sanctuary`
+## (@1532894). Sanctuary biomes (forest/desert/coast/glacier) clear on stage 4;
+## graveyard/volcano clear on stage 3.
+static func stage_count(state: Dictionary) -> int:
+	var biome := PbData.biome(str(state.get("biome", "forest")))
+	return 4 if not PbJson.as_dict(biome.get("sanctuary", {})).is_empty() else 3
 
 
 static func create(species_id: int, biome: String = "forest", seed_value: int = 0,
@@ -281,7 +291,7 @@ static func tick(state: Dictionary, dt: float) -> void:
 		else:
 			state["state"] = "over"
 			state["endHow"] = "defeat"
-	elif int(state["stage"]) > STAGES:
+	elif int(state["stage"]) > stage_count(state):
 		state["state"] = "over"
 		state["endHow"] = "victory"
 		state["victory"] = true

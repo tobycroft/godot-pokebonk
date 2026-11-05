@@ -264,8 +264,16 @@ func _run_flow() -> void:
 	ok(int(stats.get("kills", 0)) > 0, "enemies died (kill/loot pipeline works)")
 	ok(int(player.get("level", 1)) > 1, "player levelled up (xp curve + offers work)")
 	ok(int(stats.get("powerUps", 0)) > 0, "cards were picked during level-ups")
-	ok(bool(run.get("bossSpawned", false)) or int(run["stage"]) >= 2,
-		"stage timer drove the boss/stage progression")
+	ok(not bool(run.get("bossSpawned", false)) and int(run["stage"]) == 1,
+		"no guardian before the web 600 s stage horizon")
+	# Stage count is per biome (web @1532894).
+	ok(PbRun.stage_count(run) == 4, "sanctuary biome clears on stage 4")
+	ok(PbRun.stage_count({"biome": "graveyard"}) == 3, "non-sanctuary biome clears on stage 3")
+	# The guardian wakes once stageT reaches the recovered 600 s milestone.
+	var horizon := PbRun.create(1, "forest", 20261102, {"damage": 0.2, "maxHp": 20})
+	horizon["stageT"] = PbRun.STAGE_TIME
+	PbRun.simulate(horizon, 2.0)
+	ok(bool(horizon.get("bossSpawned", false)), "guardian wakes at the 600 s stage horizon")
 	ok(PbJson.as_array(run["orbs"]).size() >= 0, "orb list maintained")
 	ok(not PbJson.as_array(run["offers"]).is_empty() or int(run["pendingLevels"]) == 0,
 		"modal state consistent with pending levels")

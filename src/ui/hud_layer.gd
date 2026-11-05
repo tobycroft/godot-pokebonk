@@ -670,10 +670,11 @@ func sync(state: Dictionary, dt: float) -> void:
 	var run_stats := PbJson.as_dict(state.get("stats", {}))
 	var time := float(state.get("time", 0.0))
 	var stage := int(state.get("stage", 1))
+	var stages := PbRun.stage_count(state)
 
 	# timer + runclock (rl()/il() semantics)
 	(_els["timer_label"] as Label).text = UI.fmt_clock(time)
-	var final_phase := stage >= PbRun.STAGES and bool(state.get("bossSpawned", false))
+	var final_phase := stage >= stages and bool(state.get("bossSpawned", false))
 	(_els["timer"] as PanelContainer).add_theme_stylebox_override("panel", PbTheme.timer_style(final_phase))
 	if final_phase != _timer_final:
 		_timer_final = final_phase
@@ -688,11 +689,11 @@ func sync(state: Dictionary, dt: float) -> void:
 			_timer_pulse.tween_property(timer, "modulate", Color(1.35, 1.35, 1.35), 0.4)
 			_timer_pulse.tween_property(timer, "modulate", Color.WHITE, 0.4)
 	(_els["clock"] as Label).text = UI.fmt_clock_t(time)
-	(_els["clock_sub"] as Label).text = "第 %d/%d 阶段" % [stage, PbRun.STAGES]
+	(_els["clock_sub"] as Label).text = "第 %d/%d 阶段" % [stage, stages]
 
 	# biome + stage pips + weather
 	(_els["biome"] as Label).text = _biome_name(str(state.get("biome", "forest")))
-	_sync_pips(stage)
+	_sync_pips(stage, stages)
 	var weather := str(state.get("weather", "clear"))
 	# The web badge reads the weather channel only (`run.weather` @1521349);
 	# map events (fog/storm/eclipse/meowth) drive `look` and the banner instead,
@@ -834,14 +835,14 @@ func _weather_icon_type(key: String) -> String:
 		"fog": "ghost", "ash": "fire"}.get(key, "")
 
 
-func _sync_pips(stage: int) -> void:
+func _sync_pips(stage: int, stages: int) -> void:
 	if stage == _stage_shown:
 		return
 	_stage_shown = stage
 	var pips := _els["pips"] as HBoxContainer
 	for c in pips.get_children():
 		c.queue_free()
-	for i in PbRun.STAGES:
+	for i in stages:
 		var pip := Panel.new()
 		pip.custom_minimum_size = Vector2(16, 16)
 		var s := StyleBoxFlat.new()

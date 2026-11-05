@@ -564,9 +564,9 @@ static func on_killed_info(state: Dictionary, info: Dictionary) -> void:
 	end(state, true)
 
 
-## §4.10: beat clock. The web uses `stageTime`, but the port advances a stage
-## every 60 s (PbRun.STAGE_TIME) so `stageT` resets before the doc's beats could
-## fire. The beats therefore keep the doc's seconds but run on the run clock.
+## §4.10: beat clock on `stageTime` (the run resets it on every zone change,
+## @1506202 run init / @1506897 enterPortal). The doc's beats are stageTime
+## values, so they now run on `stageT` again instead of the run clock.
 static func schedule(state: Dictionary) -> void:
 	var c := ensure(state)
 	var run_t := float(state.get("time", 0.0))
@@ -580,27 +580,28 @@ static func schedule(state: Dictionary) -> void:
 				c["next"] = run_t + _beat(15.0, 15.0)
 		return
 	var stage := int(state.get("stage", 1))
+	var stage_t := float(state.get("stageT", 0.0))
 	if int(c.get("stage", 0)) != stage:
 		c["stage"] = stage
 		var beats := []
 		if stage == 1:
-			beats.append({"t": run_t + _beat(170.0, 300.0), "fired": false})
+			beats.append({"t": stage_t + _beat(170.0, 300.0), "fired": false})
 		else:
-			beats.append({"t": run_t + _beat(130.0, 230.0), "fired": false})
-			beats.append({"t": run_t + _beat(340.0, 460.0), "fired": false})
+			beats.append({"t": stage_t + _beat(130.0, 230.0), "fired": false})
+			beats.append({"t": stage_t + _beat(340.0, 460.0), "fired": false})
 		c["beats"] = beats
 	var beats := PbJson.as_array(c.get("beats", []))
 	for raw in beats:
 		var beat := PbJson.as_dict(raw)
-		if bool(beat.get("fired", false)) or run_t < float(beat.get("t", 0.0)):
+		if bool(beat.get("fired", false)) or stage_t < float(beat.get("t", 0.0)):
 			continue
 		if start_random(state):
 			beat["fired"] = true
 		else:
-			beat["t"] = run_t + _beat(15.0, 15.0)
+			beat["t"] = stage_t + _beat(15.0, 15.0)
 
 
-## Doc beat seconds; kept verbatim (see `schedule` for the run-clock mapping).
+## Doc beat seconds (stageTime); kept verbatim (see `schedule`).
 static func _beat(from: float, to: float) -> float:
 	return PbRng.randf_range(from, to)
 
