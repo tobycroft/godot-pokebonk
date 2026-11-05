@@ -34,6 +34,7 @@ func _ready() -> void:
 	_boss_altar_checks()
 	_spawn_pool_checks()
 	_difficulty_scaling_checks()
+	_attack_rhythm_checks()
 	_save_flow()
 	_save_migration_checks()
 	_asset_checks()
@@ -1896,6 +1897,38 @@ func _difficulty_scaling_checks() -> void:
 	var got := float(run["stats"]["damageTaken"])
 	ok(absf(got - want) <= 0.001 * maxf(1.0, want),
 		"diff 3 contact hit takes base*3 once (got %.3f want %.3f)" % [got, want])
+
+
+# ------------------------------------------------------------------ attack rhythm
+## No per-enemy 1 s cooldown: contact damage is gated only by `iframes`
+## (@361132 hurt call, @845081 `iframes>0` guard, @864367 `iframes-=dt`).
+func _attack_rhythm_checks() -> void:
+	section("enemy attack rhythm: iframes only (web @361132/@845081/@864367)")
+	var run := PbRun.create(1, "forest", 424242)
+	var player: Dictionary = run["player"]
+	player["moves"] = []
+	player["x"] = 0.0
+	player["z"] = 0.0
+	player["iframes"] = 0.0
+	PbJson.as_dict(player["stats"])["evasion"] = 0.0
+	var pool: Dictionary = run["enemies"]
+	PbEnemies.spawn(pool, 19, 0.0, 0.0, 1, run["diff"], "wild")
+	var dt := 1.0 / 60.0
+	PbRun._tick_player(run, dt)
+	PbRun._tick_enemies(run, dt)
+	var first := float(run["stats"]["damageTaken"])
+	ok(first > 0.0, "a contact enemy hurts on the first frame (no 1 s cd)")
+	close(float(player.get("iframes", 0.0)), 0.45, "a hit grants .45 s of i-frames")
+	var frame_before := float(player.get("iframes", 0.0))
+	PbRun._tick_player(run, dt)
+	ok(float(player.get("iframes", 0.0)) < frame_before, "i-frames tick down every frame")
+	var t := dt
+	while t < 0.55:
+		PbRun._tick_player(run, dt)
+		PbRun._tick_enemies(run, dt)
+		t += dt
+	ok(float(run["stats"]["damageTaken"]) >= first * 1.9,
+		"a second contact hit lands by .55 s (0.45 s i-frames, not a 1 s cd)")
 
 
 # ------------------------------------------------------------------ weather events

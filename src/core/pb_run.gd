@@ -768,6 +768,9 @@ static func enter_portal(state: Dictionary) -> bool:
 ## ------------------------------------------------------------------ combat
 static func _tick_player(state: Dictionary, dt: float) -> void:
 	var player: Dictionary = state["player"]
+	# Ob.tick @864367: `this.iframes-=e`; `hurt()` (@845081) refuses damage while
+	# this counter is positive, which is the web's only contact-attack gate.
+	player["iframes"] = maxf(0.0, float(player.get("iframes", 0.0)) - dt)
 	var moves: Array = PbJson.as_array(player.get("moves", []))
 	var actor := PbActor.actor_for_damage(player)
 	for i in moves.size():
@@ -1154,35 +1157,32 @@ static func _tick_enemies(state: Dictionary, dt: float) -> void:
 			PbEnemies.set_field(pool, "x", i, float(PbEnemies.get_field(pool, "x", i)) + dx / dist * speed * dt)
 			PbEnemies.set_field(pool, "z", i, float(PbEnemies.get_field(pool, "z", i)) + dz / dist * speed * dt)
 		if dist < 1.4:
-			var cd := float(PbEnemies.get_field(pool, "cd", i)) - dt
-			if cd <= 0.0:
-				PbEnemies.set_field(pool, "cd", i, 1.0)
-				# Player invulnerability frames (the bundle tracks Ob.iframes) keep a
-				# horde from deleting the player in one overlap cluster.
-				if float(player.get("iframes", 0.0)) > 0.0:
-					continue
-				# Ob.hurt() @846019 rolls evasion before any mitigation.
-				if PbRng.chance(float(stats.get("evasion", 0.0))):
-					state["stats"]["dodges"] = int(state["stats"].get("dodges", 0)) + 1
-					continue
-				var raw := float(PbEnemies.get_field(pool, "dmg", i))
-				var types: Array = [str(PbEnemies.get_field(pool, "typeA", i))]
-				var taken := PbDamage.incoming_to_player(raw, types[0],
-					PbJson.as_array(player.get("types", [])), stats, false,
-					str(player.get("ability", "")), int(player.get("level", 1)))
-				taken = maxf(0.0, taken * float(state["diff"].get("enemyDamage", 1.0)))
-				# Contact hits carry no floor/cap config in the web build; the
-				# pipeline is wired for hazard/projectile overrides.
-				taken = PbDamage.apply_incoming_floor_cap(taken, raw, float(player.get("maxHp", 1.0)), 0.0, 0.0)
-				var applied := PbActor.damage(player, taken)
-				player["iframes"] = 0.45
-				state["stats"]["damageTaken"] = float(state["stats"]["damageTaken"]) + applied
-				# Ob.hurt() thorns: stats.thorns * (1+level*.05), fixed steel hit.
-				var thorns := float(stats.get("thorns", 0.0))
-				if thorns > 0.0 and not bool(player.get("dead", false)):
-					PbEnemies.damage(pool, i, thorns * (1.0 + float(player.get("level", 1)) * 0.05))
-			else:
-				PbEnemies.set_field(pool, "cd", i, cd)
+			# Web contact hits have no per-enemy cooldown (@361132): the only gate
+			# is the player's i-frame counter, decremented by Ob.tick.
+			if float(player.get("iframes", 0.0)) > 0.0:
+				continue
+			# Ob.hurt() @846019 rolls evasion before any mitigation; a dodge still
+			# grants .25 s of i-frames.
+			if PbRng.chance(float(stats.get("evasion", 0.0))):
+				state["stats"]["dodges"] = int(state["stats"].get("dodges", 0)) + 1
+				player["iframes"] = 0.25
+				continue
+			var raw := float(PbEnemies.get_field(pool, "dmg", i))
+			var types: Array = [str(PbEnemies.get_field(pool, "typeA", i))]
+			var taken := PbDamage.incoming_to_player(raw, types[0],
+				PbJson.as_array(player.get("types", [])), stats, false,
+				str(player.get("ability", "")), int(player.get("level", 1)))
+			taken = maxf(0.0, taken * float(state["diff"].get("enemyDamage", 1.0)))
+			# Contact hits carry no floor/cap config in the web build; the
+			# pipeline is wired for hazard/projectile overrides.
+			taken = PbDamage.apply_incoming_floor_cap(taken, raw, float(player.get("maxHp", 1.0)), 0.0, 0.0)
+			var applied := PbActor.damage(player, taken)
+			player["iframes"] = 0.45
+			state["stats"]["damageTaken"] = float(state["stats"]["damageTaken"]) + applied
+			# Ob.hurt() thorns: stats.thorns * (1+level*.05), fixed steel hit.
+			var thorns := float(stats.get("thorns", 0.0))
+			if thorns > 0.0 and not bool(player.get("dead", false)):
+				PbEnemies.damage(pool, i, thorns * (1.0 + float(player.get("level", 1)) * 0.05))
 
 
 ## ------------------------------------------------------------------ settle
