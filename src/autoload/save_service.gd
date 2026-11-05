@@ -409,6 +409,13 @@ func lab_deltas() -> Dictionary:
 	out["attackSpeed"] = 0.05 * lab("atkspd")
 	out["moveSlots"] = 1 if lab("slot-move") > 0 else 0
 	out["vitaminSlots"] = lab("slot-vit")
+	# Offer actions + the run's revive charge consume these lab levels directly
+	# (PbRun.start copies them into `rerolls`/`skips`/`banishes`; PbActor
+	# reads `revive` on creation). Without them every run started with 0.
+	out["reroll"] = lab("reroll")
+	out["skip"] = lab("skip")
+	out["banish"] = lab("banish")
+	out["revive"] = lab("revive")
 	return out
 
 
