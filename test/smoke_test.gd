@@ -32,6 +32,7 @@ func _ready() -> void:
 	_fusion_checks()
 	_run_flow()
 	_save_flow()
+	_save_migration_checks()
 	_asset_checks()
 	_avatar_fallback_checks()
 	_billboard_scale_checks()
@@ -740,6 +741,71 @@ func _save_flow() -> void:
 	ok(str(PbJson.as_dict(envelope.get("profile", {})).get("name", "")) == "验证员", "name survived the round trip")
 	ok(int(envelope.get("v", 0)) == 1, "envelope version 1")
 	ok(float(Save.stale_seconds()) < 5.0, "stale_seconds reports a fresh save")
+
+
+# ------------------------------------------------------------------ 5b. save migrations
+## Fixtures an older save / cross-build export can produce: a run state with no
+## weather fields, `forms` as an object vs an array, and the web's league array.
+func _save_migration_checks() -> void:
+	section("save migration: run weather defaults")
+	# A run state from before the weather fields existed (or one that missed
+	# them): ensure_state fills what PbRun.tick / the HUD read.
+	var state := PbRun.create(4, "forest", 42)
+	state.erase("weather")
+	state.erase("baseWeather")
+	state.erase("weatherT")
+	state.erase("stage")
+	state.erase("stageT")
+	state.erase("stats")
+	state.erase("shopVisit")
+	state.erase("nextEvo")
+	PbRun.ensure_state(state)
+	ok(str(state.get("weather", "")) == "clear", "missing weather -> clear")
+	ok(str(state.get("baseWeather", "")) == "clear", "missing baseWeather -> clear")
+	ok(is_zero_approx(float(state.get("weatherT", -1.0))), "missing weatherT -> 0")
+	ok(int(state.get("stage", 0)) == 1, "missing stage -> 1")
+	ok(is_zero_approx(float(state.get("stageT", -1.0))), "missing stageT -> 0")
+	ok(int(state.get("shopVisit", -1)) == 0, "missing shopVisit -> 0")
+	ok(state.get("nextEvo") != null, "missing nextEvo is re-planned")
+	ok(int(PbJson.as_dict(state.get("stats", {})).get("kills", -1)) == 0, "missing stats rebuilt")
+	ok(int(PbJson.as_dict(state.get("player", {})).get("evo_stage", -1)) == 0, "missing evo_stage -> 0")
+	ok(PbJson.as_dict(state.get("player", {})).get("vitamins") is Dictionary, "missing vitamins -> {}")
+	ok(PbJson.as_dict(state.get("capture", {})).get("state", "") == "idle", "missing capture rebuilt")
+	ok(PbJson.as_dict(state.get("hazards", {})).has("list"), "missing hazards rebuilt")
+	# The repaired state ticks: the old every-cast `str(null)` write is gone.
+	PbRun.tick(state, 0.1)
+	ok(str(state.get("weather", "")) != "<null>", "repair keeps weather a legal id")
+	ok(str(state.get("weather", "")) != "", "repair leaves no empty weather")
+
+	section("save migration: weather never becomes the literal <null>")
+	var played := PbRun.create(4, "coast", 7)
+	PbRun.simulate(played, 12.0)
+	ok(str(played.get("weather", "")) != "<null>",
+		"casting non-weather moves keeps a legal weather id (got %s)" % str(played.get("weather", "")))
+
+	section("save migration: forms object -> array")
+	var obj_forms := {"name": "Old", "stardust": 10, "forms": {"49": true, "53": 1, "0": true, "junk": true}}
+	ok(Save.import_text(JSON.stringify(obj_forms)) == "ok", "object-shaped forms import")
+	var migrated := PbJson.as_array(Save.store.get("forms", []))
+	ok(migrated is Array and migrated.size() == 2, "forms object migrated to 2 ids (got %s)" % str(migrated))
+	ok(migrated.has(49) and migrated.has(53), "forms keeps truthy numeric keys")
+	ok(not migrated.has(0), "forms drops the falsy/zero key")
+
+	section("save migration: forms array stays an array")
+	var arr_forms := {"name": "New", "stardust": 10, "forms": [7, 7, 0, -1, "12"]}
+	ok(Save.import_text(JSON.stringify(arr_forms)) == "ok", "array-shaped forms import")
+	var kept := PbJson.as_array(Save.store.get("forms", []))
+	ok(kept.size() == 2 and kept.has(7) and kept.has(12),
+		"forms array deduped to valid ids (got %s)" % str(kept))
+
+	section("save migration: web league array")
+	var web_league := {"name": "Web", "stardust": 100, "league": [1, 4, 7, 25],
+		"captured": [1, 4, 7, 25]}
+	ok(Save.import_text(JSON.stringify(web_league)) == "ok", "web league-array export imports")
+	ok(int(Save.store.get("league", 0)) == 4, "league array migrated to its count (got %s)" % str(Save.store.get("league")))
+	ok(PbJson.as_array(Save.store.get("forms", [])).is_empty(), "missing forms -> empty array")
+	ok(PbJson.as_array(Save.store.get("captured", [])).size() == 4, "captured array kept")
+	Save.reset(true)
 
 
 # ------------------------------------------------------------------ 6. assets
