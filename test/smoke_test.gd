@@ -34,6 +34,7 @@ func _ready() -> void:
 	_save_flow()
 	_asset_checks()
 	_avatar_fallback_checks()
+	_billboard_scale_checks()
 	_theme_ui_checks()
 	_revive_checks()
 	_danger_golden_checks()
@@ -815,6 +816,73 @@ func _avatar_fallback_checks() -> void:
 	p137.free()
 	ok(int(PbActor.create(1).get("facing", -1)) == 0,
 		"actors spawn facing the camera (PMD row 0), like the web's facing(0,1)")
+
+
+## ------------------------------------------------------- 1c. billboard scale + frame window
+## Regression for "actors are a few stray pixels in the run": 3D materials cannot
+## resolve an AtlasTexture's region (the quad sampled the whole 704x2112 sheet), and
+## the quad was sized off pokemon.json height (~0.7 units) instead of the web's
+## pixel metric (Bl = .074 world units per sheet pixel).
+func _billboard_scale_checks() -> void:
+	section("billboard scale + atlas frame window")
+	var layout := PbVisuals.billboard_layout(1, "idle")
+	var quad := layout["size"] as Vector2
+	ok(quad.y >= 1.5 and quad.y <= 4.0,
+		"PMD idle quad is sheet-sized, not a speck (#1 quad h=%.2f)" % quad.y)
+	var body := float(layout["content_height"])
+	ok(body >= 0.6 and body <= 1.8,
+		"opaque body reads at character scale (#1 body=%.2f units)" % body)
+	ok(float(layout["lift"]) <= quad.y * 0.5,
+		"billboard centre sits below the quad top so the feet reach the ground")
+	# Grounding must account for the empty pixel rows under the body, otherwise the
+	# sprite floats by the frame padding (13px = .96 units for #1).
+	var bounds := PbVisuals.frame_bounds(1, "idle", 1)
+	ok(float(bounds.get("bottom_pad", 0.0)) > 0.0,
+		"frame padding under the body measured (%.0f px)" % float(bounds.get("bottom_pad", 0.0)))
+	var esmall := PbVisuals.billboard_layout(4, "walk", 0.6)
+	ok(float(esmall["content_height"]) >= 0.6,
+		"weak-enemy (scale 0.6) still above 0.6 units (#4 body=%.2f)"
+			% float(esmall["content_height"]))
+	# The material must carry the frame's UV window: UV 0..1 over a QuadMesh samples the
+	# whole sheet when handed a raw AtlasTexture.
+	var avatar := PbVisuals.avatar(1) as MeshInstance3D
+	var mat := avatar.material_override as StandardMaterial3D
+	ok(mat != null and mat.albedo_texture is AtlasTexture, "avatar samples the PMD atlas")
+	if mat != null and mat.albedo_texture is AtlasTexture:
+		var atlas := mat.albedo_texture as AtlasTexture
+		var sheet_size := atlas.atlas.get_size()
+		var want_scale := Vector3(atlas.region.size.x / sheet_size.x,
+			atlas.region.size.y / sheet_size.y, 1.0)
+		ok(is_equal_approx(mat.uv1_scale.x, want_scale.x)
+			and is_equal_approx(mat.uv1_scale.y, want_scale.y),
+			"quad UV window maps the frame, not the full sheet (got %s)" % str(mat.uv1_scale))
+		ok(is_equal_approx(mat.uv1_offset.x, atlas.region.position.x / sheet_size.x)
+			and is_equal_approx(mat.uv1_offset.y, atlas.region.position.y / sheet_size.y),
+			"quad UV window starts at the frame origin (got %s)" % str(mat.uv1_offset))
+	avatar.free()
+	# A plain texture (front/<id>.png) must not inherit the atlas UV window.
+	var plain := StandardMaterial3D.new()
+	PbVisuals.apply_frame_texture(plain, PbVisuals.front_texture(514))
+	ok(plain.uv1_scale == Vector3.ONE and plain.uv1_offset == Vector3.ZERO,
+		"non-atlas frames keep UV 0..1")
+	# Every frame rect we can ask for must land inside the sheet it is cut from.
+	for id in [1, 4, 25, 52, 16]:
+		var size := PbPmd.sheet_size(id)
+		for anim in ["idle", "walk", "attack"]:
+			for facing in [0, 1, 3]:
+				var rect := PbPmd.frame_rect(id, anim, 0.0, facing)
+				var inside := rect.end.x <= size.x and rect.end.y <= size.y and rect.size.x > 0
+				ok(inside, "%d/%s row %d inside the sheet (rect %s, sheet %s)"
+					% [id, anim, facing, str(rect), str(size)])
+	# HUD weather badge: a null/empty weather id must not leak into the pill (the
+	# `«null»` badge under the biome name).
+	var hud := RunHud.new()
+	ok(hud._weather_name("<null>") == "", "null weather id has no name (pill hidden)")
+	ok(hud._weather_name("") == "", "empty weather id has no name (pill hidden)")
+	ok(hud._weather_name("rain") == App.ui("Lluvia"), "rain keeps its label")
+	ok(hud._weather_name("storm") == App.ui("Tormenta eléctrica"),
+		"weather events are named from data/pb/weather.json (got %s)" % hud._weather_name("storm"))
+	hud.free()
 
 
 ## ------------------------------------------------------------------ 7. theme tokens
