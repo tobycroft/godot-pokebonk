@@ -1063,12 +1063,16 @@ static func button_style(accent: String = "yellow", lighten: float = 0.0, presse
 	var c := accent_color(accent, "c")
 	var cd := accent_color(accent, "cd")
 	var s := StyleBoxFlat.new()
-	s.bg_color = mix(c, Color.WHITE, 0.06) if pressed else mix(c, Color.WHITE, 0.14 + lighten)
+	# CSS `.btn` paints a gradient: color-mix(c 82%, white) at the top, c in the
+	# middle, cd at the bottom. A flat box approximates that with c + a 6% white
+	# wash (mix() weights its *first* argument). `lighten` is the .btn:hover
+	# brightness(1.06) bump; :active keeps the same fill and only moves.
+	s.bg_color = mix(c, Color.WHITE, 0.94 - lighten)
 	s.set_corner_radius_all(999)
 	s.corner_detail = 12
 	# .btn box-shadow 0 4px 0; :active collapses it to 0 1px 0 (M-02).
 	s.border_width_bottom = 1 if pressed else 4
-	s.border_color = mix(cd, Color.BLACK, 0.25)
+	s.border_color = mix(cd, Color.BLACK, 0.70)
 	s.shadow_size = 0 if pressed else 8
 	s.shadow_color = css_color("#1a124626", Color(0.1, 0.07, 0.27, 0.15))
 	s.shadow_offset = Vector2(0, 4 if pressed else 8)
