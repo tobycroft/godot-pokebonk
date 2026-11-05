@@ -111,7 +111,9 @@ static func spawn(pool: Dictionary, species_id: int, x: float, z: float, stage: 
 	set_field(pool, "y", index, 0.0)
 	set_field(pool, "hp", index, float(numbers["hp"]))
 	set_field(pool, "maxHp", index, float(numbers["hp"]))
-	set_field(pool, "dmg", index, float(numbers["dmg"]) * float(diff.get("enemyDamage", 1.0)))
+	# `this.dmg[s] = ... * i * ...` (@346928) takes only the director's dmgMult;
+	# `diff.enemyDamage` is applied once, when the player is hurt (@359832).
+	set_field(pool, "dmg", index, float(numbers["dmg"]))
 	set_field(pool, "speed", index, float(numbers["speed"]) * float(diff.get("enemySpeed", 1.0)))
 	set_field(pool, "weight", index, weight)
 	set_field(pool, "xp", index, float(numbers["xp"]))

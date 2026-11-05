@@ -33,6 +33,7 @@ func _ready() -> void:
 	_run_flow()
 	_boss_altar_checks()
 	_spawn_pool_checks()
+	_difficulty_scaling_checks()
 	_save_flow()
 	_save_migration_checks()
 	_asset_checks()
@@ -1852,6 +1853,49 @@ func _spawn_pool_checks() -> void:
 		ok(PbJson.as_array(PbJson.as_dict(run["wildPool"]).get("ids", [])).has(picked),
 			"wild pick #%d comes from the stage pool" % n)
 	PbRng.set_state(saved_rng)
+
+
+# ------------------------------------------------------------------ difficulty
+## Spawn stores the raw director number (@346928) and `diff.enemyDamage` is
+## applied only inside hurt (@359832/@361132), never both.
+func _difficulty_scaling_checks() -> void:
+	section("difficulty scaling: enemyDamage applied once")
+	var species_id := 19  # rattata, a first-stage wild spawn
+	var pool_one := PbEnemies.create_pool()
+	var pool_three := PbEnemies.create_pool()
+	var i1 := PbEnemies.spawn(pool_one, species_id, 0.0, 0.0, 1, {"enemyDamage": 1.0}, "wild")
+	var i3 := PbEnemies.spawn(pool_three, species_id, 0.0, 0.0, 1, {"enemyDamage": 3.0}, "wild")
+	close(float(PbEnemies.get_field(pool_one, "dmg", i1)),
+		float(PbEnemies.get_field(pool_three, "dmg", i3)),
+		"spawn dmg ignores enemyDamage (diff 1 vs 3)")
+	var diff_one := {"enemyDamage": 1.0}
+	var numbers := PbCombat.enemy_numbers(PbData.species(species_id), "wild",
+		PbCombat.hp_mult(1, 0.0, diff_one), PbCombat.dmg_mult(1, 0.0), 1.0,
+		PbCombat.toughness(PbCombat.eff_time(1, 0.0)), PbCombat.speed_mult(1, 0.0))
+	close(float(PbEnemies.get_field(pool_one, "dmg", i1)), float(numbers["dmg"]),
+		"spawn dmg is the raw director number")
+	# contact hit with enemyDamage 3: base * 3, not base * 9
+	var run := PbRun.create(1, "forest", 424242)
+	run["diff"]["enemyDamage"] = 3.0
+	run["diff"]["enemySpeed"] = 1.0
+	var pool: Dictionary = run["enemies"]
+	var player: Dictionary = run["player"]
+	player["x"] = 0.0
+	player["z"] = 0.0
+	player["iframes"] = 0.0
+	PbJson.as_dict(player["stats"])["evasion"] = 0.0
+	var idx := PbEnemies.spawn(pool, species_id, 0.0, 0.0, 1, run["diff"], "wild")
+	var raw := float(PbEnemies.get_field(pool, "dmg", idx))
+	var stats := PbJson.as_dict(player["stats"])
+	var base := PbDamage.incoming_to_player(raw,
+		str(PbEnemies.get_field(pool, "typeA", idx)), PbJson.as_array(player.get("types", [])),
+		stats, false, str(player.get("ability", "")), int(player.get("level", 1)))
+	var want := PbDamage.apply_incoming_floor_cap(base * 3.0, raw,
+		float(player.get("maxHp", 1.0)), 0.0, 0.0)
+	PbRun._tick_enemies(run, 1.0 / 60.0)
+	var got := float(run["stats"]["damageTaken"])
+	ok(absf(got - want) <= 0.001 * maxf(1.0, want),
+		"diff 3 contact hit takes base*3 once (got %.3f want %.3f)" % [got, want])
 
 
 # ------------------------------------------------------------------ weather events
