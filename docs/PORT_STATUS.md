@@ -13,7 +13,7 @@
 当前结果：**465 项断言 0 失败**，`MainMenu / Pokedex / Lab / FusionMachine / SaveManager / Run` 全部零错误启动。
 断言套件在 `test/smoke_test.gd`，其中公式部分不是自证：它比对 `data/pb/golden_values.json`，该文件由
 `tools-re/golden_values.py` 用**独立的 Python 实现**按同样的逆向公式算出（双实现互验）。
-无头模拟对局（`PbRun.simulate`）实测：150 秒内 170 次击杀、等级 18、进入第 2 阶段。
+无头模拟对局（`PbRun.simulate`）实测：约 83 秒阵亡、仍在第 1 阶段（Web 关卡无固定计时，守卫在 600 s 里程碑唤醒；生存曲线仍需对齐）。
 
 操作：`WASD/方向键`移动 · `F`融合 · `P`暂停 · `1-3`选卡 · `Esc`结束本局/返回。
 
