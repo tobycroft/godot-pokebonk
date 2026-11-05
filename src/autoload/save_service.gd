@@ -64,7 +64,7 @@ func base_profile(name: String = "Entrenador") -> Dictionary:
 		"unlocked": [],
 		"league": 1,
 		"starter": 0,
-		"forms": {},
+		"forms": [],
 		"research": {},
 		"captured": [],
 		"seen": [],
@@ -151,6 +151,11 @@ func normalize(p: Variant) -> Dictionary:
 	for key in PbJson.as_dict(incoming.get("settings", {})).keys():
 		out["settings"][key] = incoming["settings"][key]
 	out["lab"] = PbJson.as_dict(incoming.get("lab", {})).duplicate(true)
+	# The web runtime keeps `forms` as an id array (LM() @1652986 `forms:[]`,
+	# unlockForm() @1668955 `.forms.includes/.push`). api-core.js's offline
+	# skeleton says `{}`; older web exports and this port's own early saves can
+	# therefore hold an object. Migrate either shape to the runtime's array.
+	out["forms"] = _forms_array(incoming.get("forms"))
 	out["daily"] = _period()
 	for key in PbJson.as_dict(incoming.get("daily", {})).keys():
 		out["daily"][key] = incoming["daily"][key]
@@ -263,6 +268,26 @@ func apply_actions(actions: Array) -> void:
 				store["biomes"] = _union(store["biomes"], [a.get("id")])
 			_:
 				pass
+
+
+## Web `forms` is an array of species ids. An object-shaped save (api-core.js
+## baseProfile wrote `{}`) is migrated to its keys, dropping false/0 entries and
+## non-numeric keys so a corrupt export cannot poison the dex.
+static func _forms_array(value: Variant) -> Array:
+	var out := []
+	if value is Array:
+		for raw in value:
+			var id := int(raw) if raw != null else 0
+			if id > 0 and not out.has(id):
+				out.append(id)
+		return out
+	if value is Dictionary:
+		for key in value.keys():
+			var id := str(key).to_int()
+			if id > 0 and bool(value[key]) and not out.has(id):
+				out.append(id)
+	out.sort()
+	return out
 
 
 ## `league` is an int in a fresh profile and a starter-id array after the web's
