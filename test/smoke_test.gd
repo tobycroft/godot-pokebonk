@@ -2193,6 +2193,54 @@ func _menu_layout_checks() -> void:
 	add_child(menu)
 	for i in 4:
 		await get_tree().process_frame
+	var clipped: Array[String] = _menu_clipped_labels(menu)
+	ok(clipped.is_empty(), "no clipped menu text at 1024x600 %s" % str(clipped))
+	var k: float = float(menu.get("_mm_scale"))
+	ok(k > 1.0, "menu lays out in CSS px then scales to the canvas (k=%.2f)" % k)
+	var pt: Label = menu.get("_play_title")
+	var pt_fs := pt.get_theme_font_size("font_size")
+	var pt_tw := pt.get_theme_font("font").get_string_size(pt.text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, pt_fs).x
+	ok(pt_tw <= pt.size.x + 0.5,
+		"play title fits its column at 1024x600 (%.0f in %.0f)" % [pt_tw, pt.size.x])
+	ok(pt_fs < 34, "play title shrinks instead of overflowing at 1024x600 (fs=%d)" % pt_fs)
+
+	# `.mm` sits on the live canvas in the web; the port keeps the Node3D diorama
+	# behind the Screen and the `.mm:before` shade above it.
+	var diorama := menu.get_node_or_null("MenuDiorama") as Node3D
+	ok(diorama != null, "menu background diorama exists")
+	if diorama != null:
+		var cam := diorama.get_node_or_null("MenuCamera") as Camera3D
+		ok(cam != null and cam.current, "diorama camera is the active 3D camera")
+	var flat := menu.get_node_or_null("Screen/Backdrop") as CanvasItem
+	ok(flat != null and not flat.visible,
+		"flat backdrop is hidden behind the diorama")
+	var shade := menu.get_node_or_null("Screen/MenuShade") as Control
+	ok(shade != null, "menu shade plate (`.mm:before`) exists")
+	var vp := menu.get_viewport_rect().size
+	if shade != null:
+		ok(shade.size.x >= vp.x - 1.0 and shade.size.y >= vp.y - 1.0,
+			"shade covers 1024x600 (%.0fx%.0f of %.0fx%.0f)" % [shade.size.x, shade.size.y, vp.x, vp.y])
+
+	# Same guarantees after a resize, since the web plate is viewport-anchored.
+	get_window().size = Vector2i(1920, 1080)
+	for i in 3:
+		await get_tree().process_frame
+	var vp2 := menu.get_viewport_rect().size
+	if shade != null:
+		ok(shade.size.x >= vp2.x - 1.0 and shade.size.y >= vp2.y - 1.0,
+			"shade covers 1920x1080 after resize (%.0fx%.0f of %.0fx%.0f)" % [shade.size.x, shade.size.y, vp2.x, vp2.y])
+	var clipped2: Array[String] = _menu_clipped_labels(menu)
+	ok(clipped2.is_empty(), "no clipped menu text at 1920x1080 %s" % str(clipped2))
+	if diorama != null:
+		var cam2 := diorama.get_node_or_null("MenuCamera") as Camera3D
+		ok(cam2 != null and cam2.current, "diorama camera stays active after resize")
+	menu.queue_free()
+	get_window().size = Vector2i(1280, 720)
+
+
+## Every unwrapped label must fit its laid-out rect; wrapped text must not be truncated.
+func _menu_clipped_labels(menu: Node) -> Array[String]:
 	var clipped: Array[String] = []
 	for node in _menu_labels(menu):
 		var l: Label = node
@@ -2214,18 +2262,7 @@ func _menu_layout_checks() -> void:
 				l.size.x, fs, l.max_lines_visible if l.max_lines_visible > 0 else -1, opts)
 			if need.y > shown.y + 0.5:
 				clipped.append("%s wrap" % txt.substr(0, 12))
-	ok(clipped.is_empty(), "no clipped menu text at 1024x600 %s" % str(clipped))
-	var k: float = float(menu.get("_mm_scale"))
-	ok(k > 1.0, "menu lays out in CSS px then scales to the canvas (k=%.2f)" % k)
-	var pt: Label = menu.get("_play_title")
-	var pt_fs := pt.get_theme_font_size("font_size")
-	var pt_tw := pt.get_theme_font("font").get_string_size(pt.text,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, pt_fs).x
-	ok(pt_tw <= pt.size.x + 0.5,
-		"play title fits its column at 1024x600 (%.0f in %.0f)" % [pt_tw, pt.size.x])
-	ok(pt_fs < 34, "play title shrinks instead of overflowing at 1024x600 (fs=%d)" % pt_fs)
-	menu.queue_free()
-	get_window().size = Vector2i(1280, 720)
+	return clipped
 
 
 func _menu_labels(root: Node) -> Array:
