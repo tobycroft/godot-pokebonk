@@ -2,17 +2,26 @@ class_name PbVisuals
 extends RefCounted
 ## Builds the visuals for a species: 3D avatar and 2D textures.
 ##
-## The web build streams a .glb per species from the CDN (assets/models/<key>.glb).
-## Those files are absent from pokebonk-web and unreachable here (see
-## data/pb/missing_remote_assets.json), so avatars fall back in three steps --
-## and each step is deliberate rather than a missing-resource error:
+## The web build renders species as PMD billboards; .glb is reserved for props,
+## balls and terminals. Per-species models were never shipped (see
+## data/pb/missing_remote_assets.json), so avatars fall back in four steps --
+## each step is deliberate rather than a missing-resource error:
 ##
-##   1. res://assets/models/<key>.glb        (real model, used as soon as it exists)
+##   1. res://assets/models/<key>.glb, but ONLY for keys listed in
+##      SPECIES_MODEL_KEYS. assets/models/ also holds world props (61 shipped
+##      .glb: terminals, balls, altars...), and some prop names collide with
+##      species keys (e.g. "porygon" is the event terminal, not #137). Never
+##      infer a species model from the filename alone.
 ##   2. billboard quad textured with the species' PMD sheet frame (shipped)
 ##   3. billboard quad textured with the species' static front art
 ##      (assets/front/<id>.png) -- the web build's `front/<id>.png` fallback for
 ##      species that have no PMD anims; UI portraits are never used here
 ##   4. tinted box from pokemon.json color/height/weight (always works)
+##
+## SPECIES_MODEL_KEYS is therefore empty; add a key only when a real per-species
+## model actually ships.
+
+const SPECIES_MODEL_KEYS := {}   # species key -> true; empty by design
 
 const COLOR_NAMES := {
 	"black": 0x2b2b2b, "blue": 0x4a90d9, "brown": 0x8b5a2b, "gray": 0x9aa0a6,
@@ -87,7 +96,7 @@ static func avatar(species_id: int, key: String = "") -> Node3D:
 	var species := PbData.species(species_id)
 	var model_key := key if not key.is_empty() else str(species.get("key", ""))
 	var glb_path := "res://assets/models/%s.glb" % model_key
-	if ResourceLoader.exists(glb_path):
+	if SPECIES_MODEL_KEYS.has(model_key) and ResourceLoader.exists(glb_path):
 		var packed = load(glb_path)
 		if packed is PackedScene:
 			var instance: Node = packed.instantiate()

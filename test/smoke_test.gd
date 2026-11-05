@@ -720,6 +720,13 @@ func _avatar_fallback_checks() -> void:
 			"front fallback is the 96x96 web art (got %dx%d)" % [f_front.get_width(), f_front.get_height()])
 	ok(PbVisuals.frame_texture(52, "idle", 0.0, 0) != null,
 		"Meowth shop NPC keeps its PMD idle sheet")
+	# assets/models/porygon.glb is the Porygon *event terminal* (Cables/Terminal/
+	# Screen), not species #137. The avatar glb branch must be whitelist-only, so
+	# Porygon resolves to its PMD billboard and never to that prop scene.
+	var p137 := PbVisuals.avatar(137)
+	var k137 := str(p137.get_meta("avatar_kind", ""))
+	ok(k137 == "pmd-billboard", "species 137 resolves to a PMD billboard, not the porygon prop (got %s)" % k137)
+	p137.free()
 	ok(int(PbActor.create(1).get("facing", -1)) == 0,
 		"actors spawn facing the camera (PMD row 0), like the web's facing(0,1)")
 

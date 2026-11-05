@@ -14,12 +14,12 @@
  "entries": [
   {
    "id": "species_models",
-   "web_path": "assets/models/<speciesKey>.glb (bundle: dn(`models/${e}.glb`))",
+   "web_path": "assets/models/<speciesKey>.glb (assumed; NOT actually requested for species by the bundle)",
    "count": 151,
-   "status": "open",
-   "substitute": "PbVisuals.build_avatar(): real .glb when present, otherwise a billboard quad textured with assets/pmd/<dex>.png, otherwise a BoxMesh tinted from pokemon.json color/height/weight.",
-   "todo": "Drop the official .glb files into assets/models/<key>.glb and they are picked up automatically -- no code change required.",
-   "resolution": "Still no per-species .glb upstream. The mirror did bring 61 real prop/arena models (assets/models/*.glb), which replace the corrupted 17 the web repo shipped; PbVisuals keeps its .glb -> PMD billboard -> tinted box fallback chain for species."
+   "status": "not-needed",
+   "substitute": "PbVisuals.avatar(): PMD sheet billboard from data/sprites.json, then assets/front/<dex>.png, then a BoxMesh tinted from pokemon.json color/height/weight. The .glb branch is whitelist-only (PbVisuals.SPECIES_MODEL_KEYS) because assets/models/*.glb are props/balls/terminals, not species models.",
+   "todo": "None. Do not add prop glb names to SPECIES_MODEL_KEYS; only add a key when a real per-species model ships.",
+   "resolution": "Closed 2026-11-05: research confirmed the web build renders species as PMD billboards and reserves .glb for props/balls/terminals, so per-species .glb is neither present nor required. assets/models/porygon.glb is the Porygon event terminal (Cables/Terminal/Screen), not species 137; the avatar loader no longer infers models from species keys."
   },
   {
    "id": "species_cries",
