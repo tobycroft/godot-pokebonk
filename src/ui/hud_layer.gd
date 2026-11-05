@@ -83,12 +83,22 @@ func _build_top() -> void:
 	var wbox := UI.hbox(3)
 	wbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	weather.add_child(wbox)
-	var wlabel := UI.label("", 11, PbTheme.ink_muted())
+	# Web prepends a 16px elemental badge before the name (`JE(type,16)`).
+	var wicon := TextureRect.new()
+	wicon.custom_minimum_size = Vector2(16, 16)
+	wicon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	wicon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	wicon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	wicon.visible = false
+	wbox.add_child(wicon)
+	var wlabel := UI.label("", 11, _weather_ink())
+	wlabel.add_theme_font_override("font", PbTheme.font("body_bold"))
 	wbox.add_child(wlabel)
 	weather.add_theme_stylebox_override("panel", PbTheme.stylebox(".ht-weather"))
 	weather.visible = false
 	row.add_child(weather)
 	_els["weather"] = weather
+	_els["weather_icon"] = wicon
 	_els["weather_label"] = wlabel
 
 	# ht-c: the middle grid track (.ht-c margin:-4px 0 -80px in CSS). The slot is
@@ -678,7 +688,8 @@ func sync(state: Dictionary, dt: float) -> void:
 	(_els["biome"] as Label).text = _biome_name(str(state.get("biome", "forest")))
 	_sync_pips(stage)
 	var weather := str(state.get("weather", "clear"))
-	var wname := _weather_name(weather)
+	var event_kind := str(PbJson.as_dict(state.get("weatherEvent", {})).get("kind", ""))
+	var wname := _weather_name(weather, event_kind == weather)
 	var wpill := _els["weather"] as PanelContainer
 	# Only show the pill for a weather we can actually name. A null/unknown id
 	# used to leak straight into the label (`<null>`), which is what showed as a
@@ -686,6 +697,14 @@ func sync(state: Dictionary, dt: float) -> void:
 	wpill.visible = weather != "clear" and not wname.is_empty()
 	if wpill.visible:
 		(_els["weather_label"] as Label).text = wname
+	var wicon := _els["weather_icon"] as TextureRect
+	var icon_type := _weather_icon_type(weather) if wpill.visible else ""
+	if icon_type != str(wicon.get_meta("type", "")):
+		wicon.set_meta("type", icon_type)
+		var icon_path := "res://assets/ui/types/%s.png" % icon_type
+		wicon.texture = load(icon_path) if not icon_type.is_empty() \
+			and ResourceLoader.exists(icon_path) else null
+	wicon.visible = wicon.texture != null
 
 	# wallet + kills
 	(_els["gold"] as Label).text = UI.fmt_num(float(state.get("gold", 0.0)))
@@ -785,15 +804,33 @@ func _biome_name(id: String) -> String:
 ## Naming a weather id. Unknown or empty ids (a resumed run can carry a null)
 ## resolve to "" so the HUD hides the pill instead of echoing the raw value.
 ## Weather *events* (storm/eclipse/meowth, PbWeatherEvents) also write into
-## `state.weather`, so they are named from data/pb/weather.json.
-func _weather_name(key: String) -> String:
-	var names := {"rain": App.ui("Lluvia"), "sun": App.ui("Sol"), "sand": App.ui("Tormenta de arena"),
-		"hail": App.ui("Granizo"), "fog": App.ui("Niebla"), "ash": App.ui("Ceniza")}
-	if names.has(key):
-		return str(names[key])
+## `state.weather`, so they are named from data/pb/weather.json. `fog` exists
+## in both tables, hence `event_active` picks the event name while it runs.
+func _weather_name(key: String, event_active: bool = false) -> String:
 	var event := PbJson.as_dict(PbWeatherEvents.table().get(key))
 	var event_name := str(event.get("name", ""))
+	if event_active and not event_name.is_empty():
+		return App.ui(event_name)
+	# Base names from the web's weather table (`pr`): sun/sand/hail/ash are
+	# spelled out there, not the shorter move-weather labels.
+	var names := {"rain": App.ui("Lluvia"), "sun": App.ui("Sol abrasador"),
+		"sand": App.ui("Tormenta de arena"), "hail": App.ui("Granizo"),
+		"fog": App.ui("Niebla"), "ash": App.ui("Lluvia de ceniza")}
+	if names.has(key):
+		return str(names[key])
 	return App.ui(event_name) if not event_name.is_empty() else ""
+
+
+## Web `.ht-weather{color:var(--blue-t,#2a6ad0)}` (dark theme recolours it).
+func _weather_ink() -> Color:
+	return PbTheme.css_color(PbTheme.v("--blue-t", "#2a6ad0"), Color("#2a6ad0"))
+
+
+## Web maps base weather to an element icon (`n={rain:'water',sun:'fire',
+## sand:'rock',hail:'ice',fog:'ghost',ash:'fire'}`); events have none.
+func _weather_icon_type(key: String) -> String:
+	return {"rain": "water", "sun": "fire", "sand": "rock", "hail": "ice",
+		"fog": "ghost", "ash": "fire"}.get(key, "")
 
 
 func _sync_pips(stage: int) -> void:
