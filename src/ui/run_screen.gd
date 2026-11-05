@@ -24,6 +24,7 @@ var _hazard_view: PbHazardView
 var _sun: DirectionalLight3D
 var _enemy_nodes: Array[MeshInstance3D] = []
 var _orb_nodes: Array[MeshInstance3D] = []
+var _bolt_nodes: Array[MeshInstance3D] = []
 const HudFx = preload("res://src/ui/hud_fx.gd")
 
 var _hud: RunHud
@@ -134,6 +135,23 @@ func _build_world() -> void:
 		o.visible = false
 		add_child(o)
 		_orb_nodes.append(o)
+	# Storm event telegraphs: flat yellow discs where bolts are about to land.
+	for i in 6:
+		var b := MeshInstance3D.new()
+		var disc := CylinderMesh.new()
+		disc.top_radius = 3.0
+		disc.bottom_radius = 3.0
+		disc.height = 0.06
+		disc.radial_segments = 32
+		var bm := StandardMaterial3D.new()
+		bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		bm.albedo_color = Color(1.0, 0.85, 0.22, 0.5)
+		b.mesh = disc
+		b.material_override = bm
+		b.visible = false
+		add_child(b)
+		_bolt_nodes.append(b)
 	# Meowth shop NPC (species 52): a billboard like the enemies, shown only while
 	# PbRun's meowth timer has it on the map.
 	var meowth := MeshInstance3D.new()
@@ -461,6 +479,21 @@ func _ground_y(x: float, z: float) -> float:
 	return _terrain.surface(x, z)
 
 
+## Storm event telegraphs: one yellow disc per queued bolt, faded by its delay.
+func _sync_bolts() -> void:
+	var marks: Array = PbWeatherEvents.markers(_run)
+	for i in _bolt_nodes.size():
+		var node := _bolt_nodes[i]
+		if i >= marks.size():
+			node.visible = false
+			continue
+		var mark := PbJson.as_dict(marks[i])
+		node.visible = true
+		var mx := float(mark.get("x", 0.0))
+		var mz := float(mark.get("z", 0.0))
+		node.position = Vector3(mx, _ground_y(mx, mz) + 0.12, mz)
+
+
 func _process(delta: float) -> void:
 	if _run.is_empty():
 		return
@@ -680,6 +713,15 @@ func _render(dt: float) -> void:
 	_player_node.position = Vector3(px, py, pz)
 	if _view != null:
 		_view.tick(dt, Vector3(px, py, pz), _camera)
+		# Map weather events blend their `look` over the biome look: fog near/far,
+		# sky colours, sun tint + intensity, eclipse darkening.
+		_view.apply_weather_look(PbWeatherEvents.look_overrides(_run),
+			PbWeatherEvents.look_weight(_run))
+		var look: Dictionary = _view.current_look()
+		var flash := PbWeatherEvents.flash(_run)
+		_sun.light_energy = clampf(0.7 * float(look.get("light", 1.0)) + flash * 1.8, 0.12, 2.4)
+		_sun.light_color = PbWorldView.color_from_int(int(look.get("sun", 16773590)))
+		_sync_bolts()
 	if _hazard_view != null:
 		_hazard_view.sync(_run, _terrain)
 	if _player_node.get_child_count() == 0:
@@ -755,6 +797,11 @@ func _render(dt: float) -> void:
 				if maxhp > 0.0:
 					hp_ratio = clampf(float(PbEnemies.get_field(pool, "hp", i)) / maxhp, 0.0, 1.0)
 				mat.albedo_color = Color(1.0, 0.35 + 0.65 * hp_ratio, 0.35 + 0.65 * hp_ratio)
+				# Golden Meowth + eclipse shiny reads through the billboard tint.
+				if PbWeatherEvents.is_event_meowth(_run, i):
+					mat.albedo_color = Color(1.45, 1.12, 0.4)
+				elif PbEnemies.flags(pool, i) & int(PbEnemies.Flag["Shiny"]) != 0:
+					mat.albedo_color = Color(1.35, 1.1, 1.6)
 			else:
 				mat.albedo_color = PbVisuals.color_for(PbData.species(species))
 	for i in range(used, ENEMY_POOL):
@@ -770,6 +817,11 @@ func _render(dt: float) -> void:
 		orb_used += 1
 		node2.visible = true
 		node2.position = Vector3(float(orb["x"]), _ground_y(float(orb["x"]), float(orb["z"])) + 0.4, float(orb["z"]))
+		var om := node2.material_override as StandardMaterial3D
+		if om != null:
+			var is_coin := str(orb.get("kind", "xp")) == "coin"
+			om.albedo_color = Color(1.0, 0.8, 0.2) if is_coin else Color(0.45, 1.0, 0.55)
+			om.emission = Color(1.0, 0.75, 0.15) if is_coin else Color(0.35, 0.9, 0.45)
 	for i in range(orb_used, _orb_nodes.size()):
 		_orb_nodes[i].visible = false
 

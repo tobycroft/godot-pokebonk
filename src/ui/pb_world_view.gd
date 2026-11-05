@@ -549,6 +549,24 @@ func blend_look(weight: float) -> void:
 	apply_look()
 
 
+## Weather-event look: mix the biome look with an explicit weight so the
+## event's k ramp (and its fade-out) drives fog density / eclipse darkness.
+func apply_weather_look(overrides: Dictionary, weight: float) -> void:
+	var base := _look_from_biome()
+	var target := base.duplicate()
+	for key in overrides:
+		target[key] = overrides[key]
+	var w := clampf(weight, 0.0, 1.0)
+	for key in base:
+		if target.has(key):
+			_look[key] = lerpf(float(base[key]), float(target[key]), w)
+	apply_look()
+
+
+func current_look() -> Dictionary:
+	return _look.duplicate()
+
+
 func apply_look() -> void:
 	if terrain_mat == null:
 		return
