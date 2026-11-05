@@ -162,7 +162,8 @@ func _build_world() -> void:
 		add_child(b)
 		_bolt_nodes.append(b)
 	# Meowth shop NPC (species 52): a billboard like the enemies, shown only while
-	# PbRun's meowth timer has it on the map.
+	# PbRun's meowth timer has it on the map. Use its PMD idle sheet (full body)
+	# rather than the 40x40 UI portrait, which is a face crop blown up 1.8m tall.
 	var meowth := MeshInstance3D.new()
 	var meowth_quad := QuadMesh.new()
 	meowth_quad.size = Vector2(1.8, 1.8)
@@ -171,7 +172,10 @@ func _build_world() -> void:
 	meowth_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	meowth_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	meowth_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	meowth_mat.albedo_texture = PbVisuals.front_texture(52)
+	var meowth_tex := PbVisuals.frame_texture(52, "idle", 0.0, 0)
+	if meowth_tex == null:
+		meowth_tex = PbVisuals.front_texture(52)
+	meowth_mat.albedo_texture = meowth_tex
 	meowth.mesh = meowth_quad
 	meowth.material_override = meowth_mat
 	meowth.visible = false
@@ -816,7 +820,7 @@ func _render(dt: float) -> void:
 			var moved := absf(px - _last_px) > 1e-4 or absf(pz - _last_pz) > 1e-4
 			var anim := "walk" if moved else "idle"
 			var tex := PbVisuals.frame_texture(int(player.get("species_id", 1)),
-				str(anim), _time, int(player.get("facing", 2)))
+				str(anim), _time, int(player.get("facing", 0)))
 			var mat := (node as MeshInstance3D).material_override as StandardMaterial3D
 			if mat != null and tex != null:
 				mat.albedo_texture = tex

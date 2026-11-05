@@ -9,9 +9,9 @@ extends RefCounted
 ##
 ##   1. res://assets/models/<key>.glb        (real model, used as soon as it exists)
 ##   2. billboard quad textured with the species' PMD sheet frame (shipped)
-##   3. billboard quad textured with the species' static portrait
-##      (assets/portraits/<id>.png) -- mirrors the web build's `front/<id>.png`
-##      fallback for species that have no PMD anims
+##   3. billboard quad textured with the species' static front art
+##      (assets/front/<id>.png) -- the web build's `front/<id>.png` fallback for
+##      species that have no PMD anims; UI portraits are never used here
 ##   4. tinted box from pokemon.json color/height/weight (always works)
 
 const COLOR_NAMES := {
@@ -65,19 +65,20 @@ static func idle_frame_texture(species_id: int) -> Texture2D:
 	return frame_texture(species_id, "idle", 0.0, 1)
 
 
-## A Node3D representing the species in the arena.
+## Static "front" art for species with no PMD animation.
+## Priority matches the web build: its `front/<id>.png` fallback is the shipped
+## assets/front/<id>.png. The 40x40 assets/portraits crops are UI icons and must
+## never be used as a billboard texture while the front art exists, so they are
+## only the last resort here.
 static func front_texture(species_id: int) -> Texture2D:
-	## The web build falls back to `front/<id>.png` for species with no PMD anims;
-	## this port ships that same static art as assets/portraits/<id>.png, and the
-	## remaining 54 species carry `fallback: "front/<id>.png"` in sprites.json.
-	var p := "res://assets/portraits/%d.png" % species_id
-	if ResourceLoader.exists(p):
-		return load(p)
 	var fallback := str(PbData.pmd_meta(species_id).get("fallback", ""))
 	if not fallback.is_empty():
 		var alt := "res://assets/%s" % fallback
 		if ResourceLoader.exists(alt):
 			return load(alt)
+	var p := "res://assets/portraits/%d.png" % species_id
+	if ResourceLoader.exists(p):
+		return load(p)
 	return null
 
 

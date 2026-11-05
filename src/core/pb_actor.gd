@@ -50,7 +50,9 @@ static func create(species_id: int, lab_deltas: Dictionary = {}, level: int = 1)
 		"stats": {},
 		"x": 0.0,
 		"z": 0.0,
-		"facing": 2,
+		# Web actors spawn facing (0,1) = towards the start camera; PMD row 0 is
+		# the matching "down/front" frame (bundle @835172).
+		"facing": 0,
 		"iframes": 0.0,
 		"noHitT": 0.0,
 		"pendingLevels": 0,
