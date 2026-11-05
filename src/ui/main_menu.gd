@@ -40,7 +40,6 @@ var _starter := 4
 var _mm: Control
 var _top_row_ctrl: HBoxContainer
 var _left_area: Control
-var _left_scroll: ScrollContainer
 var _left_col: VBoxContainer
 var _brand: Control
 var _logo_node: Control
@@ -57,6 +56,7 @@ var _tiles_row: HBoxContainer
 var _small_row: HBoxContainer
 var _season_wrap: Control
 var _season_card: PanelContainer
+var _season_body: VBoxContainer
 var _season_box: VBoxContainer
 var _footer: VBoxContainer
 var _legal: Label
@@ -66,7 +66,11 @@ var _tile_store: Array = []
 var _anim_items: Array = []
 var _anim_i := 0
 var _compact := false
-var _viewport := Vector2(1280, 720)
+var _viewport := Vector2(1280, 720)  # canvas px (stretched root viewport)
+var _css := Vector2(1280, 720)       # layout px: the web's CSS viewport
+var _mm_scale := 1.0
+var _play_title_w := 142.0
+var _tile_h := 95.0
 
 
 func _ready() -> void:
@@ -78,6 +82,8 @@ func _ready() -> void:
 	_mm.name = "MM"
 	root.add_child(_mm)
 	UI.fill(_mm)
+	# `_mm` lays out in CSS px and is scaled to the canvas in `_on_resized`.
+	_mm.set_anchors_preset(Control.PRESET_TOP_LEFT)
 
 	_build_top()
 	_build_left()
@@ -138,14 +144,42 @@ func _unhandled_input(event: InputEvent) -> void:
 ## Re-applies the `.mm` clamps and the `@media (max-height:760px)` compact set.
 func _on_resized() -> void:
 	_viewport = get_viewport_rect().size
-	var vw := _viewport.x
-	var vh := _viewport.y
+	# `.mm` is authored in CSS px (vw/vh/dvh at 1x). The project stretches a
+	# 1280x720 canvas, so lay the menu out in the real window's CSS px and
+	# scale it once: at 1920x1080 the column stays 520 CSS px like the web
+	# instead of growing to 780 canvas px.
+	var css := Vector2(get_window().size)
+	if css.x < 1.0 or css.y < 1.0:
+		css = _viewport
+	var k := _viewport.x / css.x
+	if not is_finite(k) or k <= 0.0:
+		k = 1.0
+	_css = css
+	_mm_scale = k
+	_mm.scale = Vector2(k, k)
+	_mm.size = css
+
+	var vw := css.x
+	var vh := css.y
 	_compact = vh <= 760.0
 
 	var gutter := PbTheme.gutter(vw)                      # clamp(22,5vw,84)
 	var mm_w := minf(520.0, vw - 2.0 * gutter)           # --mm-w
+	# The mobile/portrait restack starts at 860px; above it the season column
+	# stays visible. Below 1100px the column and the season plate shrink.
+	var season_w := clampf(26.0 * vw / 100.0, 340.0, 400.0)
+	var season_inset := clampf(3.0 * vw / 100.0, 22.0, 56.0)
+	if vw <= 860.0:
+		mm_w = minf(560.0, vw - 2.0 * gutter)
+		season_w = minf(280.0, 0.36 * vw)
+	elif vw <= 1100.0:
+		mm_w = minf(480.0, 0.56 * vw)
+		season_w = minf(320.0, 0.34 * vw)
+		season_inset = 20.0
+	# `.mm-left .logo.hero .logo-word`: clamp(48px, min(6vw,10vh), 88px),
+	# compact clamp(48px, 9vh, 70px). (The 9.5vw/156px hero rule is overridden.)
 	var brand_fs := clampf(48.0, 9.0 * vh / 100.0, 70.0) if _compact \
-		else clampf(72.0, 9.5 * vw / 100.0, 156.0)
+		else clampf(48.0, minf(6.0 * vw / 100.0, 10.0 * vh / 100.0), 88.0)
 
 	# Top bar: absolute top:18 left:22 right:22.
 	_top_row_ctrl.offset_left = 22.0
@@ -153,32 +187,63 @@ func _on_resized() -> void:
 	_top_row_ctrl.offset_top = 18.0
 	_top_row_ctrl.offset_bottom = 18.0
 
-	# Left column area, centred like top:52% / translateY(-50%).
-	_left_area.offset_left = gutter
-	_left_area.offset_right = gutter + mm_w
-	_left_area.offset_top = 84.0
-	_left_area.offset_bottom = -46.0
-	_left_col.custom_minimum_size = Vector2(mm_w, 0)
-	_left_col.add_theme_constant_override("separation", 12 if _compact else 18)
-
+	# Fill the nav/tiles first: their heights feed the column's minimum size
+	# used by the fit check below.
 	_layout_brand(brand_fs, mm_w)
+	_left_col.add_theme_constant_override("separation", 12 if _compact else 18)
 	_nav_box.add_theme_constant_override("separation", 10 if _compact else 12)
 	_modes_row.custom_minimum_size.y = 100.0 if _compact \
 		else clampf(14.0 * vh / 100.0, 100.0, 124.0)
 	_today_row.custom_minimum_size.y = 64.0 if _compact else 72.0
 	_layout_tiles(mm_w)
+	# `.mm-item.play` text column: play width minus margins/icon/partner/gaps.
+	_play_title_w = mm_w - 172.0 - 10.0 - 30.0 - 70.0 - 16.0 - 64.0 - 16.0
+	_fit_play_title()
+
+	# Left column: `top:52%; translateY(-50%)`, but kept inside the band between
+	# the top bar and the footer so the minis never sit on top of the hints.
+	# On very short windows the port-only key-hint row hides (the web has none).
+	_hint_row.visible = vh >= 660.0
+	var footer_top := vh - (92.0 if _hint_row.visible else 54.0)
+	var band_top := 84.0
+	# Sum the parts directly: container minimums are one frame stale after a
+	# theme font-size override, which used to under-measure and skip the fit.
+	var nav_sep := 10.0 if _compact else 12.0
+	var need_h := _brand.custom_minimum_size.y \
+		+ float(_left_col.get_theme_constant("separation")) \
+		+ _modes_row.custom_minimum_size.y + nav_sep \
+		+ _today_row.custom_minimum_size.y + nav_sep \
+		+ _tile_h + nav_sep + 44.0
+	var fit := minf(1.0, maxf(1.0, footer_top - band_top) / need_h)
+	var shown_h := need_h * fit
+	var center := clampf(0.52 * vh, band_top + shown_h * 0.5, footer_top - shown_h * 0.5)
+	_left_area.offset_left = gutter
+	_left_area.offset_right = gutter + mm_w
+	_left_area.offset_top = 2.0 * center - vh
+	_left_area.offset_bottom = 0.0
+	_left_col.custom_minimum_size = Vector2(mm_w, 0)
+	_left_col.pivot_offset = Vector2(mm_w, need_h) * 0.5
+	_left_col.scale = Vector2(fit, fit)
 
 	# Season column: right:clamp(22,3vw,56), width:clamp(340,26vw,400),
-	# max-height:min(640,100dvh - 170).
-	var season_w := clampf(26.0 * vw / 100.0, 340.0, 400.0)
-	var season_inset := clampf(3.0 * vw / 100.0, 22.0, 56.0)
-	var season_cap := minf(640.0, vh - 170.0)
+	# max-height:min(640,100dvh - 170), top:52%. <=1100px: 320px / right 20.
+	# The cap is a max-height, not a fixed height: let the plate hug its content
+	# (the web does) and scroll internally only when it exceeds the cap.
+	var season_cap := minf(640.0, minf(vh - 170.0, footer_top - 103.0))
+	_season_card.custom_minimum_size = Vector2(season_w, 0)
+	# The inner scroll reports a 0 minimum height, so add the body's natural
+	# height explicitly to get the plate's content height before capping it.
+	var season_h := clampf(_season_card.get_combined_minimum_size().y
+		+ _season_body.get_combined_minimum_size().y, 220.0, season_cap)
+	var season_center := clampf(0.52 * vh, 103.0 + season_h * 0.5,
+		footer_top - season_h * 0.5) / vh
+	_season_wrap.anchor_top = season_center
+	_season_wrap.anchor_bottom = season_center
 	_season_wrap.offset_left = -(season_w + season_inset)
 	_season_wrap.offset_right = -season_inset
-	_season_wrap.offset_top = -season_cap * 0.5
-	_season_wrap.offset_bottom = season_cap * 0.5
-	_season_card.custom_minimum_size = Vector2(season_w, 0)
-	_season_wrap.visible = vw >= 1000.0
+	_season_wrap.offset_top = -season_h * 0.5
+	_season_wrap.offset_bottom = season_h * 0.5
+	_season_wrap.visible = vw > 860.0
 
 	# `.mm-foot{position:absolute;bottom:10px;left:0;right:0}`.
 	_footer.offset_left = 0.0
@@ -196,10 +261,17 @@ func _layout_brand(fs: float, mm_w: float) -> void:
 		label.add_theme_constant_override("shadow_offset_y", 7)
 	var sz1 := _brand_poke.get_combined_minimum_size()
 	var sz2 := _brand_bonk.get_combined_minimum_size()
+	# Label minimums exclude the outline stroke; reserve it on the right of the
+	# first half, then tuck the second half back under the shared 4px stroke so
+	# "Poké" + "Bonk" read as one word (the web only adds letter-spacing:1px).
+	sz1.x += 8.0
+	sz2.x += 8.0
+	_brand_poke.size = sz1
+	_brand_bonk.size = sz2
 	_brand_poke.position = Vector2.ZERO
-	_brand_bonk.position = Vector2(sz1.x, 0.0)
+	_brand_bonk.position = Vector2(sz1.x - 7.0, 0.0)
 	var word_h := maxf(sz1.y, sz2.y)
-	var word_w := sz1.x + sz2.x
+	var word_w := sz1.x + sz2.x - 7.0
 	_brand_word.position = Vector2.ZERO
 	_brand_word.size = Vector2(word_w, word_h)
 	_brand_word.pivot_offset = _brand_word.size * 0.5
@@ -210,9 +282,14 @@ func _layout_brand(fs: float, mm_w: float) -> void:
 	_brand_ball.pivot_offset = _brand_ball.size * 0.5
 	_logo_node.size = Vector2(word_w, word_h)
 	_brand_ver.reset_size()
-	_brand_ver.position = Vector2(8.0, word_h - 2.0)
+	# `.logo>.logo-ver{top:54%;left:calc(100% + 12px);translateY(-50%)rotate(-3deg)}`
+	# -- desktop keeps the version capsule beside the wordmark, vertically centred.
+	# (The below-left placement only applies at <=700px, where the menu restacks.)
+	var ver_h := _brand_ver.size.y
+	_brand_ver.position = Vector2(word_w + 12.0, word_h * 0.54 - ver_h * 0.5)
 	_brand_ver.pivot_offset = _brand_ver.size * 0.5
-	_brand.custom_minimum_size = Vector2(mm_w, word_h + 22.0)
+	_brand_ver.rotation = deg_to_rad(-3.0)
+	_brand.custom_minimum_size = Vector2(mm_w, word_h + 14.0)
 
 
 ## `.mm-item.tile` padding/icon/font set: title size = min(14.5, width / (n * .66)).
@@ -233,6 +310,20 @@ func _layout_tiles(mm_w: float) -> void:
 		title.add_theme_font_size_override("font_size", font)
 		var tile: Control = rec["tile"]
 		tile.custom_minimum_size.y = float(pad_top + icon_px + 3 + int(font * 1.20) + 3 + 14 + pad_bottom)
+		_tile_h = tile.custom_minimum_size.y
+
+
+## `b{font-size:clamp(34px,4.6vh,42px)}` -- CJK titles are wider than "Jugar",
+## so shrink to the available text column instead of ellipsizing.
+func _fit_play_title() -> void:
+	if _play_title == null:
+		return
+	var fs := clampf(34.0, 4.6 * _css.y / 100.0, 42.0)
+	var font := PbTheme.font("title")
+	while fs > 18.0 and font.get_string_size(_play_title.text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, int(fs)).x > _play_title_w:
+		fs -= 1.0
+	_play_title.add_theme_font_size_override("font_size", int(fs))
 
 
 # ------------------------------------------------------------------- header
@@ -244,8 +335,13 @@ func _build_top() -> void:
 	_mm.add_child(_top_row_ctrl)
 	_top_row_ctrl.set_anchors_preset(Control.PRESET_TOP_WIDE)
 
-	var fs := UI.small_button("⛶", _toggle_fullscreen, "blue")
+	# `.pill` icon-only button: "⛶" has no glyph in M PLUS Rounded (it rendered
+	# as tofu), so use the extracted fullscreen sprite instead.
+	var fs := UI.small_button("", _toggle_fullscreen, "blue")
 	fs.name = "FullscreenPill"
+	fs.custom_minimum_size = Vector2(44, 44)
+	fs.icon = load("res://assets/ui/icons/fullscreen.png")
+	fs.expand_icon = true
 	_top_row_ctrl.add_child(fs)
 
 	var spacer := Control.new()
@@ -310,16 +406,15 @@ func _build_left() -> void:
 	_left_area.anchor_bottom = 1.0
 	_mm.add_child(_left_area)
 
-	_left_scroll = UI.scroll()
-	_left_scroll.name = "MMLeftScroll"
-	_left_area.add_child(_left_scroll)
-	UI.fill(_left_scroll)
-
-	# CenterContainer keeps the 52% vertical centring; it grows past the viewport
-	# when the content is taller, which is what makes the ScrollContainer scroll.
+	# No ScrollContainer here: it clipped the logo at the 520px column edge on
+	# tall windows (1440x900 and up), which is the "cut wordmark" bug. The
+	# CenterContainer keeps the CSS 52% centring and lets the logo overflow
+	# visibly, exactly like `.mm-left`. `_on_resized` scales the column down
+	# only when it would not fit vertically.
 	var center := CenterContainer.new()
 	center.name = "MMLeftCenter"
-	_left_scroll.add_child(center)
+	_left_area.add_child(center)
+	UI.fill(center)
 
 	_left_col = UI.vbox(18)
 	_left_col.name = "MMLeftColumn"
@@ -543,7 +638,8 @@ func _play_tile() -> Control:
 	_play_title = tile.get_meta("title_label")
 	_play_sub = tile.get_meta("sub_label")
 	_play_sprite = PmdSprite.new()
-	_play_sprite.custom_minimum_size = Vector2(64, 64)
+	_play_sprite.custom_minimum_size = Vector2(56, 56)
+	_play_sprite.size = Vector2(56, 56)
 	var partner := PanelContainer.new()
 	var ps := StyleBoxFlat.new()
 	ps.bg_color = Color("#ffffff38")
@@ -750,7 +846,12 @@ func _mini(icon_name: String, title_text: String, accent: Color, on_click: Calla
 		"tip": title_text,
 	}
 	var tile := _make_item(cfg)
-	tile.custom_minimum_size = Vector2(0, 44)
+	# A Button does not derive its minimum size from its anchored children, so
+	# the mini pill used to collapse to 0px and every label inside was clipped
+	# to 1px. Reserve the content width: pad 5+18, icon 34, gap 8, title text.
+	var text_w := PbTheme.font("title").get_string_size(title_text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+	tile.custom_minimum_size = Vector2(5.0 + 34.0 + 8.0 + text_w + 18.0 + 1.0, 44.0)
 	tile.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	if on_click.is_valid():
 		tile.pressed.connect(on_click)
@@ -933,8 +1034,8 @@ func _build_season() -> void:
 	_season_wrap.name = "SeasonColumn"
 	_season_wrap.anchor_left = 1.0
 	_season_wrap.anchor_right = 1.0
-	_season_wrap.anchor_top = 0.5
-	_season_wrap.anchor_bottom = 0.5
+	_season_wrap.anchor_top = 0.52
+	_season_wrap.anchor_bottom = 0.52
 	_season_wrap.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_season_wrap.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_mm.add_child(_season_wrap)
@@ -963,6 +1064,7 @@ func _season_card_node() -> PanelContainer:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_season_box.add_child(scroll)
 	var box := UI.vbox(8)
+	_season_body = box
 	scroll.add_child(box)
 
 	box.add_child(UI.segment([
@@ -1242,9 +1344,7 @@ func refresh() -> void:
 	if _play_sub != null:
 		_play_sub.text = App.ui("Modo clásico · {n}/{total} en tu Liga",
 			{"n": int(s.get("captured", 0)), "total": 151})
-	if _play_title != null:
-		_play_title.add_theme_font_size_override("font_size",
-			int(clampf(34.0, 4.6 * _viewport.y / 100.0, 42.0)))
+	_fit_play_title()
 	for c in _recent.get_children():
 		c.queue_free()
 	var runs: Array = PbJson.as_array(profile.get("runs", []))
@@ -1259,6 +1359,13 @@ func refresh() -> void:
 	_show_starter(int(profile.get("starter", 0)) if int(profile.get("starter", 0)) > 0 else _starter)
 	if _play_sprite != null and is_instance_valid(_play_sprite):
 		_play_sprite.setup(_starter, "idle")
+		# PmdSprite sizes itself from the sheet frame (96x120 here); clamp it to
+		# the 56px partner badge so it cannot inflate the play tile.
+		_play_sprite.custom_minimum_size = Vector2(56, 56)
+		_play_sprite.size = Vector2(56, 56)
+	# The column height depends on the text that was just filled in; re-run the
+	# 52% centring / fit check once the labels have their real minimum sizes.
+	_on_resized.call_deferred()
 
 
 # ------------------------------------------------------------- settings modal
@@ -1268,7 +1375,7 @@ func _build_settings_modal() -> void:
 	_settings_scrim = PanelContainer.new()
 	_settings_scrim.name = "SettingsScrim"
 	_settings_scrim.add_theme_stylebox_override("panel", PbTheme.modal_scrim())
-	add_child(_settings_scrim)
+	_mm.add_child(_settings_scrim)
 	UI.fill(_settings_scrim)
 	_settings_scrim.visible = false
 	var col := UI.vbox(12)
@@ -1460,7 +1567,7 @@ func _open_starter_picker() -> void:
 	var scrim := PanelContainer.new()
 	scrim.name = "StarterPicker"
 	scrim.add_theme_stylebox_override("panel", PbTheme.modal_scrim())
-	add_child(scrim)
+	_mm.add_child(scrim)
 	UI.fill(scrim)
 	_picker = scrim
 	var col := UI.vbox(16)
@@ -1569,7 +1676,7 @@ func _confirm_starter(species_id: int, stamp: Control) -> void:
 	var modal := UI.modal_shell(App.ui("¿Elegir a {name}?", {"name": nm}), true)
 	var scrim: PanelContainer = modal["scrim"]
 	var body: VBoxContainer = modal["body"]
-	add_child(scrim)
+	_mm.add_child(scrim)
 	UI.fill(scrim)
 	body.add_child(UI.paragraph("它将成为你的初始伙伴，之后不可更换。", 14, Color.WHITE, 1))
 	var row := UI.hbox(10)
