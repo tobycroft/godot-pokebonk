@@ -131,6 +131,8 @@ static func _weather_id(value: Variant, fallback: String = "clear") -> String:
 ## (@1506897: weather/baseWeather `clear`, weatherT 0) and the later systems
 ## need. A state built by create() already has all of them; this keeps an older
 ## save playable instead of letting a null weather/stage leak into the tick.
+## The map-event channel (`weatherEvent`) is added by PbWeatherEvents.ensure and
+## old saves that stored an event id in `weather` are normalized there.
 static func ensure_state(state: Dictionary) -> Dictionary:
 	var base := _weather_id(state.get("baseWeather"))
 	state["baseWeather"] = base
@@ -179,6 +181,10 @@ static func ensure_state(state: Dictionary) -> Dictionary:
 		PbCapture.create(state)
 	PbHazards.ensure(state)
 	PbWeatherEvents.ensure(state)
+	# Older saves wrote the map-event id into `weather`; move it back onto the
+	# event channel so the badge/damage keep reading the weather channel (web
+	# never puts event ids there, @1521349 setWeather is moves-only).
+	PbWeatherEvents.normalize_legacy(state)
 	return state
 
 

@@ -688,8 +688,10 @@ func sync(state: Dictionary, dt: float) -> void:
 	(_els["biome"] as Label).text = _biome_name(str(state.get("biome", "forest")))
 	_sync_pips(stage)
 	var weather := str(state.get("weather", "clear"))
-	var event_kind := str(PbJson.as_dict(state.get("weatherEvent", {})).get("kind", ""))
-	var wname := _weather_name(weather, event_kind == weather)
+	# The web badge reads the weather channel only (`run.weather` @1521349);
+	# map events (fog/storm/eclipse/meowth) drive `look` and the banner instead,
+	# so they never rename this pill.
+	var wname := _weather_name(weather)
 	var wpill := _els["weather"] as PanelContainer
 	# Only show the pill for a weather we can actually name. A null/unknown id
 	# used to leak straight into the label (`<null>`), which is what showed as a
@@ -803,22 +805,15 @@ func _biome_name(id: String) -> String:
 
 ## Naming a weather id. Unknown or empty ids (a resumed run can carry a null)
 ## resolve to "" so the HUD hides the pill instead of echoing the raw value.
-## Weather *events* (storm/eclipse/meowth, PbWeatherEvents) also write into
-## `state.weather`, so they are named from data/pb/weather.json. `fog` exists
-## in both tables, hence `event_active` picks the event name while it runs.
-func _weather_name(key: String, event_active: bool = false) -> String:
-	var event := PbJson.as_dict(PbWeatherEvents.table().get(key))
-	var event_name := str(event.get("name", ""))
-	if event_active and not event_name.is_empty():
-		return App.ui(event_name)
+## Only the weather channel (base/active) reaches this function; map events are
+## a separate `look` channel and never rename the badge.
+func _weather_name(key: String) -> String:
 	# Base names from the web's weather table (`pr`): sun/sand/hail/ash are
 	# spelled out there, not the shorter move-weather labels.
 	var names := {"rain": App.ui("Lluvia"), "sun": App.ui("Sol abrasador"),
 		"sand": App.ui("Tormenta de arena"), "hail": App.ui("Granizo"),
 		"fog": App.ui("Niebla"), "ash": App.ui("Lluvia de ceniza")}
-	if names.has(key):
-		return str(names[key])
-	return App.ui(event_name) if not event_name.is_empty() else ""
+	return str(names.get(key, ""))
 
 
 ## Web `.ht-weather{color:var(--blue-t,#2a6ad0)}` (dark theme recolours it).

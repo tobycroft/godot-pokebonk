@@ -4,8 +4,11 @@ extends RefCounted
 ## the bundle's `uS` table (@1061261) and `fS` controller (@1062329).
 ##
 ## State lives under `state["weatherEvent"]`; the set of events already seen in
-## this run is `state["weatherDone"]`. Events only touch `weather`/`weatherT`
-## (via start/end), never `baseWeather` (§4.11/§4.13).
+## this run is `state["weatherDone"]`. Like the web, an event never writes
+## `weather`/`weatherT`/`baseWeather`: it only installs its `look` override
+## (§4.5/@1062379, where the controller drives `look`/`atmos` instead of
+## `setWeather`). The badge and the damage layer therefore keep reading the
+## weather channel while an event runs.
 
 const MEOWTH_SPECIES := 52
 const SPAWN_INTERVAL := 4.0
@@ -158,10 +161,8 @@ static func start(state: Dictionary, event_kind: String) -> bool:
 	var title := App.ui("¡{name}!", {"name": App.ui(str(entry.get("name", event_kind)))})
 	_message(state, "banner|%s|%s|%s|big" % [title, App.ui(str(entry.get("sub", ""))),
 		str(entry.get("color", "#f7c948"))])
-	if event_kind != "meowth":
-		# §4.13: events drive `weather`/`weatherT`; `baseWeather` stays untouched.
-		state["weather"] = event_kind
-		state["weatherT"] = float(entry.get("dur", 0.0))
+	# The web's event controller never calls `setWeather`; the event id lives on
+	# the `look` channel only, so `weather`/`weatherT` stay as they were.
 	return true
 
 
@@ -183,13 +184,54 @@ static func end(state: Dictionary, silent: bool = false) -> void:
 	c["left"] = 0.0
 	c["boltQueue"] = []
 	c["meowth"] = -1
-	# Only release a weather override the event itself installed; a weather move
-	# cast during the event keeps its own timer.
-	if was != "meowth" and PbJson.as_string(state.get("weather"), "") == was:
-		var base := PbJson.as_string(state.get("baseWeather"), "clear")
-		state["weather"] = "clear" if base == "<null>" else base
-		state["weatherT"] = 0.0
+	# The weather channel is not ours to clear: an event never installed an
+	# override there (weather moves keep their own `weatherT`).
 	# The look keeps fading out through `lookKind` until k reaches 0.
+
+
+## Migration for saves written before the channels were split: those saves put
+## the event id into `weather` (and the event duration into `weatherT`). Move a
+## tracked id back onto the event channel and restore the base weather. `fog`
+## is also a graveyard base weather, so an untracked `fog` only counts as a
+## leftover event when the base weather is something else.
+static func normalize_legacy(state: Dictionary) -> void:
+	var c := ensure(state)
+	var raw := PbJson.as_string(state.get("weather"), "")
+	if raw.is_empty() or raw == "<null>":
+		return
+	var base := PbJson.as_string(state.get("baseWeather"), "")
+	if base.is_empty() or base == "<null>":
+		base = "clear"
+		state["baseWeather"] = base
+	var tracked := str(c.get("kind", ""))
+	if tracked != "":
+		# The event is still tracked: only its id can be stale in `weather`.
+		if raw != tracked:
+			return
+	else:
+		# storm/eclipse/meowth are never weather ids; fog is a base weather too.
+		if raw == "fog":
+			if base == "fog":
+				return
+		elif raw != "storm" and raw != "eclipse" and raw != "meowth":
+			return
+		tracked = raw
+		var left := float(state.get("weatherT", 0.0))
+		if left > 0.0:
+			# Revive the event for its remaining time so the normal fade/timer
+			# path closes it (and a mid-event save keeps its look).
+			c["kind"] = tracked
+			c["left"] = left
+			c["lookKind"] = "" if tracked == "meowth" else tracked
+			c["k"] = 0.0 if tracked == "meowth" else 1.0
+			c["spawnT"] = 2.0
+			c["boltT"] = 3.0
+			var done := PbJson.as_array(state.get("weatherDone", []))
+			if not done.has(tracked):
+				done.append(tracked)
+			state["weatherDone"] = done
+	state["weather"] = base
+	state["weatherT"] = 0.0
 
 
 ## §4.5: timers + per-kind effects.

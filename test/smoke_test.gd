@@ -882,6 +882,50 @@ func _save_migration_checks() -> void:
 	ok(str(played.get("weather", "")) != "<null>",
 		"casting non-weather moves keeps a legal weather id (got %s)" % str(played.get("weather", "")))
 
+	section("save migration: event id in weather -> event channel")
+	# Old saves wrote the event id into `weather`; ensure_state moves it onto
+	# `weatherEvent` and restores the weather channel.
+	var legacy_storm := PbRun.create(4, "forest", 43)
+	legacy_storm.erase("weatherEvent")
+	legacy_storm["baseWeather"] = "rain"
+	legacy_storm["weather"] = "storm"
+	legacy_storm["weatherT"] = 12.0
+	PbRun.ensure_state(legacy_storm)
+	ok(str(legacy_storm["weather"]) == "rain", "storm id moved out of weather")
+	ok(float(legacy_storm["weatherT"]) <= 0.0, "legacy event timer cleared")
+	ok(str(PbWeatherEvents.kind(legacy_storm)) == "storm", "storm id restored on the event channel")
+	close(float(PbWeatherEvents.ensure(legacy_storm).get("left", 0.0)), 12.0,
+		"remaining event time preserved")
+
+	var legacy_fog := PbRun.create(4, "forest", 44)
+	legacy_fog["baseWeather"] = "clear"
+	legacy_fog["weather"] = "fog"
+	legacy_fog["weatherT"] = 45.0
+	PbRun.ensure_state(legacy_fog)
+	ok(str(legacy_fog["weather"]) == "clear", "legacy fog event normalizes to base")
+	ok(str(PbWeatherEvents.kind(legacy_fog)) == "fog", "legacy fog event restored")
+
+	# Graveyard's base weather is `fog`; that is not an event leak.
+	var graveyard := PbRun.create(4, "graveyard", 45)
+	graveyard["baseWeather"] = "fog"
+	graveyard["weather"] = "fog"
+	graveyard["weatherT"] = 0.0
+	PbRun.ensure_state(graveyard)
+	ok(str(graveyard["weather"]) == "fog", "graveyard base fog stays in the weather channel")
+	ok(str(PbWeatherEvents.kind(graveyard)) == "", "graveyard base fog is not an event")
+
+	# A weather-move overlay cast during an event keeps its own id + timer.
+	var overlay := PbRun.create(4, "forest", 46)
+	PbRun.ensure_state(overlay)
+	overlay["baseWeather"] = "clear"
+	overlay["weather"] = "rain"
+	overlay["weatherT"] = 7.0
+	PbWeatherEvents.start(overlay, "fog")
+	PbRun.ensure_state(overlay)
+	ok(str(overlay["weather"]) == "rain", "move overlay survives the event")
+	close(float(overlay["weatherT"]), 7.0, "move overlay keeps its timer")
+	ok(str(PbWeatherEvents.kind(overlay)) == "fog", "event stays on its channel")
+
 	section("save migration: forms object -> array")
 	var obj_forms := {"name": "Old", "stardust": 10, "forms": {"49": true, "53": 1, "0": true, "junk": true}}
 	ok(Save.import_text(JSON.stringify(obj_forms)) == "ok", "object-shaped forms import")
@@ -1045,8 +1089,9 @@ func _billboard_scale_checks() -> void:
 	ok(hud._weather_name("<null>") == "", "null weather id has no name (pill hidden)")
 	ok(hud._weather_name("") == "", "empty weather id has no name (pill hidden)")
 	ok(hud._weather_name("rain") == App.ui("Lluvia"), "rain keeps its label")
-	ok(hud._weather_name("storm") == App.ui("Tormenta eléctrica"),
-		"weather events are named from data/pb/weather.json (got %s)" % hud._weather_name("storm"))
+	ok(hud._weather_name("fog") == App.ui("Niebla"),
+		"base fog keeps the weather name, not the event name")
+	ok(hud._weather_name("storm") == "", "event ids never name the badge (pill hidden)")
 	hud.free()
 
 
@@ -1750,19 +1795,36 @@ func _weather_event_checks() -> void:
 	ok(PbWeatherEvents.start_random(endless), "endless clears done and restarts")
 	ok(PbJson.as_array(endless["weatherDone"]).size() == 1, "endless done keeps only the new pick")
 
-	# §4.5 duration: weather follows the event, then falls back to baseWeather.
+	# §4.13 two channels: the event keeps its own `look`/timer and never writes
+	# `weather`/`weatherT`, so the badge + damage bonus stay on the weather
+	# channel while it runs.
 	var dur := PbRun.create(4, "forest", 5150)
 	PbWeatherEvents.ensure(dur)
 	PbRng.seed(5150)
+	dur["baseWeather"] = "rain"
+	dur["weather"] = "rain"
+	dur["weatherT"] = 0.0
 	var base := str(dur["baseWeather"])
 	ok(PbWeatherEvents.start(dur, "fog"), "fog starts")
-	ok(str(dur["weather"]) == "fog", "event installs its weather")
-	close(float(dur["weatherT"]), 45.0, "weather timer matches dur")
+	ok(str(dur["weather"]) == base, "event leaves the weather channel alone")
+	ok(float(dur["weatherT"]) <= 0.0, "event installs no weather timer")
+	ok(str(dur["baseWeather"]) == base, "event leaves baseWeather alone")
+	ok(str(PbWeatherEvents.ensure(dur).get("lookKind", "")) == "fog",
+		"event installs its look channel")
+	# The damage layer reads `weather` (bundle @747555 `pr[r.weather]`), so rain
+	# still boosts Water and weakens Fire mid-event.
+	close(PbWeather.of(str(dur["weather"])).type_mult("water"), 1.3,
+		"rain boost still applies during the event")
+	close(PbWeather.of(str(dur["weather"])).type_mult("fire"), 0.75,
+		"rain nerf still applies during the event")
 	for n in 470:
 		PbWeatherEvents.update(dur, 0.1)
 	ok(not PbWeatherEvents.active(dur), "fog expires after dur")
-	ok(str(dur["weather"]) == base, "weather falls back to baseWeather")
-	ok(float(dur["weatherT"]) <= 0.0, "weatherT is cleared on expiry")
+	ok(str(PbWeatherEvents.ensure(dur).get("kind", "")) == "", "event kind cleared on expiry")
+	ok(str(dur["weather"]) == "rain", "expiry leaves the weather channel untouched")
+	ok(float(dur["weatherT"]) <= 0.0, "weatherT stays untouched by the event")
+	ok(str(PbWeatherEvents.ensure(dur).get("lookKind", "")) == "fog",
+		"only the event fade channel is left after expiry")
 	ok(str(dur["baseWeather"]) == base, "baseWeather is never modified")
 
 	# §4.6 fog: pool spawn + Flying + doubled xp.
