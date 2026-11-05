@@ -1024,12 +1024,20 @@ func _offer_card_data(card: Dictionary) -> Dictionary:
 			rar = mini(4, int(roundf(float(def.get("dmg", 10.0)) / 12.0)))
 		"move_upgrade":
 			var def2 := _move_def_by_key(str(card.get("move_key", "")))
+			rar = clampi(int(card.get("rarity", 0)), 0, PbCards.RARITY_MULT.size() - 1)
 			rc = PbTheme.rarity_color(rar)
 			out["rar_text"] = App.ui("MEJORA")
 			out["kind_text"] = "升级"
 			out["title"] = App.t("moves", int(def2.get("id", 0)), str(def2.get("name", card.get("move_key", "?"))))
-			out["sub"] = label_text
-			out["lines"] = [_mod_line(PbJson.as_dict(mods[0])) if not mods.is_empty() else label_text]
+			var lvl := int(card.get("level", 1))
+			out["sub"] = App.ui("Nivel {a} → {b} (máx. {max})", {
+				"a": lvl, "b": int(card.get("next_level", lvl + 1)),
+				"max": int(card.get("cap", PbActor.MOVE_MAX_LEVEL))})
+			# Ey() picks 2 (3 at rarity >= 1.6) ups: list every one, not just the first.
+			var lines := []
+			for mod in mods:
+				lines.append(_mod_line(PbJson.as_dict(mod)))
+			out["lines"] = lines if not lines.is_empty() else [label_text]
 			out["icon_name"] = str(def2.get("type", "")) if ResourceLoader.exists("res://assets/ui/icons/%s.png" % str(def2.get("type", ""))) else ""
 		"new_vit", "up_vit":
 			# qS() @1100020: title = vitamin name, sub = level -> level+1 / "Nueva
