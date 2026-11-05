@@ -542,6 +542,92 @@ func _run_flow() -> void:
 	ok(PbCards.roll_vitamin(free_actor, {"vcalcium": true}, false).is_empty(),
 		"a taken/banished vitamin leaves the up-vit pool")
 
+	# ---- upgrade cards actually land on the move instance (Dy @794775, Ey @794285)
+	var mv_actor := PbActor.create(1, {}, 1)
+	var mv0 := PbJson.as_dict(PbJson.as_array(mv_actor["moves"])[0])
+	var mv_key := str(PbJson.as_dict(mv0["def"]).get("key", ""))
+	var dmg_before := float(PbDamage.move_instance(PbJson.as_dict(mv0["def"]),
+		PbActor.actor_for_damage(mv_actor), int(mv0["level"]), PbRun._move_mods(mv0, mv_actor))["real"])
+	var up1 := PbCards.roll_move_upgrade(mv_actor, {})
+	var rarity_mult := float(PbCards.RARITY_MULT[clampi(int(up1.get("rarity", 0)), 0,
+		PbCards.RARITY_MULT.size() - 1)])
+	ok(PbJson.as_array(up1.get("ups", [])).size() == (3 if rarity_mult >= 1.6 else 2),
+		"upMove rolls 2 ups, 3 at rarity >= 1.6 (Ey)")
+	ok(int(up1.get("next_level", 0)) == int(up1.get("level", 1)) + 1,
+		"upMove previews level -> level+1 (qS)")
+	var dmg_card := {"kind": "move_upgrade", "move_key": mv_key, "slot": 0, "rarity": 2,
+		"mods": [{"stat": "dmg", "add": 0.22 * 1.45}]}
+	ok(PbCards.take(mv_actor, dmg_card) == "move upgraded", "upMove take() applies")
+	var mv1 := PbJson.as_dict(PbJson.as_array(mv_actor["moves"])[0])
+	var dmg_after := float(PbDamage.move_instance(PbJson.as_dict(mv1["def"]),
+		PbActor.actor_for_damage(mv_actor), int(mv1["level"]), PbRun._move_mods(mv1, mv_actor))["real"])
+	ok(int(mv1.get("level", 1)) == 2, "upMove increments the move level (Dy)")
+	close(dmg_after / dmg_before, 1.04 * (1.08 + 0.22 * 1.45),
+		"upMove damage = (1+.08) * (1+(level-1)*.04) (yA)")
+
+	# ---- new move really enters the roster
+	var nm_actor := PbActor.create(1, {}, 1)
+	nm_actor["moveSlots"] = int(nm_actor["moveSlots"]) + 1
+	var nm_card := PbCards.roll_new_move(nm_actor, {})
+	ok(PbCards.take(nm_actor, nm_card) == "learned" and
+		PbActor.move_keys(nm_actor).has(str(nm_card.get("move_key", ""))),
+		"newMove card writes into the roster (addMove)")
+
+	# ---- cap and banish exclusion
+	var cap_actor := PbActor.create(1, {}, 1)
+	for raw in PbJson.as_array(cap_actor["moves"]):
+		if raw != null:
+			PbJson.as_dict(raw)["level"] = PbActor.MOVE_MAX_LEVEL
+	ok(PbCards._upgradeable_slots(cap_actor, {}).is_empty(),
+		"no upMove candidates once every move hits capOf (KS)")
+	ok(PbCards._card_key({"kind": "move_upgrade", "move_key": "tackle"}, 0) == "m:tackle",
+		"upMove/newMove share the m+key banish tag")
+	ok(PbCards.roll_move_upgrade(mv_actor, {"m:" + mv_key: true}).get("move_key", "") != mv_key,
+		"a banished move drops out of the upMove pool")
+	var br := PbRun.create(1, "forest", 99)
+	br["pendingLevels"] = 1
+	PbRun.open_offers(br)
+	var first_card := PbJson.as_dict(PbJson.as_array(br["offers"])[0])
+	var first_tag := PbCards._card_key(first_card, 0)
+	br["banishes"] = 1
+	ok(PbRun.banish(br, 0) and br["banished"].has(first_tag),
+		"PbRun.banish stores the key the pools consume")
+
+	# ---- pendingLevels drives one card per level, each applied
+	var pr := PbRun.create(1, "forest", 99)
+	pr["pendingLevels"] = 3
+	pr["offers"] = []
+	PbRun.open_offers(pr)
+	var picks := 0
+	while int(pr["pendingLevels"]) > 0 and picks < 3:
+		var pu_before := int(pr["stats"]["powerUps"])
+		ok(PbRun.choose_offer(pr, 0), "consecutive level-up pick %d applies" % (picks + 1))
+		ok(int(pr["stats"]["powerUps"]) == pu_before + 1, "each pick counts a powerUp")
+		picks += 1
+	ok(int(pr["pendingLevels"]) == 0 and str(pr["state"]) == "play",
+		"three pending levels resolve into three applied cards")
+
+	# ---- empty pool pays heal + 15 gold (doLevelUp fallback @1541902)
+	var er := PbRun.create(1, "forest", 99)
+	var ep: Dictionary = er["player"]
+	for raw in PbJson.as_array(ep["moves"]):
+		if raw != null:
+			PbJson.as_dict(raw)["level"] = PbActor.MOVE_MAX_LEVEL
+	var vents := PbVitamins.entries(ep)
+	for key in vents:
+		PbJson.as_dict(vents[key])["level"] = PbVitamins.LEVEL_CAP
+	ep["vitaminSlots"] = vents.size()
+	ep["moveSlots"] = PbActor.move_keys(ep).size()
+	PbActor.recompute(ep)
+	ep["hp"] = 1.0
+	var gold_before := float(er["gold"])
+	er["pendingLevels"] = 1
+	PbRun.open_offers(er)
+	close(float(er["gold"]), gold_before + 15.0, "empty level-up pays 15 gold")
+	close(float(ep["hp"]), 1.0 + float(ep["maxHp"]) * 0.2, "empty level-up heals 20% maxHp")
+	ok(str(er["state"]) == "play" and int(er["pendingLevels"]) == 0,
+		"empty level-up consumes the pending level")
+
 
 # ------------------------------------------------------------------ 5. save flow
 func _save_flow() -> void:
