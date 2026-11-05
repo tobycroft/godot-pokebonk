@@ -52,6 +52,7 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"weather": "clear",
 		"baseWeather": "clear",
 		"weatherT": 0.0,
+		"weatherDone": [],
 		"victory": false,
 		"endHow": null,
 		"gold": 0.0,
@@ -270,6 +271,10 @@ static func _tick_director(state: Dictionary, dt: float) -> void:
 	# web controller (`kw.update`), with no extra play-state gate.
 	PbHazards.schedule(state, dt)
 	PbHazards.update(state, dt)
+	# Map weather events (fog/storm/eclipse/meowth): beats are scheduled on the
+	# director clock and the controller ticks every director frame.
+	PbWeatherEvents.schedule(state)
+	PbWeatherEvents.update(state, dt)
 
 
 ## Danger meter (bundle director.danger @882422 = 0.5*log2(hpMult*dmgMult*
@@ -527,6 +532,8 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 					_on_kill_info(state, PbJson.as_dict(alpha_info))
 		state["stats"]["damage"] = float(state["stats"]["damage"]) + dealt
 		state["stats"]["hits"] = int(state["stats"].get("hits", 0)) + 1
+		# §4.9: the golden Meowth drops a coin on every hit (0.16 s cooldown).
+		PbWeatherEvents.on_hit(state, target)
 		if bool(out["crit"]):
 			state["stats"]["crits"] = int(state["stats"].get("crits", 0)) + 1
 		if bool(out["mega"]):
@@ -565,6 +572,8 @@ static func _on_kill_info(state: Dictionary, info: Dictionary) -> void:
 	if info.is_empty():
 		return
 	var species := int(info["species"])
+	# §4.9: the event Meowth pays out 30 coins and closes the event.
+	PbWeatherEvents.on_killed_info(state, info)
 	var weight := float(info["weight"])
 	var stats: Dictionary = state["stats"]
 	stats["kills"] = int(stats["kills"]) + 1
@@ -612,6 +621,8 @@ static func _tick_orbs(state: Dictionary, dt: float) -> void:
 		if d <= pickup:
 			if str(orb.get("kind", "xp")) == "xp":
 				add_xp(state, float(orb["xp"]))
+			elif str(orb.get("kind", "")) == "coin":
+				state["gold"] = float(state["gold"]) + float(orb.get("value", 0.0))
 		elif float(orb["life"]) > 0.0:
 			kept.append(orb)
 	state["orbs"] = kept

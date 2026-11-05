@@ -22,6 +22,9 @@ const Flag := {
 	"Summoner": 8192,
 	"Treasure": 16384,
 	"Capture": 128,
+	## Port-only bit for the eclipse event's shiny spawn (the web keeps a
+	## separate capture/sprite flag that has no port counterpart).
+	"Shiny": 1 << 21,
 }
 
 ## Credit pool weight of a spawn card (offset 346928: `o`), 1 for singles.
