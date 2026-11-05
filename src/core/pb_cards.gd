@@ -89,10 +89,26 @@ static func kind_weights(actor: Dictionary, exclude: Dictionary = {}) -> Array:
 	var move_up := _upgradeable_slots(actor, exclude).size()
 	if move_up > 0:
 		entries.append([2.0 * float(move_up), "move_upgrade"])
-	# The web only rolls new-move candidates while an empty move slot is open.
-	if PbActor.free_slot(actor) >= 0 and not _new_move_candidates(actor, exclude).is_empty():
-		entries.append([3.0, "new_move"])
+	var move_new := new_move_weight(actor, exclude)
+	if move_new > 0.0:
+		entries.append([move_new, "new_move"])
 	return entries
+
+
+## `KS` @1097230 newMove candidates, counted exactly:
+##   * 3 per roster-kit move (`c.kit.forEach(... for(let e=0;e<3;e++))`)
+##   * 1 shortlist pick from `by(species)` whose learn level <= level*2.6+10
+##     (always when there is no roster, 35% of the time when a roster exists)
+##   * 1 at 50% from cross-species league moves (`d` set)
+## The port has no roster/league, so only the species shortlist remains: **1**.
+## The flat `o` fallback list only fills in when the rolled list is short; it is
+## not a separate weight.
+static func new_move_weight(actor: Dictionary, exclude: Dictionary = {}) -> float:
+	if PbActor.free_slot(actor) < 0:
+		return 0.0
+	if _new_move_candidates(actor, exclude).is_empty():
+		return 0.0
+	return 1.0
 
 
 ## Vitamin card: `KS` @1099962 gives 2 upVit offers per owned vitamin below
@@ -306,16 +322,45 @@ static func _up_label(arch: String, stat: String, value: float) -> String:
 static func _new_move_candidates(actor: Dictionary, exclude: Dictionary) -> Array:
 	var species_id := int(actor.get("species_id", 1))
 	var owned := _owned_move_ids(actor)
+	# KS gates the species shortlist by `HS`'s minimum learn level:
+	# `(s.get(e) ?? 0) <= n.level * BS + 10`, BS = 2.6 (@1095527).
+	var gate := float(actor.get("level", 1)) * 2.6 + 10.0
+	var levels := _learn_levels(species_id)
 	var candidates := []
 	for key in PbMoves.learnable_moves(species_id):
 		if owned.has(key):
 			continue
 		if exclude.has("m:" + str(key)):
 			continue
+		if float(levels.get(str(key), 0.0)) > gate:
+			continue
 		if PbMoves.resolve(str(key)).is_empty():
 			continue
 		candidates.append(str(key))
 	return candidates
+
+
+## `HS()` @1095541: min learn level per move over the evolution chain.
+static func _learn_levels(species_id: int) -> Dictionary:
+	var out := {}
+	var current_id := species_id
+	var guard := 0
+	while current_id > 0 and guard < 12:
+		guard += 1
+		for entry in PbData.learnset(current_id):
+			var pair := PbJson.as_array(entry)
+			if pair.size() < 2:
+				continue
+			var move := PbData.move_by_id(int(pair[0]))
+			var key := str(move.get("key", ""))
+			if key.is_empty():
+				continue
+			out[key] = mini(int(out.get(key, 999)), int(pair[1]))
+		var spec := PbData.species(current_id)
+		if spec.get("evoFrom") == null:
+			break
+		current_id = int(spec["evoFrom"])
+	return out
 
 
 static func roll_new_move(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
@@ -411,15 +456,25 @@ static func _upgradeable_slots(actor: Dictionary, exclude: Dictionary = {}) -> A
 	return out
 
 
-## Ob.ownedMoveIds(): owns a move by its key or by either fusion parent's key.
+## Ob.ownedMoveIds(): owns a move by its key or by either fusion parent. The
+## bundle stores parents as move **ids** (`parents.append_array([a.def.id,
+## b.def.id])`), so both id and key spellings have to be honoured.
 static func _owned_move_ids(actor: Dictionary) -> Array:
 	var out := PbActor.move_keys(actor)
 	for raw in PbJson.as_array(actor.get("moves", [])):
 		if raw == null:
 			continue
 		for parent in PbJson.as_array(PbJson.as_dict(raw).get("parents", [])):
+			if typeof(parent) == TYPE_INT or typeof(parent) == TYPE_FLOAT:
+				var def := PbData.move_by_id(int(parent))
+				var id_key := str(def.get("key", ""))
+				if not id_key.is_empty():
+					out.append(id_key)
+				continue
 			var p := PbJson.as_dict(parent)
 			var key := str(p.get("key", p.get("move_key", "")))
+			if key.is_empty() and typeof(parent) == TYPE_STRING:
+				key = str(parent)
 			if not key.is_empty():
 				out.append(key)
 	return out

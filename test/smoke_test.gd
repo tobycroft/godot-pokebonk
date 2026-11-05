@@ -630,6 +630,105 @@ func _run_flow() -> void:
 	ok(str(er["state"]) == "play" and int(er["pendingLevels"]) == 0,
 		"empty level-up consumes the pending level")
 
+	# ---- train() (zk @1504504, train @1542115): one accumulated mini-stat per
+	# empty level, base diluted by min(3, 1 + trainedLevels/25).
+	var tr := PbJson.as_dict(ep.get("training", {}))
+	ok(tr.size() == 1 and int(ep.get("trainedLevels", 0)) == 1,
+		"empty level-up calls train() once")
+	var tr_stat := str(tr.keys()[0]) if not tr.is_empty() else ""
+	var tr_mode := ""
+	var tr_base := 0.0
+	for row in PbActor.TRAIN_TABLE:
+		if str(row[0]) == tr_stat:
+			tr_mode = str(row[1])
+			tr_base = float(row[2])
+	ok(not tr_stat.is_empty() and not tr_mode.is_empty(), "train() picks a stat from zk")
+	var tr_mod := PbJson.as_dict(tr.get(tr_stat, {}))
+	var tr_want := (1.0 + tr_base) if tr_mode == "mul" else tr_base
+	close(float(tr_mod.get(tr_mode, 0.0)), tr_want,
+		"train() applies zk's full base at trainedLevels=0 (%s)" % tr_stat)
+	var dil := PbActor.create(1, {}, 1)
+	dil["trainedLevels"] = 25
+	var dil1 := PbActor.train(dil)
+	var dil_base := 0.0
+	for row in PbActor.TRAIN_TABLE:
+		if str(row[0]) == str(dil1.get("stat", "")):
+			dil_base = float(row[2])
+	close(float(dil1.get("amount", 0.0)), dil_base / 2.0,
+		"train() halves its base at 25 trained levels (Bk)")
+	dil["trainedLevels"] = 50
+	var dil2 := PbActor.train(dil)
+	var dil2_base := 0.0
+	for row in PbActor.TRAIN_TABLE:
+		if str(row[0]) == str(dil2.get("stat", "")):
+			dil2_base = float(row[2])
+	close(float(dil2.get("amount", 0.0)), dil2_base / 3.0,
+		"train() caps dilution at 3 (Vk) from 50 trained levels")
+
+	# ---- skip payout: max(10*stage, .2*eT) with eT = 18 at 0 chests.
+	for st in [1, 3, 5]:
+		var sr := PbRun.create(1, "forest", 321)
+		sr["stage"] = st
+		sr["skips"] = 1
+		sr["gold"] = 0.0
+		sr["pendingLevels"] = 1
+		ok(PbRun.skip(sr), "skip succeeds at stage %d" % st)
+		ok(int(sr["gold"]) == 10 * st,
+			"skip pays 10*stage = %d at stage %d (eT=18)" % [10 * st, st])
+
+	# ---- newMove candidate weight (KS @1097230): no roster/league in this port,
+	# so exactly the one species-shortlist candidate remains.
+	var wm_actor := PbActor.create(1, {}, 1)
+	wm_actor["moveSlots"] = PbActor.move_keys(wm_actor).size() + 1
+	ok(PbActor.free_slot(wm_actor) >= 0, "an empty move slot is open")
+	var wm_cands := PbCards._new_move_candidates(wm_actor, {})
+	ok(wm_cands.size() > 0, "species shortlist has new moves")
+	close(_kind_weight(PbCards.kind_weights(wm_actor, {}), "new_move"), 1.0,
+		"one newMove candidate from by(species), not 3 (KS)")
+	var wm_lv := PbCards._learn_levels(int(wm_actor["species_id"]))
+	var wm_gate := float(wm_actor["level"]) * 2.6 + 10.0
+	var wm_gated := false
+	for key in wm_cands:
+		if float(wm_lv.get(str(key), 0.0)) > wm_gate:
+			wm_gated = true
+	ok(not wm_gated, "newMove candidates respect the level*2.6+10 learn gate (HS/BS)")
+	var wm_ban := {}
+	for key in wm_cands:
+		wm_ban["m:" + str(key)] = true
+	ok(PbCards.new_move_weight(wm_actor, wm_ban) == 0.0,
+		"banishing every candidate drops the newMove weight")
+
+	# ---- fusion parents are owned for newMove (Ob.ownedMoveIds)
+	var fp_actor := PbActor.create(1, {}, 100)
+	var fp_spare := ""
+	var fp_spare_id := 0
+	for key in PbMoves.learnable_moves(1):
+		if not PbActor.move_keys(fp_actor).has(str(key)):
+			fp_spare = str(key)
+			fp_spare_id = int(PbMoves.resolve(str(key)).get("id", 0))
+			break
+	ok(not fp_spare.is_empty(), "found a learnable move outside the roster")
+	var fp_slot := PbJson.as_dict(PbJson.as_array(fp_actor["moves"])[0])
+	fp_slot["parents"] = [fp_spare_id]
+	ok(PbCards._owned_move_ids(fp_actor).has(fp_spare),
+		"fusion parent stored by id counts as owned")
+	ok(not PbCards._new_move_candidates(fp_actor, {}).has(fp_spare),
+		"fusion parents are excluded from newMove candidates")
+
+	# ---- tm-case (items_game.json @550): capOf 8->10 regular, 5->6 fusion
+	ok(not PbData.item_game("tm-case").is_empty(), "tm-case exists in items_game")
+	var tc_actor := PbActor.create(1, {}, 1)
+	var tc_reg := PbJson.as_dict(PbJson.as_array(tc_actor["moves"])[0])
+	var tc_fused := {"def": {"fusion": {"key": "fused"}}}
+	ok(PbActor.move_cap(tc_actor, tc_reg) == 8, "regular capOf is 8 without tm-case")
+	ok(PbActor.move_cap(tc_actor, tc_fused) == 5, "fusion capOf is 5 without tm-case")
+	PbActor.give_item(tc_actor, "tm-case", 1.0)
+	ok(PbActor.move_cap(tc_actor, tc_reg) == 10, "tm-case lifts regular capOf to 10")
+	ok(PbActor.move_cap(tc_actor, tc_fused) == 6, "tm-case lifts fusion capOf to 6")
+	PbActor.give_item(tc_actor, "tm-case", 0.0)
+	ok(PbActor.move_cap(tc_actor, tc_reg) == 8, "removing tm-case restores capOf 8")
+	ok(PbActor.move_cap(tc_actor, tc_fused) == 5, "removing tm-case restores fusion cap 5")
+
 
 # ------------------------------------------------------------------ 5. save flow
 func _save_flow() -> void:
