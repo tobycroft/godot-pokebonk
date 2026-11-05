@@ -40,6 +40,7 @@ func _ready() -> void:
 	_ui_build_checks()
 	_terrain_checks()
 	_hazard_checks()
+	_weather_event_checks()
 	_evolution_checks()
 	_shop_checks()
 	_locale_checks()
@@ -1311,6 +1312,209 @@ func _shop_checks() -> void:
 	PbRun._tick_meowth(np, 46.0)
 	ok(not PbRun.meowth_present(np), "meowth leaves after its 45 s stay")
 	ok(not PbRun.meowth_near(np), "the departed NPC can no longer be interacted with")
+
+
+# ------------------------------------------------------------------ weather events
+## §4 weather events: table, gates/weights, duration fallback, per-kind effects.
+func _weather_event_checks() -> void:
+	section("weather events: schedule + effects (6g)")
+	var table := PbJson.as_dict(PbData.pb_table("weather"))
+	ok(table.size() == 4, "weather.json carries fog/storm/eclipse/meowth")
+	for event_kind in ["fog", "storm", "eclipse", "meowth"]:
+		ok(table.has(event_kind), "%s entry present" % event_kind)
+		ok(PbJson.as_array(PbJson.as_dict(table[event_kind]).get("pool", [])).size() <= 3,
+			"%s pool has at most 3 stage tiers" % event_kind)
+	close(float(PbJson.as_dict(table["fog"]).get("dur", 0.0)), 45.0, "fog lasts 45 s")
+	close(float(PbJson.as_dict(table["storm"]).get("dur", 0.0)), 40.0, "storm lasts 40 s")
+	close(float(PbJson.as_dict(table["eclipse"]).get("dur", 0.0)), 40.0, "eclipse lasts 40 s")
+	close(float(PbJson.as_dict(table["meowth"]).get("dur", 0.0)), 25.0, "meowth lasts 25 s")
+
+	# §4.4 gates: boss alive / stage cleared / map event / active.
+	var gate := PbRun.create(4, "forest", 777)
+	PbWeatherEvents.ensure(gate)
+	PbRun.spawn_boss(gate)
+	ok(not PbWeatherEvents.start_random(gate), "boss alive blocks selection")
+	PbEnemies.kill(gate["enemies"], int(gate.get("bossIndex", -1)))
+	gate["bossSpawned"] = false
+	gate["bossIndex"] = -1
+	gate["stageCleared"] = true
+	ok(not PbWeatherEvents.start_random(gate), "stageCleared blocks selection")
+	gate["stageCleared"] = false
+	gate["mapEvents"] = {"busy": true}
+	ok(not PbWeatherEvents.start_random(gate), "mapEvents.busy blocks selection")
+	gate["mapEvents"] = {"busy": false}
+	ok(PbWeatherEvents.start_random(gate), "clear gates let an event start")
+	ok(PbWeatherEvents.active(gate), "started event is active")
+	ok(not PbWeatherEvents.start_random(gate), "a running event blocks another")
+
+	# §4.4 weights (meowth .8) + fixed-seed determinism + one-per-run.
+	var wrun := PbRun.create(4, "forest", 11)
+	var entries := PbWeatherEvents.weights(wrun)
+	ok(entries.size() == 4, "four fresh candidates")
+	var meowth_weight := -1.0
+	for raw in entries:
+		if str(PbJson.as_array(raw)[1]) == "meowth":
+			meowth_weight = float(PbJson.as_array(raw)[0])
+	ok(absf(meowth_weight - 0.8) < EPS, "meowth weight is .8")
+	ok(absf(float(PbJson.as_array(PbWeatherEvents.weights(wrun)[0])[0]) - 1.0) < EPS,
+		"other weights are 1")
+	var seq_a := _event_sequence(424242)
+	var seq_b := _event_sequence(424242)
+	ok(seq_a.size() == 4, "four events fit in one standard run (got %s)" % str(seq_a))
+	for event_kind in ["fog", "storm", "eclipse", "meowth"]:
+		ok(seq_a.has(event_kind), "%s selected once per run" % event_kind)
+	ok(seq_a == seq_b, "fixed seed reproduces the same event order")
+	var endless := PbRun.create(4, "forest", 9, {}, "endless")
+	PbWeatherEvents.ensure(endless)
+	endless["weatherDone"] = ["fog", "storm", "eclipse", "meowth"]
+	ok(PbWeatherEvents.start_random(endless), "endless clears done and restarts")
+	ok(PbJson.as_array(endless["weatherDone"]).size() == 1, "endless done keeps only the new pick")
+
+	# §4.5 duration: weather follows the event, then falls back to baseWeather.
+	var dur := PbRun.create(4, "forest", 5150)
+	PbWeatherEvents.ensure(dur)
+	PbRng.seed(5150)
+	var base := str(dur["baseWeather"])
+	ok(PbWeatherEvents.start(dur, "fog"), "fog starts")
+	ok(str(dur["weather"]) == "fog", "event installs its weather")
+	close(float(dur["weatherT"]), 45.0, "weather timer matches dur")
+	for n in 470:
+		PbWeatherEvents.update(dur, 0.1)
+	ok(not PbWeatherEvents.active(dur), "fog expires after dur")
+	ok(str(dur["weather"]) == base, "weather falls back to baseWeather")
+	ok(float(dur["weatherT"]) <= 0.0, "weatherT is cleared on expiry")
+	ok(str(dur["baseWeather"]) == base, "baseWeather is never modified")
+
+	# §4.6 fog: pool spawn + Flying + doubled xp.
+	var fog := PbRun.create(4, "forest", 6060)
+	PbWeatherEvents.ensure(fog)
+	PbRng.seed(6060)
+	ok(PbWeatherEvents.start(fog, "fog"), "fog starts for spawn checks")
+	var fog_ids := PbWeatherEvents.pool(fog)
+	ok(fog_ids.size() >= 3, "fog pool resolves stage 1 species")
+	PbWeatherEvents.update_spawns(fog, 5.0)
+	var fog_live := PbEnemies.live_indices(fog["enemies"])
+	ok(fog_live.size() >= 1, "fog spawns enemies")
+	for entry in fog_live:
+		var i := int(entry)
+		ok(fog_ids.has(int(PbEnemies.get_field(fog["enemies"], "species", i))),
+			"fog spawn comes from its pool")
+		ok(PbEnemies.flags(fog["enemies"], i) & int(PbEnemies.Flag["Flying"]) != 0,
+			"fog spawn carries Flying")
+	# Look override drives fog density + eclipse-style tint inputs.
+	var fog_c := PbWeatherEvents.ensure(fog)
+	fog_c["k"] = 1.0
+	var fog_look := PbWeatherEvents.look_overrides(fog)
+	close(float(fog_look.get("near", -1.0)), 2.0, "fog look near")
+	close(float(fog_look.get("far", -1.0)), 26.0, "fog look far")
+	close(float(fog_look.get("light", -1.0)), 0.62, "fog look light")
+	PbWeatherEvents.end(fog, true)
+
+	# §4.7 storm: telegraph queue + bolt damages player and paralyzes enemies.
+	var storm := PbRun.create(4, "forest", 7070)
+	PbWeatherEvents.ensure(storm)
+	PbRng.seed(7070)
+	ok(PbWeatherEvents.start(storm, "storm"), "storm starts")
+	var storm_c := PbWeatherEvents.ensure(storm)
+	storm_c["k"] = 1.0
+	storm_c["boltT"] = 0.0
+	PbWeatherEvents.storm_fx(storm, 0.01)
+	ok(PbWeatherEvents.markers(storm).size() == 1, "storm queues a telegraph")
+	var player := PbJson.as_dict(storm["player"])
+	player["x"] = 0.0
+	player["z"] = 0.0
+	var diff := PbJson.as_dict(storm["diff"])
+	var idx := PbEnemies.spawn(storm["enemies"], 25, 1.0, 0.0, 1, diff, "wild")
+	var enemy_max := float(PbEnemies.get_field(storm["enemies"], "maxHp", idx))
+	var hp_before := float(player["hp"])
+	PbWeatherEvents.bolt(storm, 0.0, 0.0, 3.0)
+	ok(float(player["hp"]) < hp_before, "bolt hurts the player")
+	ok(float(PbEnemies.get_field(storm["enemies"], "paralysis", idx)) > 0.0,
+		"bolt paralyzes the enemy")
+	close(float(PbEnemies.get_field(storm["enemies"], "hp", idx)), enemy_max * 0.7,
+		"bolt removes 30% enemy maxHp")
+	ok(PbWeatherEvents.flash(storm) > 0.0, "bolt flashes the screen")
+
+	# §4.8 eclipse: night pool + guaranteed elite first spawn + eliteBonus.
+	var ecl := PbRun.create(4, "forest", 8080)
+	PbWeatherEvents.ensure(ecl)
+	PbRng.seed(8080)
+	ok(PbWeatherEvents.start(ecl, "eclipse"), "eclipse starts")
+	ecl["stageT"] = 100.0
+	var ecl_c := PbWeatherEvents.ensure(ecl)
+	ecl_c["spawnT"] = 0.0
+	PbWeatherEvents.update_spawns(ecl, 0.05)
+	var ecl_idx := int(PbEnemies.live_indices(ecl["enemies"])[0])
+	ok(str(PbEnemies.get_field(ecl["enemies"], "tier", ecl_idx)) == "elite",
+		"eclipse first spawn is elite after stageTime 90")
+	ok(PbWeatherEvents.elite_bonus(ecl) > 0.0, "eclipse exposes eliteBonus .12")
+	close(PbWeatherEvents.elite_bonus(ecl), 0.12, "eliteBonus value")
+
+	# §4.9 meowth: golden spawn, coin per hit, 30-coin kill payout.
+	var mew := PbRun.create(4, "forest", 9090)
+	PbWeatherEvents.ensure(mew)
+	PbRng.seed(9090)
+	ok(PbWeatherEvents.start(mew, "meowth"), "meowth starts")
+	var mew_c := PbWeatherEvents.ensure(mew)
+	var mew_idx := int(mew_c["meowth"])
+	ok(mew_idx >= 0, "meowth spawned")
+	ok(PbEnemies.flags(mew["enemies"], mew_idx) & int(PbEnemies.Flag["Treasure"]) != 0,
+		"meowth carries Treasure")
+	close(float(PbEnemies.get_field(mew["enemies"], "dmg", mew_idx)), 1.0, "meowth dmg is 1")
+	close(float(PbEnemies.get_field(mew["enemies"], "speed", mew_idx)), 7.4, "meowth speed 7.4")
+	mew_c["coinCd"] = 0.0
+	PbWeatherEvents.on_hit(mew, mew_idx)
+	ok(_count_orbs(mew, "coin") == 1, "one coin per hit")
+	var gold := float(PbJson.as_dict(PbJson.as_dict(mew["player"]).get("stats", {})).get("gold", 1.0))
+	close(float(PbJson.as_dict(PbJson.as_array(mew["orbs"])[0]).get("value", 0.0)),
+		ceil((2.0 + 2.0) * gold), "hit coin uses (2+stage*2)*gold")
+	var kill := PbEnemies.damage(mew["enemies"], mew_idx, 1.0e9)
+	PbRun._on_kill_info(mew, PbJson.as_dict(kill.get("info", {})))
+	ok(not PbWeatherEvents.active(mew), "killing meowth ends the event")
+	ok(_count_orbs(mew, "coin") == 31, "kill payout is 30 coins (plus the hit coin)")
+	ok(_has_message(mew, "banner|" + App.ui("¡Día de Pago!")), "Día de Pago banner")
+
+	# §4.9 escape branch: timeout kills it with no coins, toast only.
+	var esc := PbRun.create(4, "forest", 9191)
+	PbWeatherEvents.ensure(esc)
+	PbRng.seed(9191)
+	ok(PbWeatherEvents.start(esc, "meowth"), "escape meowth starts")
+	var esc_c := PbWeatherEvents.ensure(esc)
+	var esc_idx := int(esc_c["meowth"])
+	esc_c["left"] = 0.01
+	PbWeatherEvents.update(esc, 0.05)
+	ok(not PbWeatherEvents.active(esc), "timeout closes the event")
+	ok(not PbEnemies.is_alive(esc["enemies"], esc_idx), "escaped meowth is removed")
+	ok(_has_message(esc, App.ui("Meowth dorado se escapa con su botín")), "escape toast")
+	ok(_count_orbs(esc, "coin") == 0, "escape pays no coins")
+
+
+func _event_sequence(seed_value: int) -> Array:
+	var run := PbRun.create(4, "forest", seed_value)
+	PbRng.seed(seed_value)
+	PbWeatherEvents.ensure(run)
+	var seq := []
+	for n in 4:
+		if not PbWeatherEvents.start_random(run):
+			break
+		seq.append(PbWeatherEvents.kind(run))
+		PbWeatherEvents.end(run, true)
+	return seq
+
+
+func _count_orbs(state: Dictionary, kind: String) -> int:
+	var count := 0
+	for raw in PbJson.as_array(state.get("orbs", [])):
+		if str(PbJson.as_dict(raw).get("kind", "")) == kind:
+			count += 1
+	return count
+
+
+func _has_message(state: Dictionary, needle: String) -> bool:
+	for raw in PbJson.as_array(state.get("messages", [])):
+		if str(raw).find(needle) >= 0:
+			return true
+	return false
 
 
 # ------------------------------------------------------------------ language
