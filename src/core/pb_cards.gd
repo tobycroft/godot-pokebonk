@@ -54,31 +54,26 @@ static func type_cards() -> Dictionary:
 
 ## One random card from the pool; exclude keys lets the caller avoid duplicates
 ## and the run's banished set.
-static func roll(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
+##
+## KS() @1097230 only builds four card kinds -- `newMove`, `upMove`, `upVit`
+## and `newVit`; there is no stat/type card in the level-up pool. Once every
+## move is at capOf() and every vitamin slot is full/at vitCap, KS returns an
+## empty list and doLevelUp() @1542070 falls back to its heal+gold reward.
+static func roll(actor: Dictionary, exclude: Dictionary = {}, stage: int = 1) -> Dictionary:
 	var weights := kind_weights(actor, exclude)
 	if weights.is_empty():
-		return roll_stat_card(exclude, actor)
+		return {}
 	var kind := str(PbRng.weighted(weights))
 	match kind:
 		"up_vit":
-			var up := roll_vitamin(actor, exclude, false)
-			if not up.is_empty():
-				return up
+			return roll_vitamin(actor, exclude, false, stage)
 		"new_vit":
-			var nv := roll_vitamin(actor, exclude, true)
-			if not nv.is_empty():
-				return nv
+			return roll_vitamin(actor, exclude, true, stage)
 		"move_upgrade":
-			var up_move := roll_move_upgrade(actor, exclude)
-			if not up_move.is_empty():
-				return up_move
+			return roll_move_upgrade(actor, exclude, stage)
 		"new_move":
-			var nm := roll_new_move(actor, exclude)
-			if not nm.is_empty():
-				return nm
-	# Vitamins / moves unavailable (everything at cap, no free slot, or all
-	# candidates banned): fall back to the stand-in stat card.
-	return roll_stat_card(exclude, actor)
+			return roll_new_move(actor, exclude)
+	return {}
 
 
 ## `KS` candidate counts: [weight, kind]. The web builds a flat candidate list
@@ -95,20 +90,21 @@ static func kind_weights(actor: Dictionary, exclude: Dictionary = {}) -> Array:
 	if move_up > 0:
 		entries.append([2.0 * float(move_up), "move_upgrade"])
 	# The web only rolls new-move candidates while an empty move slot is open.
-	if PbActor.free_slot(actor) >= 0:
+	if PbActor.free_slot(actor) >= 0 and not _new_move_candidates(actor, exclude).is_empty():
 		entries.append([3.0, "new_move"])
 	return entries
 
 
 ## Vitamin card: `KS` @1099962 gives 2 upVit offers per owned vitamin below
 ## vitCap, and a .45 chance of a newVit per unowned one while a slot is free.
-static func roll_vitamin(actor: Dictionary, exclude: Dictionary = {}, brand_new: bool = false) -> Dictionary:
+static func roll_vitamin(actor: Dictionary, exclude: Dictionary = {}, brand_new: bool = false,
+		stage: int = 1) -> Dictionary:
 	var candidates := _vitamin_candidates(actor, exclude, brand_new)
 	if candidates.is_empty():
 		return {}
 	var key := str(PbRng.pick(candidates))
 	var def := PbVitamins.def_of(key)
-	var rarity := _roll_rarity(actor)
+	var rarity := _roll_rarity(actor, stage)
 	var value := float(RARITY_MULT[clampi(rarity, 0, RARITY_MULT.size() - 1)])
 	var preview := PbVitamins.preview(actor, key, value)
 	var current_level := PbVitamins.level_of(actor, key)
@@ -212,56 +208,118 @@ static func roll_type_card(exclude: Dictionary = {}) -> Dictionary:
 	}
 
 
-static func roll_move_upgrade(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
+## Ey() @794285: pick 2 distinct stats from the archetype's upgradeable list
+## (3 when the rarity multiplier is >= 1.6, i.e. rarity 3/4). Each up carries
+## the amount from Ey; the card shows one label per stat (wy @793150).
+static func roll_move_upgrade(actor: Dictionary, exclude: Dictionary = {},
+		stage: int = 1) -> Dictionary:
 	var slots := _upgradeable_slots(actor, exclude)
 	if slots.is_empty():
 		return {}
 	var slot := PbJson.as_dict(PbRng.pick(slots))
 	var arch := str(slot.get("arch", "bolt"))
-	var stats := _arch_stats(arch)
-	if stats.is_empty():
+	var pool := _arch_stats(arch).duplicate()
+	if pool.is_empty():
 		return {}
-	var stat := str(PbRng.pick(stats))
-	var rarity := _roll_rarity(actor)
-	var mult := float(RARITY_MULT[rarity])
-	var base := float(PbJson.as_dict(ARCH_STAT_AMOUNTS.get(stat, {"base": 0.1}))["base"])
-	var mod := {"stat": stat}
-	match stat:
-		"count":
-			mod["add"] = 2 if mult >= 1.6 else 1
-		"pierce", "bounce":
-			mod["add"] = maxi(1, int(round(mult)))
-		"cd":
-			mod["mul"] = 1.0 - minf(0.25, base * mult)
-		"crit":
-			mod["add"] = base * mult
-		_:
-			mod["mul"] = 1.0 + base * mult
+	var rarity := _roll_rarity(actor, stage)
+	var mult := float(RARITY_MULT[clampi(rarity, 0, RARITY_MULT.size() - 1)])
+	var count := 3 if mult >= 1.6 else 2
+	var ups := []
+	var lines := []
+	while ups.size() < count and not pool.is_empty():
+		var stat := str(pool.pop_at(PbRng.randi_range(0, pool.size() - 1)))
+		var mod := _move_up_mod(stat, mult)
+		ups.append(mod)
+		var value := float(mod["add"]) if mod.has("add") else 1.0 - float(mod.get("mul", 1.0))
+		lines.append(_up_label(arch, stat, value))
 	return {
 		"kind": "move_upgrade",
 		"move_key": str(slot["key"]),
 		"slot": int(slot["slot"]),
-		"stat": stat,
+		"stat": str(ups[0].get("stat", "")) if not ups.is_empty() else "",
 		"rarity": rarity,
-		"mods": [mod],
-		"label": "%s · %s" % [str(slot.get("name", "")), stat],
+		"ups": ups,
+		"mods": ups,
+		"level": int(slot.get("level", 1)),
+		"next_level": int(slot.get("level", 1)) + 1,
+		"cap": int(slot.get("cap", PbActor.MOVE_MAX_LEVEL)),
+		"label": "%s · %s" % [str(slot.get("name", "")), " / ".join(lines)],
 		"estimated": false,
 	}
 
 
-static func roll_new_move(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
+## Ey()'s per-stat amounts. `mult` is Ot[rarity], not the rarity index.
+static func _move_up_mod(stat: String, mult: float) -> Dictionary:
+	match stat:
+		"dmg":
+			return {"stat": stat, "add": 0.22 * mult}
+		"cd":
+			return {"stat": stat, "mul": 1.0 - minf(0.25, 0.08 * mult)}
+		"count":
+			return {"stat": stat, "add": float(2 if mult >= 1.6 else 1)}
+		"pierce", "bounce":
+			return {"stat": stat, "add": float(maxi(1, int(round(mult))))}
+		"area":
+			return {"stat": stat, "add": 0.15 * mult}
+		"speed":
+			return {"stat": stat, "add": 0.15 * mult}
+		"dur":
+			return {"stat": stat, "add": 0.2 * mult}
+		"crit":
+			return {"stat": stat, "add": 0.05 * mult}
+		"status":
+			return {"stat": stat, "add": 0.25 * mult}
+	return {"stat": stat, "add": 0.0}
+
+
+## Cy()/wy() labels: count reads "+N golpes" on strike-like archetypes and
+## "+N proyectiles" elsewhere; everything else is a percentage.
+static func _up_label(arch: String, stat: String, value: float) -> String:
+	match stat:
+		"count":
+			if arch in ["strike", "dash", "smite", "meteor"]:
+				return App.ui("+{n} golpe", {"n": int(value)}) if int(value) == 1 \
+					else App.ui("+{n} golpes", {"n": int(value)})
+			return App.ui("+{n} proyectil", {"n": int(value)}) if int(value) == 1 \
+				else App.ui("+{n} proyectiles", {"n": int(value)})
+		"pierce":
+			return App.ui("+{n} perforación", {"n": int(value)})
+		"bounce":
+			return App.ui("+{n} rebote", {"n": int(value)})
+		"dmg":
+			return App.ui("+{pct}% daño", {"pct": int(roundf(value * 100.0))})
+		"cd":
+			return App.ui("-{pct}% recarga", {"pct": int(roundf(value * 100.0))})
+		"area":
+			return App.ui("+{pct}% área", {"pct": int(roundf(value * 100.0))})
+		"speed":
+			return App.ui("+{pct}% velocidad", {"pct": int(roundf(value * 100.0))})
+		"dur":
+			return App.ui("+{pct}% duración", {"pct": int(roundf(value * 100.0))})
+		"crit":
+			return App.ui("+{pct}% crítico", {"pct": int(roundf(value * 100.0))})
+		"status":
+			return App.ui("+{pct}% prob. de estado", {"pct": int(roundf(value * 100.0))})
+	return stat
+
+
+static func _new_move_candidates(actor: Dictionary, exclude: Dictionary) -> Array:
 	var species_id := int(actor.get("species_id", 1))
-	var owned := PbActor.move_keys(actor)
+	var owned := _owned_move_ids(actor)
 	var candidates := []
 	for key in PbMoves.learnable_moves(species_id):
 		if owned.has(key):
 			continue
-		if exclude.has("new:" + str(key)):
+		if exclude.has("m:" + str(key)):
 			continue
-		var def := PbMoves.resolve(str(key))
-		if def.is_empty():
+		if PbMoves.resolve(str(key)).is_empty():
 			continue
 		candidates.append(str(key))
+	return candidates
+
+
+static func roll_new_move(actor: Dictionary, exclude: Dictionary = {}) -> Dictionary:
+	var candidates := _new_move_candidates(actor, exclude)
 	if candidates.is_empty():
 		return {}
 	var pick_key := str(PbRng.pick(candidates))
@@ -275,13 +333,14 @@ static func roll_new_move(actor: Dictionary, exclude: Dictionary = {}) -> Dictio
 	}
 
 
-static func offer(actor: Dictionary, count: int = 3, banished: Dictionary = {}) -> Array:
+static func offer(actor: Dictionary, count: int = 3, banished: Dictionary = {},
+		stage: int = 1) -> Array:
 	var out := []
 	var used := banished.duplicate(true)
 	var guard := 0
 	while out.size() < count and guard < 40:
 		guard += 1
-		var card := roll(actor, used)
+		var card := roll(actor, used, stage)
 		if card.is_empty():
 			break
 		used[_card_key(card, out.size())] = true
@@ -295,10 +354,10 @@ static func _card_key(card: Dictionary, fallback: int) -> String:
 	match kind:
 		"new_vit", "up_vit":
 			return "v" + str(card.get("vit", ""))
-		"new_move":
-			return "new:" + str(card.get("move_key", ""))
-		"move_upgrade":
-			return "mv:" + str(card.get("move_key", ""))
+		"new_move", "move_upgrade":
+			# The web tags both pools with the same `m`+move.id key, so a
+			# banish hit removes the move from upgrades *and* new-move rolls.
+			return "m:" + str(card.get("move_key", ""))
 		"type":
 			return "type:" + str(card.get("type", ""))
 	return "stat:" + str(card.get("stat", fallback))
@@ -330,11 +389,13 @@ static func _owned_slots(actor: Dictionary) -> Array:
 		var m = moves[i]
 		if m == null:
 			continue
-		var def := PbJson.as_dict(PbJson.as_dict(m).get("def", {}))
+		var inst := PbJson.as_dict(m)
+		var def := PbJson.as_dict(inst.get("def", {}))
 		if def.is_empty():
 			continue
 		out.append({"slot": i, "key": str(def.get("key", "")), "name": str(def.get("name", "")),
-			"arch": str(def.get("arch", "")), "level": int(PbJson.as_dict(m).get("level", 1))})
+			"arch": str(def.get("arch", "")), "level": int(inst.get("level", 1)),
+			"cap": PbActor.move_cap(actor, inst)})
 	return out
 
 
@@ -342,11 +403,25 @@ static func _owned_slots(actor: Dictionary) -> Array:
 static func _upgradeable_slots(actor: Dictionary, exclude: Dictionary = {}) -> Array:
 	var out := []
 	for slot in _owned_slots(actor):
-		if int(slot.get("level", 1)) >= PbActor.MOVE_MAX_LEVEL:
+		if int(slot.get("level", 1)) >= int(slot.get("cap", PbActor.MOVE_MAX_LEVEL)):
 			continue
-		if exclude.has("mv:" + str(slot["key"])):
+		if exclude.has("m:" + str(slot["key"])):
 			continue
 		out.append(slot)
+	return out
+
+
+## Ob.ownedMoveIds(): owns a move by its key or by either fusion parent's key.
+static func _owned_move_ids(actor: Dictionary) -> Array:
+	var out := PbActor.move_keys(actor)
+	for raw in PbJson.as_array(actor.get("moves", [])):
+		if raw == null:
+			continue
+		for parent in PbJson.as_array(PbJson.as_dict(raw).get("parents", [])):
+			var p := PbJson.as_dict(parent)
+			var key := str(p.get("key", p.get("move_key", "")))
+			if not key.is_empty():
+				out.append(key)
 	return out
 
 

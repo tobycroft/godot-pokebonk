@@ -651,8 +651,26 @@ static func open_offers(state: Dictionary) -> void:
 	if PbEvo.try_evolve(state):
 		return
 	var player: Dictionary = state["player"]
-	state["offers"] = PbCards.offer(player, 3, state["banished"])
+	state["offers"] = PbCards.offer(player, 3, state["banished"], int(state.get("stage", 1)))
+	# doLevelUp() @1542070: when KS() finds no candidates (all moves at
+	# capOf(), all vitamins capped) the level-up pays out heal + gold instead
+	# of showing cards. The web's random `train()` mini-stat is not ported --
+	## 待确认 (zk table absent from the extracted data).
+	if PbJson.as_array(state["offers"]).is_empty():
+		_empty_level_up(state)
+		return
 	state["state"] = "modal"
+
+
+static func _empty_level_up(state: Dictionary) -> void:
+	var player: Dictionary = state["player"]
+	PbActor.heal(player, float(player.get("maxHp", 0.0)) * 0.2)
+	state["gold"] = float(state["gold"]) + 15.0
+	state["pendingLevels"] = maxi(0, int(state["pendingLevels"]) - 1)
+	state["offers"] = []
+	state["state"] = "play"
+	if int(state["pendingLevels"]) > 0:
+		open_offers(state)
 
 
 static func choose_offer(state: Dictionary, index: int) -> bool:
@@ -661,7 +679,10 @@ static func choose_offer(state: Dictionary, index: int) -> bool:
 		return false
 	var card := PbJson.as_dict(offers[index])
 	var player: Dictionary = state["player"]
-	PbCards.take(player, card)
+	var result := PbCards.take(player, card)
+	# JS() @1098000 also counts newly learned moves for the run stats.
+	if str(card.get("kind", "")) == "new_move" and result == "learned":
+		state["stats"]["movesLearned"] = int(state["stats"].get("movesLearned", 0)) + 1
 	state["stats"]["powerUps"] = int(state["stats"]["powerUps"]) + 1
 	state["pendingLevels"] = maxi(0, int(state["pendingLevels"]) - 1)
 	state["offers"] = []
@@ -696,8 +717,9 @@ static func banish(state: Dictionary, index: int) -> bool:
 	if index < 0 or index >= offers.size():
 		return false
 	var card := PbJson.as_dict(offers[index])
-	var tag := "%s:%s" % [str(card.get("kind", "")), str(card.get("stat", card.get("type", card.get("move_key", ""))))]
-	state["banished"][tag] = true
+	# Reuse the exact keys the roll_* pools consult (`m:`+move, `v`+vit);
+	# the old `kind:field` tag never matched and banish had no effect.
+	state["banished"][PbCards._card_key(card, index)] = true
 	state["banishes"] = int(state["banishes"]) - 1
 	open_offers(state)
 	return true

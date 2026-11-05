@@ -165,6 +165,7 @@ static func learn(state: Dictionary, move_key: String, slot: int = -1) -> bool:
 		"level": 1,
 		"mods": [],
 		"parents": [],
+		"extra": [],
 		"cooldown": 0.0,
 		"timer": 0.0,
 	}
@@ -176,26 +177,48 @@ static func forget(state: Dictionary, slot: int) -> void:
 		PbJson.as_array(state["moves"])[slot] = null
 
 
+## Ob.capOf() @840315: fused moves cap at 5, regular moves at `moveCap`
+## (8 + 2 with tm-case). tm-case only lifts the regular cap by 1 on fusions.
+static func move_cap(state: Dictionary, inst: Dictionary) -> int:
+	var def := PbJson.as_dict(inst.get("def", {}))
+	var tm_case := int(item_power(state, "tm-case")) > 0
+	if def.has("fusion"):
+		return 5 + (1 if tm_case else 0)
+	return MOVE_MAX_LEVEL + (2 if tm_case else 0)
+
+
 static func level_up_move(state: Dictionary, slot: int) -> bool:
 	var m = PbJson.as_array(state["moves"])[slot]
 	if m == null:
 		return false
 	var inst := PbJson.as_dict(m)
 	var lvl := int(inst.get("level", 1))
-	if lvl >= MOVE_MAX_LEVEL:
+	if lvl >= move_cap(state, inst):
 		return false
 	inst["level"] = lvl + 1
 	return true
 
 
-## A card that upgrades one stat of an owned move.
+## Port of Dy() @794775: every upgrade card bumps the instance one level (the
+## +8% damage per level lives in PbDamage.level_mods), then folds the card's
+## ups into the instance. At/over capOf() the ups also land in `extra`, the
+## rollback bucket tm-case removal pops (Oy @795313).
+##   card.mods entries: `add` for dmg/area/speed/dur/status/count/pierce/
+##   bounce/crit, `mul` for cd -- the same arithmetic the web does on its
+##   `Sy.mods` dictionary.
 static func upgrade_move(state: Dictionary, slot: int, card: Dictionary) -> void:
-	var m = PbJson.as_array(state["moves"])[slot]
-	if m == null:
+	var moves := PbJson.as_array(state.get("moves", []))
+	if slot < 0 or slot >= moves.size() or moves[slot] == null:
 		return
-	var inst := PbJson.as_dict(m)
+	var inst := PbJson.as_dict(moves[slot])
+	var ups := PbJson.as_array(card.get("mods", card.get("ups", [])))
+	if int(inst.get("level", 1)) >= move_cap(state, inst):
+		var extra := PbJson.as_array(inst.get("extra", []))
+		extra.append(ups.duplicate(true))
+		inst["extra"] = extra
+	inst["level"] = int(inst.get("level", 1)) + 1
 	var mods: Array = PbJson.as_array(inst.get("mods", []))
-	for mod in PbJson.as_array(card.get("mods", [])):
+	for mod in ups:
 		mods.append(PbJson.as_dict(mod))
 	inst["mods"] = mods
 
