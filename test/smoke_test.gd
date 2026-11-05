@@ -31,6 +31,7 @@ func _ready() -> void:
 	_formula_parity()
 	_fusion_checks()
 	_run_flow()
+	_boss_altar_checks()
 	_save_flow()
 	_save_migration_checks()
 	_asset_checks()
@@ -265,15 +266,16 @@ func _run_flow() -> void:
 	ok(int(player.get("level", 1)) > 1, "player levelled up (xp curve + offers work)")
 	ok(int(stats.get("powerUps", 0)) > 0, "cards were picked during level-ups")
 	ok(not bool(run.get("bossSpawned", false)) and int(run["stage"]) == 1,
-		"no guardian before the web 600 s stage horizon")
+		"no guardian spawns on its own during a normal stage")
 	# Stage count is per biome (web @1532894).
 	ok(PbRun.stage_count(run) == 4, "sanctuary biome clears on stage 4")
 	ok(PbRun.stage_count({"biome": "graveyard"}) == 3, "non-sanctuary biome clears on stage 3")
-	# The guardian wakes once stageT reaches the recovered 600 s milestone.
+	# The 600 s milestone only drives the web's final swarm; it never wakes the
+	# guardian (that is the altar interaction, @1297900).
 	var horizon := PbRun.create(1, "forest", 20261102, {"damage": 0.2, "maxHp": 20})
 	horizon["stageT"] = PbRun.STAGE_TIME
 	PbRun.simulate(horizon, 2.0)
-	ok(bool(horizon.get("bossSpawned", false)), "guardian wakes at the 600 s stage horizon")
+	ok(not bool(horizon.get("bossSpawned", false)), "600 s no longer auto-wakes the guardian")
 	ok(PbJson.as_array(run["orbs"]).size() >= 0, "orb list maintained")
 	ok(not PbJson.as_array(run["offers"]).is_empty() or int(run["pendingLevels"]) == 0,
 		"modal state consistent with pending levels")
@@ -1745,6 +1747,53 @@ func _shop_checks() -> void:
 	PbRun._tick_meowth(np, 46.0)
 	ok(not PbRun.meowth_present(np), "meowth leaves after its 45 s stay")
 	ok(not PbRun.meowth_near(np), "the departed NPC can no longer be interacted with")
+
+
+# ------------------------------------------------------------------ boss altar
+## Boss altar + portal (interactables @1303414 / onBossKilled @1529103):
+## the guardian is woken by walking onto the altar, never by stage time.
+func _boss_altar_checks() -> void:
+	section("boss altar + portal (web @1303414/@1532894)")
+	var run := PbRun.create(1, "forest", 424242)
+	ok(PbRun.altar_present(run), "a non-endless stage carries a boss altar")
+	ok(not PbRun.altar_used(run), "the altar starts dormant")
+	ok(not bool(run.get("bossSpawned", false)), "no guardian before the interaction")
+	ok(not PbRun.portal_open(run), "no portal while the guardian is up")
+	var endless := PbRun.create(1, "forest", 7, {}, "endless")
+	ok(not PbRun.altar_present(endless), "endless runs have no boss altar")
+	# Walk onto the altar (web `boss` radius 4 + .8 prompt pad, @1288807/@1310201).
+	var player: Dictionary = run["player"]
+	player["x"] = float(run.get("altarX", 0.0))
+	player["z"] = float(run.get("altarZ", 0.0))
+	ok(PbRun.altar_near(run), "the altar prompt opens inside its radius")
+	ok(PbRun.wake_guardian(run), "the interaction wakes the guardian")
+	ok(bool(run.get("bossSpawned", false)), "the guardian is on the field")
+	ok(PbRun.altar_used(run), "the altar is spent")
+	ok(not PbRun.wake_guardian(run), "a spent altar cannot summon a second guardian")
+	# The guardian falls: the portal opens where it died, the stage stays put.
+	var pool: Dictionary = run["enemies"]
+	PbEnemies.kill(pool, int(run.get("bossIndex", -1)))
+	PbRun.tick(run, 1.0 / 12.0)
+	ok(PbRun.portal_open(run), "the guardian's death opens the portal")
+	ok(int(run["stage"]) == 1, "the stage only advances through the portal")
+	ok(PbJson.as_array(run["splits"]).size() == 1, "the stage split is recorded at the kill")
+	ok(not PbRun.enter_portal(run), "the portal ignores E from far away")
+	# Take the portal.
+	player["x"] = float(run.get("portalX", 0.0))
+	player["z"] = float(run.get("portalZ", 0.0))
+	ok(PbRun.portal_near(run), "the portal prompt opens inside its radius")
+	ok(PbRun.enter_portal(run), "the portal advances the run")
+	ok(int(run["stage"]) == 2 and int(run["altarStage"]) == 2, "the next stage re-places its altar")
+	ok(PbRun.altar_present(run) and not PbRun.portal_open(run), "the new stage is back to its altar")
+	# A legacy auto-woken save keeps its altar dimmed and stays playable.
+	var legacy := PbRun.create(1, "forest", 99)
+	legacy.erase("altarStage")
+	legacy.erase("altarUsed")
+	PbRun.spawn_boss(legacy)
+	PbRun.ensure_state(legacy)
+	ok(PbRun.altar_present(legacy), "a legacy save still owns an altar")
+	ok(PbRun.altar_used(legacy), "the legacy altar is already spent")
+	ok(not PbRun.wake_guardian(legacy), "the legacy altar cannot wake a second guardian")
 
 
 # ------------------------------------------------------------------ weather events

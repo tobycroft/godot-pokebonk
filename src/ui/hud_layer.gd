@@ -988,9 +988,18 @@ func _sync_goal(state: Dictionary, stage: int) -> void:
 	var boss_now := bool(state.get("bossSpawned", false))
 	var pool := PbRun.pool_of(state)
 	var boss_index := int(state.get("bossIndex", -1))
-	var countdown := maxf(0.0, PbRun.STAGE_TIME - float(state.get("stageT", 0.0)))
-	(_els["kg_left"] as Label).text = UI.fmt_clock(countdown) if not boss_now else "—"
-	var progress := clampf(float(state.get("stageT", 0.0)) / PbRun.STAGE_TIME, 0.0, 1.0)
+	var portal_now := PbRun.portal_open(state)
+	var altar_here := PbRun.altar_present(state)
+	# The web has no stage countdown: the goal card leads to the boss altar
+	# (interactable @1303414) and then to the portal the guardian leaves.
+	var left_text := "—"
+	var progress := 0.0
+	if portal_now:
+		left_text = "▶"
+		progress = 1.0
+	elif altar_here and not boss_now:
+		left_text = "%d m" % roundi(PbRun.altar_distance(state))
+	(_els["kg_left"] as Label).text = left_text
 	if boss_now and boss_index >= 0 and PbEnemies.is_alive(pool, boss_index):
 		var hp := float(PbEnemies.get_field(pool, "hp", boss_index))
 		var mx := maxf(1.0, float(PbEnemies.get_field(pool, "maxHp", boss_index)))
@@ -998,10 +1007,13 @@ func _sync_goal(state: Dictionary, stage: int) -> void:
 		(_els["kg_name"] as Label).text = App.t("pokemon", int(PbEnemies.get_field(pool, "species", boss_index)),
 			"#%d" % int(PbEnemies.get_field(pool, "species", boss_index)))
 		(_els["kg_tag"] as Label).text = "击败首领"
+	elif portal_now:
+		(_els["kg_name"] as Label).text = "传送门"
+		(_els["kg_tag"] as Label).text = "进入传送门"
 	elif not boss_now:
 		var species := _next_boss_species(stage)
 		(_els["kg_name"] as Label).text = App.t("pokemon", species, "#%d" % species)
-		(_els["kg_tag"] as Label).text = App.ui("Fase {n}", {"n": stage})
+		(_els["kg_tag"] as Label).text = "唤醒祭坛"
 		var sprite := _els["kg_sprite"] as PmdSprite
 		if sprite.species_id != species:
 			sprite.setup(species, "idle", 0.36)

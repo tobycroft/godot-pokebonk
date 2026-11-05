@@ -47,6 +47,10 @@ var _shop_info: Label
 var _shop_open := false
 var _meowth_node: MeshInstance3D
 var _meowth_lift := 0.0
+var _altar_node: Node3D
+var _altar_light: OmniLight3D
+var _portal_node: Node3D
+var _portal_light: OmniLight3D
 var _prompt: Label
 var _sell_armed_key := ""
 var _sell_armed_t := 0.0
@@ -184,6 +188,39 @@ func _build_world() -> void:
 	meowth.visible = false
 	add_child(meowth)
 	_meowth_node = meowth
+	# Boss altar + portal: the web's `boss` interactable loads models/boss.glb
+	# (@1287232 `boss:['boss',6.2]`; 6.2 is the authored height, the glb is already
+	# in world units) and `portal` loads portal.glb, absent from this mirror, so
+	# the tower gate reuses the local tower_portal.glb at the same authored scale.
+	_altar_node = _build_prop("boss", 1.0, Color(1.0, 0.72, 0.28), 1.6)
+	add_child(_altar_node)
+	_altar_light = _altar_node.get_meta("light")
+	_portal_node = _build_prop("tower_portal", 1.0, Color(0.62, 0.45, 1.0), 1.3)
+	add_child(_portal_node)
+	_portal_light = _portal_node.get_meta("light")
+
+
+## One `assets/models/<key>.glb` prop plus the emissive OmniLight the world
+## shader would otherwise supply for the altar/portal glow.
+func _build_prop(key: String, scale_v: float, light_color: Color, light_energy: float) -> Node3D:
+	var root := Node3D.new()
+	root.visible = false
+	var path := "res://assets/models/%s.glb" % key
+	if ResourceLoader.exists(path):
+		var packed = load(path)
+		if packed is PackedScene:
+			var node: Node = (packed as PackedScene).instantiate()
+			if node is Node3D:
+				(node as Node3D).scale = Vector3.ONE * scale_v
+				root.add_child(node)
+	var light := OmniLight3D.new()
+	light.light_color = light_color
+	light.light_energy = light_energy
+	light.omni_range = 8.0
+	light.position = Vector3(0.0, 2.2, 0.0)
+	root.add_child(light)
+	root.set_meta("light", light)
+	return root
 
 
 # ------------------------------------------------------------------ hud
@@ -279,6 +316,24 @@ func _build_hud() -> void:
 	_shop_actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	shop_body.add_child(_shop_actions)
 	shop_body.add_child(UI.dim(App.ui("Si le compras mucho sin abrir Poké Balls, su próxima tienda saldrá más cara.")))
+
+
+## The altar interaction (@1297900): the guardian appears 6-10 units away
+## and its `boss!` message becomes the usual banner.
+func _wake_guardian() -> void:
+	if not PbRun.wake_guardian(_run):
+		return
+	Audio.sfx("boss")
+	_sync_run_music()
+
+
+## enterPortal (@1532894): taking the portal advances the stage; the next tick
+## closes the run once the last stage is cleared.
+func _enter_portal() -> void:
+	if not PbRun.enter_portal(_run):
+		return
+	Audio.sfx("level")
+	_sync_run_music()
 
 
 func _toggle_pause() -> void:
@@ -490,6 +545,8 @@ func _build_terrain() -> void:
 	# PbHazards needs the height field for flat-spot sampling; it stays in-memory
 	# only (runs are not persisted mid-stage).
 	_run["terrain"] = _terrain
+	# Re-pick the altar on the real height field (create() only had the fallback).
+	PbRun.place_altar(_run, true)
 	var palette_all := PbData.world_palettes()
 	var palette := PbJson.as_dict(PbJson.as_dict(palette_all.get("by_pack")).get(biome_id))
 	_view.setup(_terrain, biome_dict, PbData.world_pack(biome_id), palette, PbData.world_fx())
@@ -699,9 +756,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				_toggle_aim()
 		KEY_E:
 			# re keymap: capture throw = KeyE (kS.tryThrow/throwBall @1082671).
-			# The meowth interactable shares the key and wins while the NPC is near.
+			# Interactables share the key: portal > guardian altar > Meowth shop,
+			# matching the web's `nearest` priority (@1310201).
 			if not modal and not _paused and not over:
-				if PbRun.meowth_near(_run):
+				if PbRun.portal_near(_run):
+					_enter_portal()
+				elif PbRun.altar_near(_run):
+					_wake_guardian()
+				elif PbRun.meowth_near(_run):
 					_open_shop()
 				elif PbCapture.throw_ball(_run):
 					Audio.sfx("ui")
@@ -739,7 +801,7 @@ func _pump_events() -> void:
 		_msg_seen += 1
 		if text.begins_with("stage"):
 			var n := int(text.get_slice(" ", 1))
-			_hud.show_banner(App.ui("Fase {n}", {"n": n}), "击杀首领才能进入下一阶段", "#ff5a5f")
+			_hud.show_banner(App.ui("Fase {n}", {"n": n}), "穿过传送门进入下一阶段", "#ff5a5f")
 			Audio.sfx("level")
 			_sync_run_music()
 		elif text.begins_with("boss!"):
@@ -932,6 +994,26 @@ func _render(dt: float) -> void:
 	for i in range(orb_used, _orb_nodes.size()):
 		_orb_nodes[i].visible = false
 
+	# Altar (@1303414) and portal (@1529103): the altar glows until the guardian
+	# is awake (web dims it on use); the portal only exists after the kill.
+	var altar_here := PbRun.altar_present(_run)
+	_altar_node.visible = altar_here
+	if altar_here:
+		var ax := float(_run.get("altarX", 0.0))
+		var az := float(_run.get("altarZ", 0.0))
+		_altar_node.position = Vector3(ax, _ground_y(ax, az), az)
+		var awake := PbRun.altar_used(_run)
+		_altar_light.visible = not awake
+		if not awake:
+			_altar_light.light_energy = 1.5 + sin(_time * 2.4) * 0.35
+	var portal_here := PbRun.portal_open(_run)
+	_portal_node.visible = portal_here
+	if portal_here:
+		var ox := float(_run.get("portalX", 0.0))
+		var oz := float(_run.get("portalZ", 0.0))
+		_portal_node.position = Vector3(ox, _ground_y(ox, oz), oz)
+		_portal_light.light_energy = 1.2 + sin(_time * 3.0) * 0.3
+
 	# Meowth NPC + `[E]` prompt. The prompt hides while a modal/shop is open.
 	var meowth_here := PbRun.meowth_present(_run)
 	_meowth_node.visible = meowth_here
@@ -941,12 +1023,19 @@ func _render(dt: float) -> void:
 		_meowth_node.position = Vector3(mx, _ground_y(mx, mz) + _meowth_lift
 			+ sin(_time * 2.0) * 0.08, mz)
 	var play_state := str(_run.get("state", "play")) == "play"
-	var prompt_on := meowth_here and PbRun.meowth_near(_run) and not _shop_open \
+	var prompt_text := ""
+	if portal_here and PbRun.portal_near(_run):
+		prompt_text = "[E] " + App.ui(PbRun.portal_prompt(_run))
+	elif altar_here and PbRun.altar_near(_run):
+		prompt_text = "[E] " + App.ui(PbRun.altar_prompt(_run))
+	elif meowth_here and PbRun.meowth_near(_run):
+		prompt_text = "[E] " + App.ui("Tienda de Meowth")
+	var prompt_on := prompt_text != "" and not _shop_open \
 		and not _paused and play_state and not _modal_scrim.visible \
 		and not _settle_scrim.visible
 	_prompt.visible = prompt_on
 	if prompt_on:
-		_prompt.text = "[E] " + App.ui("Tienda de Meowth")
+		_prompt.text = prompt_text
 
 
 # ------------------------------------------------------------------ modals

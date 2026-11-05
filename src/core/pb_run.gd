@@ -16,9 +16,12 @@ extends RefCounted
 ## (interactable @1303414) and the stage ends when the guardian dies and the
 ## portal is taken (onBossKilled @1529103 / enterPortal @1532894). The one
 ## stage-time milestone in the bundle is the final swarm at 600 s (@1558002);
-## the port has no altar interaction yet, so it wakes the guardian at that same
-## horizon instead of on a 60 s guess.
+## it never wakes the guardian.
 const STAGE_TIME := 600.0
+## `boss` interactable radius: add() bumps the 2.6 default to 4 (@1288807), and
+## the prompt gate adds .8 (nearest @1310201). `portal` uses 3.4 (@1288785).
+const ALTAR_RADIUS := 4.0
+const PORTAL_RADIUS := 3.4
 const MAX_SPAWNS_PER_SEC := 1800.0  # Ab.MAX_SPAWNS_PER_SEC @876500
 const SPAWN_ALLOWANCE_CAP := 180.0  # 0.1 * MAX_SPAWNS_PER_SEC
 ## credit() @765300: goldFrac += .2 * stats.gold * weight
@@ -59,6 +62,13 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"bossSpawned": false,
 		"bossIndex": -1,
 		"stageCleared": false,
+		"altarX": 0.0,
+		"altarZ": 0.0,
+		"altarStage": 0,
+		"altarUsed": false,
+		"portalX": 0.0,
+		"portalZ": 0.0,
+		"portalOpen": false,
 		"weather": "clear",
 		"baseWeather": "clear",
 		"weatherT": 0.0,
@@ -104,6 +114,8 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 	state["weather"] = base_weather
 	# kS capture encounter (bundle @1074615): one capturable legendary per stage.
 	PbCapture.create(state)
+	# The web places the `boss` altar when the stage's interactables populate.
+	place_altar(state)
 	# The run's growth index follows the player's level (estimated mapping).
 	_apply_lab(state, lab_deltas)
 	# First evolution plan (bundle planEvolution @1514341). Runs have no roster
@@ -189,6 +201,22 @@ static func ensure_state(state: Dictionary) -> Dictionary:
 	state["stats"] = stats
 	if str(state.get("mode", "standard")) == "standard" and not (state.get("capture") is Dictionary):
 		PbCapture.create(state)
+	# Old saves predate the altar/portal pair. A state that was already auto-woken
+	# keeps a dimmed altar (used=true) and stays playable: the guardian is on the
+	# field and the altar must not summon a second one.
+	if (typeof(state.get("altarStage")) != TYPE_FLOAT and typeof(state.get("altarStage")) != TYPE_INT):
+		state["altarStage"] = 0
+	if typeof(state.get("altarUsed")) != TYPE_BOOL:
+		state["altarUsed"] = false
+	if typeof(state.get("portalOpen")) != TYPE_BOOL:
+		state["portalOpen"] = false
+	if typeof(state.get("portalX")) != TYPE_FLOAT and typeof(state.get("portalX")) != TYPE_INT:
+		state["portalX"] = 0.0
+	if typeof(state.get("portalZ")) != TYPE_FLOAT and typeof(state.get("portalZ")) != TYPE_INT:
+		state["portalZ"] = 0.0
+	place_altar(state)
+	if bool(state.get("bossSpawned", false)):
+		state["altarUsed"] = true
 	PbHazards.ensure(state)
 	PbWeatherEvents.ensure(state)
 	# Older saves wrote the map-event id into `weather`; move it back onto the
@@ -343,18 +371,17 @@ static func _tick_director(state: Dictionary, dt: float) -> void:
 	state["spawnAllowance"] = allowance
 	state["credits"] = maxf(0.0, credits)
 
-	if float(state["stageT"]) >= STAGE_TIME and not bool(state["bossSpawned"]):
-		spawn_boss(state)
+	# The guardian only comes from the altar interaction (@1297900); 600 s is the
+	# web's final-swarm milestone, never a wake-up.
 	if bool(state["bossSpawned"]) and not PbEnemies.is_alive(pool, int(state["bossIndex"])) and not bool(state["stageCleared"]):
 		state["stageCleared"] = true
+		var boss_index := int(state["bossIndex"])
 		state["splits"].append({"stage": int(state["stage"]), "time": float(state["time"]),
 			"kills": int(state["stats"]["kills"]), "level": int(state["player"].get("level", 1))})
-		state["stage"] = int(state["stage"]) + 1
-		state["stageT"] = 0.0
-		state["bossSpawned"] = false
-		state["bossIndex"] = -1
-		state["stageCleared"] = false
-		_message(state, "stage %d" % int(state["stage"]))
+		# onBossKilled (@1529103) opens the portal where the guardian died and
+		# leaves stage advancement to enterPortal (@1532894).
+		spawn_portal(state, float(PbEnemies.get_field(pool, "x", boss_index)),
+			float(PbEnemies.get_field(pool, "z", boss_index)))
 	# Hostile terrain: `schedule`/`update` run every director tick, matching the
 	# web controller (`kw.update`), with no extra play-state gate.
 	PbHazards.schedule(state, dt)
@@ -464,14 +491,28 @@ static func _pick_wild_species(state: Dictionary) -> int:
 	return int(PbRng.pick(ids))
 
 
-static func spawn_boss(state: Dictionary) -> void:
+static func spawn_boss(state: Dictionary, origin_x: float = -1.0e9,
+		origin_z: float = -1.0e9) -> void:
 	var pool: Dictionary = state["enemies"]
 	var diff: Dictionary = state["diff"]
 	var legendary := _legendary_for_stage(state)
 	var stage_t := float(state["stageT"])
 	var zone := float(PbCombat.BOSS_ZONE_HP[mini(maxi(int(state["stage"]) - 1, 0),
 		PbCombat.BOSS_ZONE_HP.size() - 1)])
-	var index := PbEnemies.spawn(pool, legendary, player_x(state) + 8.0, player_z(state),
+	# spawnBoss(e,t) @1527570: `this.terrain.randomPoint(F,e,t,6,10)` -- the
+	# guardian appears 6-10 units from the altar, not on the player.
+	var spawn_x := player_x(state) + 8.0
+	var spawn_z := player_z(state)
+	if origin_x > -1.0e8:
+		if state.get("terrain") is PbTerrain:
+			var point: Vector3 = (state["terrain"] as PbTerrain)._random_point(
+				_stage_rng(state, 71), origin_x, origin_z, 6.0, 10.0)
+			spawn_x = point.x
+			spawn_z = point.z
+		else:
+			spawn_x = origin_x + 6.0
+			spawn_z = origin_z
+	var index := PbEnemies.spawn(pool, legendary, spawn_x, spawn_z,
 		int(state["stage"]), diff, "boss",
 		PbCombat.hp_mult(int(state["stage"]), stage_t, diff,
 			float(PbJson.as_dict(state["player"].get("stats", {})).get("difficulty", 1.0))) \
@@ -493,6 +534,164 @@ static func _legendary_for_stage(state: Dictionary) -> int:
 	if candidates.is_empty():
 		return 150
 	return int(candidates[mini(int(state["stage"]) - 1, candidates.size() - 1)])
+
+
+## ------------------------------------------------ boss altar (@1303414)
+## Interactables.populate() adds one `boss` altar on every non-endless stage
+## (@1290477) at `randomPoint(play*.55, play*.97)` and renders the shipped
+## boss.glb at 6.2. Its prompt is `[E] Despertar al guardián`; the interaction
+## marks the altar used, wakes the guardian there and dims the model (@1297900).
+static func altar_present(state: Dictionary) -> bool:
+	if str(state.get("mode", "standard")) == "endless":
+		return false
+	return int(state.get("altarStage", 0)) == int(state.get("stage", 1))
+
+
+static func altar_used(state: Dictionary) -> bool:
+	return bool(state.get("altarUsed", false))
+
+
+static func altar_distance(state: Dictionary) -> float:
+	return Vector2(player_x(state) - float(state.get("altarX", 0.0)),
+		player_z(state) - float(state.get("altarZ", 0.0))).length()
+
+
+static func altar_near(state: Dictionary, radius: float = -1.0) -> bool:
+	if not altar_present(state):
+		return false
+	var limit := ALTAR_RADIUS + 0.8 if radius < 0.0 else radius
+	return altar_distance(state) <= limit
+
+
+static func altar_prompt(state: Dictionary) -> String:
+	if bool(state.get("bossSpawned", false)) or bool(state.get("altarUsed", false)):
+		return "El guardián ya despertó"
+	var sanct := PbJson.as_dict(PbData.biome(str(state.get("biome", "forest"))).get("sanctuary", {}))
+	if int(state.get("stage", 1)) >= 3 and sanct.is_empty():
+		return "Invocar al legendario"
+	return "Despertar al guardián"
+
+
+## Re-pick the stage's altar. `force` is used once the height field exists, so
+## the headless placement is replaced by a terrain-aware one before play starts.
+static func place_altar(state: Dictionary, force: bool = false) -> void:
+	if str(state.get("mode", "standard")) == "endless":
+		return
+	var stage := int(state.get("stage", 1))
+	if not force and int(state.get("altarStage", 0)) == stage:
+		return
+	var point := _altar_point(state)
+	state["altarX"] = point.x
+	state["altarZ"] = point.z
+	state["altarStage"] = stage
+	state["altarUsed"] = false
+
+
+## randomPoint(a*.55, a*.97) around the world centre (@1290460: `a=t.play-5`).
+static func _altar_point(state: Dictionary) -> Vector3:
+	var terrain: PbTerrain = state["terrain"] if state.get("terrain") is PbTerrain else null
+	var play := 128.0  # DEFAULT_WORLD/2 - 12 when no height field exists yet.
+	if terrain != null:
+		play = terrain.play
+	var inner := maxf(0.0, (play - 5.0) * 0.55)
+	var outer := maxf(inner + 1.0, (play - 5.0) * 0.97)
+	var rng := _stage_rng(state, 17)
+	if terrain != null:
+		for _i in 24:
+			var point: Vector3 = terrain._random_point(rng, 0.0, 0.0, inner, outer)
+			# altars never sit inside a prop cylinder (web `r()` rejects those).
+			if not terrain.hit_prop(point.x, point.z, point.y + 1.0, ALTAR_RADIUS + 2.0):
+				return point
+	var angle := rng.range_f(0.0, TAU)
+	var radius := rng.range_f(inner, outer)
+	return Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+
+
+## A stage-local generator: the altar/portal rolls must not shift the combat RNG.
+static func _stage_rng(state: Dictionary, salt: int) -> PbJsRng:
+	return PbJsRng.new(int(state.get("seed", 0)) + int(state.get("stage", 1)) * 7919 + salt)
+
+
+## The altar interaction (@1297900: `e.used=true, spawnBoss(e.x,e.z)`). The
+## mewtwo psychic barrier has no port counterpart, so it adds no gate.
+static func wake_guardian(state: Dictionary) -> bool:
+	if not altar_present(state) or bool(state.get("bossSpawned", false)):
+		return false
+	state["altarUsed"] = true
+	spawn_boss(state, float(state.get("altarX", 0.0)), float(state.get("altarZ", 0.0)))
+	return bool(state.get("bossSpawned", false))
+
+
+## ------------------------------------------------ portal (onBossKilled @1529103)
+static func portal_open(state: Dictionary) -> bool:
+	return bool(state.get("portalOpen", false)) and bool(state.get("stageCleared", false))
+
+
+static func portal_distance(state: Dictionary) -> float:
+	return Vector2(player_x(state) - float(state.get("portalX", 0.0)),
+		player_z(state) - float(state.get("portalZ", 0.0))).length()
+
+
+static func portal_near(state: Dictionary, radius: float = -1.0) -> bool:
+	if not portal_open(state):
+		return false
+	var limit := PORTAL_RADIUS + 0.8 if radius < 0.0 else radius
+	return portal_distance(state) <= limit
+
+
+static func portal_prompt(state: Dictionary) -> String:
+	if str(state.get("mode", "standard")) == "endless":
+		return "Migrar a tierras nuevas"
+	var sanct := PbJson.as_dict(PbData.biome(str(state.get("biome", "forest"))).get("sanctuary", {}))
+	if not sanct.is_empty() and int(state.get("stage", 1)) >= 4:
+		return "Salir del santuario"
+	return "Entrar al portal"
+
+
+## The guardian died: open the portal where it fell (onBossKilled calls
+## `spawnPortal(t.x[e], t.z[e])`) and freeze stage progression until it is taken.
+static func spawn_portal(state: Dictionary, x: float, z: float) -> void:
+	var point := _portal_point(state, x, z)
+	state["portalX"] = point.x
+	state["portalZ"] = point.z
+	state["portalOpen"] = true
+
+
+## spawnPortal's flat-spot search: keep the death spot when it is walkable, else
+## try the rings 6/12/20/35 (@1294753).
+static func _portal_point(state: Dictionary, x: float, z: float) -> Vector3:
+	if not (state.get("terrain") is PbTerrain):
+		return Vector3(x, 0.0, z)
+	var terrain: PbTerrain = state["terrain"]
+	var rng := _stage_rng(state, 29)
+	for radius in [0.0, 6.0, 12.0, 20.0, 35.0]:
+		for _i in 40:
+			var point := Vector3(x, 0.0, z)
+			if radius > 0.0:
+				point = terrain._random_point(rng, x, z, radius * 0.3, radius)
+			point.y = terrain.height(point.x, point.z)
+			if not terrain.is_flat_open(point.x, point.z) or not terrain.in_bounds(point.x, point.z, 6.0):
+				continue
+			if terrain.hit_prop(point.x, point.z, point.y + 1.0, PORTAL_RADIUS + 2.0):
+				continue
+			return point
+	return Vector3(x, terrain.height(x, z), z)
+
+
+## enterPortal @1532894: only after the guardian is down and the player stands
+## inside the 3.4-unit portal radius; increments the stage and re-places the altar.
+static func enter_portal(state: Dictionary) -> bool:
+	if not portal_near(state):
+		return false
+	state["stage"] = int(state.get("stage", 1)) + 1
+	state["stageT"] = 0.0
+	state["bossSpawned"] = false
+	state["bossIndex"] = -1
+	state["stageCleared"] = false
+	state["portalOpen"] = false
+	place_altar(state)
+	_message(state, "stage %d" % int(state["stage"]))
+	return true
 
 
 ## ------------------------------------------------------------------ combat
