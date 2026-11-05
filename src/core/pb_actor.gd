@@ -9,6 +9,21 @@ extends RefCounted
 const MAX_MOVES := 4
 const MOVE_MAX_LEVEL := 8
 
+## train() @1542115, table `zk` @1504504: [stat, mode, base].
+## The base is divided by min(Vk=3, 1 + trainedLevels/Bk=25): full value until
+## the first training past 0, halved at 25, one third from 50 on (never below).
+const TRAIN_TABLE := [
+	["damage", "mul", 0.02],
+	["maxHp", "mul", 0.03],
+	["attackSpeed", "mul", 0.015],
+	["area", "mul", 0.015],
+	["critChance", "add", 0.005],
+	["luck", "add", 2.0],
+	["armor", "add", 1.0],
+]
+const TRAIN_DILUTION_CAP := 3.0
+const TRAIN_DILUTION_STEP := 25.0
+
 ## Growth index handed to PbStats.stats_from_species(). Port of checkGrowth()
 ## (bundle @836543): the web client recomputes at level 24 and 44, so the index
 ## is the number of thresholds passed (0/1/2), not level-1.
@@ -42,6 +57,9 @@ static func create(species_id: int, lab_deltas: Dictionary = {}, level: int = 1)
 		"buffs": {},
 		"status": {},
 		"mods": [],
+		# train(): one accumulated mod per stat plus the dilution counter.
+		"training": {},
+		"trainedLevels": 0,
 		"lab_deltas": lab_deltas,
 		"dead": false,
 		# Revivir Máximo charges (bundle Ob.revives @835451); the lab "revive"
@@ -96,6 +114,14 @@ static func recompute(state: Dictionary) -> void:
 	# Vitamins fold their per-level mods in the same pass (bundle
 	# recompute @838100 loops `this.vitamins` through `hn`).
 	groups.append(PbVitamins.mods_for(state))
+	# `train()` folds its accumulated `training` mods in through `tempMods`
+	# (web recompute @838848: `for(let e of this.run.tempMods) r.push(e)`).
+	var trained := PbJson.as_dict(state.get("training", {}))
+	if not trained.is_empty():
+		var train_group := []
+		for key in trained.keys():
+			train_group.append(trained[key])
+		groups.append(train_group)
 	var stats := PbStats.stats_for(species, growth, lab, groups)
 	for key in items.keys():
 		var def := PbData.item_game(str(key))
@@ -221,6 +247,41 @@ static func upgrade_move(state: Dictionary, slot: int, card: Dictionary) -> void
 	for mod in ups:
 		mods.append(PbJson.as_dict(mod))
 	inst["mods"] = mods
+
+
+## Port of `train()` @1542115: the "empty level-up" mini-stat. One uniform pick
+## from `zk`, skipping critChance once megaCrit >= 1; the amount is diluted as
+## above and accumulated permanently in `training` (web: `run.tempMods`).
+## Returns the picked entry so the caller can surface the hint the web shows
+## through `ui.trained(...)`.
+static func train(state: Dictionary) -> Dictionary:
+	var entries := []
+	var mega_crit := float(PbJson.as_dict(state.get("stats", {})).get("megaCrit", 0.0))
+	for row in TRAIN_TABLE:
+		if str(row[0]) == "critChance" and mega_crit >= 1.0:
+			continue
+		entries.append(row)
+	if entries.is_empty():
+		return {}
+	var row: Array = PbRng.pick(entries)
+	var stat := str(row[0])
+	var mode := str(row[1])
+	var base := float(row[2])
+	var trained := int(state.get("trainedLevels", 0))
+	var amount := base / minf(TRAIN_DILUTION_CAP,
+		1.0 + float(trained) / TRAIN_DILUTION_STEP)
+	var table := PbJson.as_dict(state.get("training", {}))
+	var key := "mul" if mode == "mul" else "add"
+	var mod := PbJson.as_dict(table.get(stat, {}))
+	if mod.is_empty():
+		mod = {"stat": stat, key: 1.0 if key == "mul" else 0.0}
+		table[stat] = mod
+	mod[key] = float(mod.get(key, 0.0)) + amount
+	state["training"] = table
+	state["trainedLevels"] = trained + 1
+	recompute(state)
+	return {"stat": stat, "mode": mode, "amount": amount,
+		"trained": trained + 1, "first": trained == 0}
 
 
 static func add_mods(state: Dictionary, mods: Array) -> void:

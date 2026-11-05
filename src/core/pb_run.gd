@@ -666,11 +666,27 @@ static func _empty_level_up(state: Dictionary) -> void:
 	var player: Dictionary = state["player"]
 	PbActor.heal(player, float(player.get("maxHp", 0.0)) * 0.2)
 	state["gold"] = float(state["gold"]) + 15.0
+	# doLevelUp @1542119 `r()`: heal(.2*maxHp), addGold(15), then train().
+	# train() @1542115 picks from `zk` (7 mini-stats, critChance skipped once
+	# megaCrit >= 1) and shows `ui.trained(...)`; the first one also banners.
+	var info := PbActor.train(player)
+	if not info.is_empty():
+		_message(state, "training: +%s %s" % [
+			_fmt_train(float(info.get("amount", 0.0)), str(info.get("mode", "add"))),
+			str(info.get("stat", ""))])
+		if bool(info.get("first", false)):
+			_message(state, "training unlocked: every empty level now grants a small permanent bonus")
 	state["pendingLevels"] = maxi(0, int(state["pendingLevels"]) - 1)
 	state["offers"] = []
 	state["state"] = "play"
 	if int(state["pendingLevels"]) > 0:
 		open_offers(state)
+
+
+static func _fmt_train(amount: float, mode: String) -> String:
+	if mode == "mul":
+		return "%s%%" % str(snappedf(amount * 100.0, 0.1))
+	return str(snappedf(amount, 0.001))
 
 
 static func choose_offer(state: Dictionary, index: int) -> bool:
@@ -704,6 +720,11 @@ static func skip(state: Dictionary) -> bool:
 	if int(state["skips"]) <= 0:
 		return false
 	state["skips"] = int(state["skips"]) - 1
+	# doLevelUp @1542111: `addGold(Math.max(10*stage, .2*eT(this)))` and a single
+	# `addGold` rounds (run.addGold @1516416). eT = PbShop.chest_price().
+	var payout := int(roundf(maxf(10.0 * float(int(state.get("stage", 1))),
+		0.2 * PbShop.chest_price(state))))
+	state["gold"] = float(state["gold"]) + float(payout)
 	state["offers"] = []
 	state["pendingLevels"] = maxi(0, int(state["pendingLevels"]) - 1)
 	state["state"] = "play"
