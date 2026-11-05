@@ -46,6 +46,7 @@ var _shop_actions: HBoxContainer
 var _shop_info: Label
 var _shop_open := false
 var _meowth_node: MeshInstance3D
+var _meowth_lift := 0.0
 var _prompt: Label
 var _sell_armed_key := ""
 var _sell_armed_t := 0.0
@@ -163,10 +164,12 @@ func _build_world() -> void:
 		_bolt_nodes.append(b)
 	# Meowth shop NPC (species 52): a billboard like the enemies, shown only while
 	# PbRun's meowth timer has it on the map. Use its PMD idle sheet (full body)
-	# rather than the 40x40 UI portrait, which is a face crop blown up 1.8m tall.
+	# rather than the 40x40 UI portrait, which is a face crop blown up.
 	var meowth := MeshInstance3D.new()
 	var meowth_quad := QuadMesh.new()
-	meowth_quad.size = Vector2(1.8, 1.8)
+	var meowth_layout := PbVisuals.billboard_layout(52, "idle")
+	_meowth_lift = float(meowth_layout["lift"])
+	meowth_quad.size = meowth_layout["size"]
 	var meowth_mat := StandardMaterial3D.new()
 	meowth_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	meowth_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -175,7 +178,7 @@ func _build_world() -> void:
 	var meowth_tex := PbVisuals.frame_texture(52, "idle", 0.0, 0)
 	if meowth_tex == null:
 		meowth_tex = PbVisuals.front_texture(52)
-	meowth_mat.albedo_texture = meowth_tex
+	PbVisuals.apply_frame_texture(meowth_mat, meowth_tex)
 	meowth.mesh = meowth_quad
 	meowth.material_override = meowth_mat
 	meowth.visible = false
@@ -819,11 +822,16 @@ func _render(dt: float) -> void:
 			# Compare against last frame's position (not px, which equals this frame's x).
 			var moved := absf(px - _last_px) > 1e-4 or absf(pz - _last_pz) > 1e-4
 			var anim := "walk" if moved else "idle"
-			var tex := PbVisuals.frame_texture(int(player.get("species_id", 1)),
-				str(anim), _time, int(player.get("facing", 0)))
+			var species := int(player.get("species_id", 1))
+			var tex := PbVisuals.frame_texture(species, anim, _time, int(player.get("facing", 0)))
 			var mat := (node as MeshInstance3D).material_override as StandardMaterial3D
-			if mat != null and tex != null:
-				mat.albedo_texture = tex
+			var mesh := (node as MeshInstance3D).mesh
+			if mesh is QuadMesh:
+				var layout := PbVisuals.billboard_layout(species, anim)
+				(mesh as QuadMesh).size = layout["size"]
+				(node as MeshInstance3D).position = Vector3(0, float(layout["lift"]), 0)
+			if tex != null:
+				PbVisuals.apply_frame_texture(mat, tex)
 	_last_px = px
 	_last_pz = pz
 	var pitch := _cam_pitch
@@ -872,10 +880,12 @@ func _render(dt: float) -> void:
 		var scale := float(PbEnemies.get_field(pool, "scale", i))
 		var ex := float(PbEnemies.get_field(pool, "x", i))
 		var ez := float(PbEnemies.get_field(pool, "z", i))
-		# Enemies stand on the height field, not on a flat plane.
-		node.position = Vector3(ex, _ground_y(ex, ez) + scale * 0.55, ez)
-		(node.mesh as QuadMesh).size = Vector2(1.4, 1.4) * scale
 		var species := int(PbEnemies.get_field(pool, "species", i))
+		var layout := PbVisuals.billboard_layout(species, "walk", scale)
+		# Enemies stand on the height field, not on a flat plane; `lift` keeps the
+		# sprite's opaque feet (not the padded frame edge) on that point.
+		node.position = Vector3(ex, _ground_y(ex, ez) + float(layout["lift"]), ez)
+		(node.mesh as QuadMesh).size = layout["size"]
 		var mat := node.material_override as StandardMaterial3D
 		var tex := PbVisuals.frame_texture(species, "walk", _time + float(i) * 0.11, 1)
 		if tex == null:
@@ -883,7 +893,7 @@ func _render(dt: float) -> void:
 			# static portrait, never an untextured (white) quad.
 			tex = PbVisuals.front_texture(species)
 		if mat != null:
-			mat.albedo_texture = tex
+			PbVisuals.apply_frame_texture(mat, tex)
 			if tex != null:
 				var hp_ratio := 1.0
 				var maxhp := float(PbEnemies.get_field(pool, "maxHp", i))
@@ -924,7 +934,7 @@ func _render(dt: float) -> void:
 	if meowth_here:
 		var mx := float(_run.get("meowthX", 0.0))
 		var mz := float(_run.get("meowthZ", 0.0))
-		_meowth_node.position = Vector3(mx, _ground_y(mx, mz) + 0.9
+		_meowth_node.position = Vector3(mx, _ground_y(mx, mz) + _meowth_lift
 			+ sin(_time * 2.0) * 0.08, mz)
 	var play_state := str(_run.get("state", "play")) == "play"
 	var prompt_on := meowth_here and PbRun.meowth_near(_run) and not _shop_open \
