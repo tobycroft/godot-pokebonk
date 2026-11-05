@@ -75,15 +75,34 @@ var _tile_h := 95.0
 
 func _ready() -> void:
 	UI.fill(self)
+	# The web menu is a live 3D diorama (`.mm` over `canvas#game`), not a flat wash.
+	var diorama := PbMenuDiorama.new()
+	diorama.name = "MenuDiorama"
+	add_child(diorama)
 	var root := UI.screen()
 	add_child(root)
 	UI.fill(root)
+	# The port's flat backdrop would paint over the 3D layer: hide it.
+	var backdrop := root.get_node_or_null("Backdrop") as CanvasItem
+	if backdrop != null:
+		backdrop.visible = false
 	_mm = Control.new()
 	_mm.name = "MM"
 	root.add_child(_mm)
 	UI.fill(_mm)
 	# `_mm` lays out in CSS px and is scaled to the canvas in `_on_resized`.
 	_mm.set_anchors_preset(Control.PRESET_TOP_LEFT)
+
+	# `.mm:before`: left and bottom gradients, under the menu content but above 3D.
+	var shade := ColorRect.new()
+	shade.name = "MenuShade"
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var shade_mat := ShaderMaterial.new()
+	shade_mat.shader = load("res://src/ui/pb_menu_overlay.gdshader")
+	shade.material = shade_mat
+	root.add_child(shade)
+	UI.fill(shade)
+	root.move_child(shade, 1)
 
 	_build_top()
 	_build_left()
@@ -114,7 +133,10 @@ func _ready() -> void:
 func _debug_layout() -> void:
 	print("DBG self.size=", size, " viewport=", get_viewport_rect().size)
 	for node in _collect():
-		print("DBG  ", node.name, " ", node.get_class(), " size=", node.size, " min=", node.get_combined_minimum_size())
+		if not (node is Control):
+			continue
+		print("DBG  ", node.name, " ", node.get_class(), " size=", node.size,
+			" min=", node.get_combined_minimum_size())
 
 
 func _collect() -> Array:
