@@ -482,13 +482,84 @@ static func meowth_leaves(state: Dictionary) -> void:
 	_message(state, App.ui("Meowth se ha marchado"))
 
 
+## buildPool() @879880: wild spawns draw from a stage- and biome-filtered pool.
+## Stage 1 only permits `evoStage == 0`; stage 2 widens to 0..1; stage 3 keeps
+## 1..2 and adds unevolving stage-0 species with `bst >= 420`; stage 4 accepts
+## every stage. Legendaries/mythicals never spawn, and the species must share a
+## type with the biome.
 static func _pick_wild_species(state: Dictionary) -> int:
-	## TODO(port): the web build filters wild spawns by biome and research level;
-	## that table was not recoverable, so gen-1 species are sampled uniformly.
-	var ids := PbData.dex_ids(1)
+	var ids := _wild_pool(state)
 	if ids.is_empty():
 		return 1
 	return int(PbRng.pick(ids))
+
+
+## `this.pool = this.rng.shuffle(o.slice())` (@880322): the shuffle happens once
+## per stage, so the cache is keyed on (stage, biome).
+static func _wild_pool(state: Dictionary) -> Array:
+	var stage := int(state.get("stage", 1))
+	var biome_id := str(state.get("biome", "forest"))
+	var cache := PbJson.as_dict(state.get("wildPool", {}))
+	if int(cache.get("stage", 0)) == stage and str(cache.get("biome", "")) == biome_id:
+		return PbJson.as_array(cache.get("ids", []))
+	var biome_types := PbJson.as_array(PbData.biome(biome_id).get("types", []))
+	var sprites := PbData.sprites_map()
+	var max_evo := 0 if stage == 1 else (1 if stage == 2 else 2)
+	var min_evo := 1 if stage == 3 else 0
+	var base: Array = []
+	for raw in PbData.dex_ids(1):
+		var species := PbData.species(int(raw))
+		if species.is_empty():
+			continue
+		if bool(species.get("legendary", false)) or bool(species.get("mythical", false)):
+			continue
+		if PbJson.as_dict(sprites.get(str(int(raw)), {})).is_empty():
+			continue
+		base.append(species)
+	var matched: Array = []
+	for raw in base:
+		var species: Dictionary = raw
+		if not _type_match(PbJson.as_array(species.get("types", [])), biome_types):
+			continue
+		var evo := int(species.get("evoStage", 0))
+		if evo < min_evo or evo > max_evo:
+			continue
+		matched.append(species)
+	# `s=o.filter(hasAnimated); s.length>=24&&(o=s)`: animated sheets win when
+	# they still leave a pool of at least 24 species.
+	var animated: Array = []
+	for raw in matched:
+		var id := int(PbJson.as_dict(raw).get("id", 0))
+		if not PbJson.as_dict(sprites.get(str(id), {}).get("anims", {})).is_empty():
+			animated.append(raw)
+	if animated.size() >= 24:
+		matched = animated
+	if stage == 3:
+		for raw in base:
+			var species: Dictionary = raw
+			var id := int(species.get("id", 0))
+			if not _type_match(PbJson.as_array(species.get("types", [])), biome_types):
+				continue
+			if int(species.get("evoStage", 0)) != 0 or not PbData.evolutions_of(id).is_empty():
+				continue
+			if float(species.get("bst", 0.0)) < 420.0:
+				continue
+			if PbJson.as_dict(sprites.get(str(id), {}).get("anims", {})).is_empty():
+				continue
+			matched.append(species)
+	var ids: Array = []
+	for raw in matched:
+		ids.append(int(PbJson.as_dict(raw).get("id", 0)))
+	ids = PbRng.shuffled(ids)
+	state["wildPool"] = {"stage": stage, "biome": biome_id, "ids": ids}
+	return ids
+
+
+static func _type_match(species_types: Array, wanted: Array) -> bool:
+	for type_name in species_types:
+		if wanted.has(type_name):
+			return true
+	return false
 
 
 static func spawn_boss(state: Dictionary, origin_x: float = -1.0e9,

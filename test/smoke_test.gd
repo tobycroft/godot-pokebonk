@@ -32,6 +32,7 @@ func _ready() -> void:
 	_fusion_checks()
 	_run_flow()
 	_boss_altar_checks()
+	_spawn_pool_checks()
 	_save_flow()
 	_save_migration_checks()
 	_asset_checks()
@@ -1794,6 +1795,63 @@ func _boss_altar_checks() -> void:
 	ok(PbRun.altar_present(legacy), "a legacy save still owns an altar")
 	ok(PbRun.altar_used(legacy), "the legacy altar is already spent")
 	ok(not PbRun.wake_guardian(legacy), "the legacy altar cannot wake a second guardian")
+
+
+# ------------------------------------------------------------------ spawn pool
+## buildPool() @879880: stage evo window, biome type match, legendary/mythical
+## exclusion and the stage-3 "strong unevolving" extra.
+func _spawn_pool_checks() -> void:
+	section("wild spawn pool (web @879880)")
+	var biomes := ["forest", "desert", "coast", "glacier", "graveyard", "volcano"]
+	# counts recovered from the bundle rule over the port's gen-1 dex
+	var expected := {
+		1: [25, 11, 24, 18, 13, 11],
+		2: [43, 22, 48, 38, 26, 22],
+		3: [31, 17, 33, 24, 20, 15],
+		4: [52, 27, 55, 41, 33, 25],
+	}
+	var saved_rng := PbRng.state()
+	for stage in [1, 2, 3, 4]:
+		for b in biomes.size():
+			var state := {"stage": stage, "biome": biomes[b]}
+			var ids := PbRun._wild_pool(state)
+			var want: Array = expected[stage]
+			ok(ids.size() == int(want[b]), "stage %d %s pool size %d (web rule)" % [stage, biomes[b], int(want[b])])
+			for raw in ids:
+				var species := PbData.species(int(raw))
+				var evo := int(species.get("evoStage", 0))
+				var in_window: bool = evo >= (1 if stage == 3 else 0) \
+					and evo <= (2 if stage >= 3 else stage - 1)
+				var stage3_extra: bool = stage == 3 and evo == 0 \
+					and PbData.evolutions_of(int(raw)).is_empty() \
+					and float(species.get("bst", 0.0)) >= 420.0
+				ok(in_window or stage3_extra,
+					"stage %d %s evoStage window holds for #%d" % [stage, biomes[b], int(raw)])
+				ok(not bool(species.get("legendary", false)) and not bool(species.get("mythical", false)),
+					"no legendary/mythical in the wild pool (#%d)" % int(raw))
+	PbRng.set_state(saved_rng)
+	# stage 1 is strictly first-stage
+	for b in biomes:
+		var ids: Array = PbRun._wild_pool({"stage": 1, "biome": b})
+		for raw in ids:
+			ok(int(PbData.species(int(raw)).get("evoStage", 0)) == 0,
+				"stage 1 %s never spawns an evolution (#%d)" % [b, int(raw)])
+	# stage 2 opens evoStage 1, stage 3 swaps 0 for 1..2 + strong unevolving
+	var forest2: Array = PbRun._wild_pool({"stage": 2, "biome": "forest"})
+	ok(forest2.has(2), "stage 2 forest can spawn ivysaur (evoStage 1)")
+	var forest3: Array = PbRun._wild_pool({"stage": 3, "biome": "forest"})
+	ok(forest3.has(143), "stage 3 forest adds snorlax (unevolving, bst 540)")
+	ok(not forest3.has(133), "stage 3 forest drops plain eevee (evoStage 0)")
+	var forest4: Array = PbRun._wild_pool({"stage": 4, "biome": "forest"})
+	ok(forest4.has(1) and forest4.has(3), "stage 4 forest mixes stage 0 and stage 2")
+	# the picker only hands back species from the cached pool
+	PbRng.set_state(saved_rng)
+	var run := PbRun.create(1, "forest", 424242)
+	for n in 50:
+		var picked := PbRun._pick_wild_species(run)
+		ok(PbJson.as_array(PbJson.as_dict(run["wildPool"]).get("ids", [])).has(picked),
+			"wild pick #%d comes from the stage pool" % n)
+	PbRng.set_state(saved_rng)
 
 
 # ------------------------------------------------------------------ weather events
