@@ -51,6 +51,7 @@ func _ready() -> void:
 	_evolution_checks()
 	_shop_checks()
 	_locale_checks()
+	await _menu_layout_checks()
 	report()
 	get_tree().quit(0 if _failures.is_empty() else 1)
 
@@ -2178,3 +2179,63 @@ func _locale_checks() -> void:
 			pills.append(str(node.name))
 	menu.queue_free()
 	ok(pills.is_empty(), "no LangPill in the main menu")
+
+
+# ------------------------------------------------------------- menu layout
+## The smallest supported window: every visible label must fit its laid-out rect
+## (or wrap inside it), and the play title must shrink instead of overflowing.
+func _menu_layout_checks() -> void:
+	section("main menu layout: 1024x600")
+	get_window().size = Vector2i(1024, 600)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var menu: Control = (load("res://scenes/MainMenu.tscn") as PackedScene).instantiate()
+	add_child(menu)
+	for i in 4:
+		await get_tree().process_frame
+	var clipped: Array[String] = []
+	for node in _menu_labels(menu):
+		var l: Label = node
+		var txt := l.text.strip_edges()
+		if txt.is_empty() or l.size.x <= 0.0:
+			continue
+		var font := l.get_theme_font("font")
+		var fs := l.get_theme_font_size("font_size")
+		var outline := float(l.get_theme_constant("outline_size")) * 2.0
+		if l.autowrap_mode == TextServer.AUTOWRAP_OFF:
+			var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + outline
+			if tw > l.size.x + 0.5:
+				clipped.append("%s %.0f>%.0f" % [txt.substr(0, 12), tw, l.size.x])
+		else:
+			var opts := TextServer.BREAK_MANDATORY | TextServer.BREAK_WORD_BOUND
+			var need := font.get_multiline_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT,
+				l.size.x, fs, -1, opts)
+			var shown := font.get_multiline_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT,
+				l.size.x, fs, l.max_lines_visible if l.max_lines_visible > 0 else -1, opts)
+			if need.y > shown.y + 0.5:
+				clipped.append("%s wrap" % txt.substr(0, 12))
+	ok(clipped.is_empty(), "no clipped menu text at 1024x600 %s" % str(clipped))
+	var k: float = float(menu.get("_mm_scale"))
+	ok(k > 1.0, "menu lays out in CSS px then scales to the canvas (k=%.2f)" % k)
+	var pt: Label = menu.get("_play_title")
+	var pt_fs := pt.get_theme_font_size("font_size")
+	var pt_tw := pt.get_theme_font("font").get_string_size(pt.text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, pt_fs).x
+	ok(pt_tw <= pt.size.x + 0.5,
+		"play title fits its column at 1024x600 (%.0f in %.0f)" % [pt_tw, pt.size.x])
+	ok(pt_fs < 34, "play title shrinks instead of overflowing at 1024x600 (fs=%d)" % pt_fs)
+	menu.queue_free()
+	get_window().size = Vector2i(1280, 720)
+
+
+func _menu_labels(root: Node) -> Array:
+	var out := []
+	var stack := [root]
+	while stack:
+		var n: Node = stack.pop_back()
+		if n is CanvasItem and not (n as CanvasItem).is_visible_in_tree():
+			continue
+		if n is Label:
+			out.append(n)
+		stack.append_array(n.get_children())
+	return out
