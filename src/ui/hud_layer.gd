@@ -76,8 +76,8 @@ func _build_top() -> void:
 	_els["pips"] = pips
 	var zone := UI.dim("")
 	zone.add_theme_font_size_override("font_size", 12)
-	# `.ht-zone{...font-weight:900}` inherits `--font` (Nunito).
-	zone.add_theme_font_override("font", PbTheme.font("body_black"))
+	# `#hud{font-family:var(--font-title)}` — `.ht-zone` inherits M PLUS Rounded.
+	zone.add_theme_font_override("font", PbTheme.font("title"))
 	row.add_child(zone)
 	_els["zone"] = zone
 	var weather := PanelContainer.new()
@@ -94,7 +94,8 @@ func _build_top() -> void:
 	wicon.visible = false
 	wbox.add_child(wicon)
 	var wlabel := UI.label("", 11, _weather_ink())
-	wlabel.add_theme_font_override("font", PbTheme.font("body_black"))
+	# `#hud{font-family:var(--font-title)}` — `.ht-weather` inherits M PLUS Rounded.
+	wlabel.add_theme_font_override("font", PbTheme.font("title"))
 	wbox.add_child(wlabel)
 	weather.add_theme_stylebox_override("panel", PbTheme.stylebox(".ht-weather"))
 	weather.visible = false
@@ -183,6 +184,7 @@ func _build_danger() -> Control:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	pill.add_child(row)
 	var cap := UI.label("", 11, PbTheme.accent_color("green", "c"))
+	# `#hud{font-family:var(--font-title)}` — `.danger b` inherits M PLUS Rounded.
 	cap.add_theme_font_override("font", PbTheme.font("title"))
 	cap.custom_minimum_size = Vector2(64, 0)
 	cap.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -227,6 +229,7 @@ func _build_wallet() -> Control:
 	pill.add_child(row)
 	row.add_child(UI.icon_rect("gold", 22))
 	var value := UI.label("0", 17, PbTheme.wallet_gold())
+	# `.wallet>b` is explicit `font-family:var(--font-title)`.
 	value.add_theme_font_override("font", PbTheme.font("title"))
 	value.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	row.add_child(value)
@@ -477,6 +480,7 @@ func _build_bl() -> void:
 	counter.add_child(crow)
 	crow.add_child(UI.icon_rect("poke-ball", 22))
 	var kills := UI.label("0", 15, PbTheme.ink())
+	# `#hud{font-family:var(--font-title)}` — `.counter` inherits M PLUS Rounded.
 	kills.add_theme_font_override("font", PbTheme.font("title"))
 	crow.add_child(kills)
 	bl.add_child(counter)
