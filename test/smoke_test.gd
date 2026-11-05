@@ -38,6 +38,7 @@ func _ready() -> void:
 	_revive_checks()
 	_danger_golden_checks()
 	_ui_build_checks()
+	_run_input_checks()
 	_terrain_checks()
 	_hazard_checks()
 	_weather_event_checks()
@@ -707,6 +708,20 @@ func _avatar_fallback_checks() -> void:
 	ok(k_bad == "color-box", "unknown species falls back to color-box (got %s)" % k_bad)
 	a1.free()
 	a_bad.free()
+	# Web resource priority: static front art before the 40x40 UI portrait. Species
+	# 514 has no PMD sheet, so it MUST resolve to assets/front/514.png (96x96), not
+	# to a portrait crop used as a billboard texture.
+	var f_front := PbVisuals.front_texture(514)
+	ok(f_front != null, "front_texture(514) resolves the no-PMD species")
+	if f_front != null:
+		ok(f_front.resource_path.ends_with("assets/front/514.png"),
+			"front_texture prefers assets/front over UI portraits (got %s)" % f_front.resource_path)
+		ok(f_front.get_width() == 96 and f_front.get_height() == 96,
+			"front fallback is the 96x96 web art (got %dx%d)" % [f_front.get_width(), f_front.get_height()])
+	ok(PbVisuals.frame_texture(52, "idle", 0.0, 0) != null,
+		"Meowth shop NPC keeps its PMD idle sheet")
+	ok(int(PbActor.create(1).get("facing", -1)) == 0,
+		"actors spawn facing the camera (PMD row 0), like the web's facing(0,1)")
 
 
 ## ------------------------------------------------------------------ 7. theme tokens
@@ -814,6 +829,45 @@ func _ui_build_checks() -> void:
 	# number formatter edge cases
 	ok(UI.fmt_num(1.0e15) == "1Q", "fmt_num 1Q")
 	ok(UI.fmt_clock(0.0) == "0:00", "fmt_clock zero")
+
+
+## ------------------------------------------------------------------ 10b. run input
+## Regression guard: the run must own pointer lock + mouse look, and no visible
+## full-screen Control may swallow mouse events (the fade/backdrop/modal layers).
+func _run_input_checks() -> void:
+	section("run input: pointer lock + mouse look + overlay filters")
+	var run = (load("res://scenes/Run.tscn") as PackedScene).instantiate()
+	add_child(run)
+	ok(bool(run.get("_mouse_captured")), "run captures the pointer at start")
+	ok(bool(run._can_look()), "run starts in a lookable play state")
+	var yaw0 := float(run.get("_cam_yaw"))
+	var pitch0 := float(run.get("_cam_pitch"))
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(100.0, 40.0)
+	motion.position = Vector2(640.0, 360.0)
+	run._unhandled_input(motion)
+	ok(absf(float(run.get("_cam_yaw")) - yaw0) > 0.01,
+		"relative mouse motion yaws the camera (%.4f -> %.4f)" % [yaw0, float(run.get("_cam_yaw"))])
+	ok(float(run.get("_cam_pitch")) > pitch0, "relative mouse motion pitches the camera")
+	run._toggle_pause()
+	ok(not bool(run._can_look()), "pause releases the pointer")
+	run._toggle_pause()
+	ok(bool(run._can_look()), "resume captures the pointer again")
+	var bad: Array = []
+	_collect_fullscreen_stop(run, bad)
+	ok(bad.is_empty(), "no visible full-screen STOP control (found %s)" % str(bad))
+	run.free()
+
+
+func _collect_fullscreen_stop(node: Node, bad: Array) -> void:
+	if node is Control:
+		var c := node as Control
+		var vp := get_viewport().get_visible_rect().size
+		if c.is_visible_in_tree() and c.mouse_filter == Control.MOUSE_FILTER_STOP \
+				and c.size.x >= vp.x - 1.0 and c.size.y >= vp.y - 1.0:
+			bad.append(str(c.name))
+	for child in node.get_children():
+		_collect_fullscreen_stop(child, bad)
 
 
 func report() -> void:
