@@ -390,8 +390,11 @@ func _shop_row(index: int, entry: Dictionary) -> Control:
 		row.add_child(UI.icon_rect(icon_name, 36))
 	var col := UI.vbox(2)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_child(UI.label(App.t("items", int(meta.get("id", 0)), str(meta.get("name", key))), 18,
-		PbTheme.ink()))
+	# `.item-row h4` is 17px/900; keep UI.label's existing body face, lift 700 -> 900.
+	var item_name := UI.label(App.t("items", int(meta.get("id", 0)), str(meta.get("name", key))), 18,
+		PbTheme.ink())
+	item_name.add_theme_font_override("font", PbTheme.font("body_black"))
+	col.add_child(item_name)
 	var desc := str(meta.get("desc", ""))
 	if not desc.is_empty():
 		col.add_child(UI.dim(desc))

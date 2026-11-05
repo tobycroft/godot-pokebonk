@@ -865,9 +865,10 @@ func _gradient_chip(text: String) -> Control:
 
 
 ## `.tag` (not extracted into ui_theme.json): small bold caption above a block.
+## CSS is `font-weight:900`; keep the existing title face, lift 800 -> 900.
 func _tag(text: String) -> Control:
 	var label := UI.label(text, int(_px(".dx-count", "font-size", 12.0)), PbTheme.ink_muted())
-	label.add_theme_font_override("font", PbTheme.font("title_bold"))
+	label.add_theme_font_override("font", PbTheme.font("title"))
 	return label
 
 

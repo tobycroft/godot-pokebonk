@@ -76,6 +76,8 @@ func _build_top() -> void:
 	_els["pips"] = pips
 	var zone := UI.dim("")
 	zone.add_theme_font_size_override("font_size", 12)
+	# `.ht-zone{...font-weight:900}` inherits `--font` (Nunito).
+	zone.add_theme_font_override("font", PbTheme.font("body_black"))
 	row.add_child(zone)
 	_els["zone"] = zone
 	var weather := PanelContainer.new()
