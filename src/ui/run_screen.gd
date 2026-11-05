@@ -60,6 +60,15 @@ var _boss_seen := false
 var _music_boss := false
 var _last_px := 0.0
 var _last_pz := 0.0
+# Third-person orbit camera. The web locks the pointer during play and feeds
+# `camYaw/camPitch` from the relative mouse deltas (bundle @1551771), so the two
+# axes must be run-owned state instead of the constants below.
+var _cam_yaw := 0.0
+var _cam_pitch := 0.45
+var _cam_dist := 9.0
+var _look_sensitivity := 1.0
+var _look_invert_y := false
+var _mouse_captured := false
 
 
 func _ready() -> void:
@@ -270,6 +279,9 @@ func _toggle_pause() -> void:
 	for c in _layer.get_children():
 		if c.get_meta("is_pause", false) == true:
 			c.visible = _paused
+	# Pausing releases the pointer so the pause overlay is clickable; resuming
+	# captures it again (the web does the same around `state==='paused'`).
+	_sync_mouse_capture()
 	Audio.sfx("ui")
 
 
@@ -424,6 +436,13 @@ func _start_run() -> void:
 	_run["run_id"] = str(start.get("id", "run-local"))
 	_run["aimMode"] = str(settings.get("aimMode", "auto"))
 	_shake_scale = clampf(float(settings.get("shake", 1.0)), 0.0, 1.0)
+	# Orbit camera settings (web profile: sensitivity 1, invertY off, camDist 9).
+	_cam_yaw = 0.0
+	_cam_pitch = clampf(float(PbData.const_of("camera.pitch", 0.45)), -0.25, 1.25)
+	_cam_dist = clampf(float(settings.get("camDist", PbData.const_of("camera.dist", 9.0))), 4.5, 26.0)
+	_look_sensitivity = clampf(float(settings.get("sensitivity", 1.0)), 0.1, 3.0)
+	_look_invert_y = bool(settings.get("invertY", false))
+	_sync_mouse_capture()
 	_time = 0.0
 	_last_damage_taken = 0.0
 	_trauma = 0.0
@@ -497,6 +516,7 @@ func _sync_bolts() -> void:
 func _process(delta: float) -> void:
 	if _run.is_empty():
 		return
+	_sync_mouse_capture()
 	_time += delta
 	var dt := minf(delta, 1.0 / 15.0)
 	if str(_run.get("state", "play")) == "over":
@@ -536,6 +556,59 @@ func _process(delta: float) -> void:
 		Audio.sfx("level")
 
 
+## Pointer lock is part of gameplay: the web captures it while playing (or in the
+## evolution cinematic) and releases it for pause/shop/modal/over, so overlays
+## stay clickable. Keep the same state machine here.
+func _can_look() -> bool:
+	if _run.is_empty() or _paused or _shop_open:
+		return false
+	var state := str(_run.get("state", "play"))
+	return state == "play" or state == "evolving"
+
+
+func _sync_mouse_capture() -> void:
+	var want := _can_look()
+	_mouse_captured = want
+	if DisplayServer.get_name() == "headless":
+		return
+	var mode := Input.MOUSE_MODE_CAPTURED if want else Input.MOUSE_MODE_VISIBLE
+	if Input.mouse_mode != mode:
+		Input.mouse_mode = mode
+
+
+## Mouse look + wheel zoom (bundle @1551771: 0.0024 rad/px, invertY flips the
+## pitch sign, wheel clamps the boom distance). Returns true when consumed.
+func _look_input(event: InputEvent) -> bool:
+	if event is InputEventMouseMotion:
+		if not _mouse_captured or not _can_look():
+			return false
+		var rel: Vector2 = (event as InputEventMouseMotion).relative
+		_cam_yaw -= rel.x * 0.0024 * _look_sensitivity
+		var pitch_sign := -1.0 if _look_invert_y else 1.0
+		_cam_pitch = clampf(_cam_pitch + rel.y * 0.0024 * _look_sensitivity * pitch_sign, -0.25, 1.25)
+		return true
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if not mb.pressed:
+			return false
+		if mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			if not _can_look():
+				return false
+			_cam_dist = clampf(_cam_dist + (-1.0 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0), 4.5, 26.0)
+			# Persist the zoom like the web profile's `camDist` setting.
+			var settings := PbJson.as_dict(Save.store.get("settings", {}))
+			settings["camDist"] = snappedf(_cam_dist, 0.1)
+			Save.store["settings"] = settings
+			return true
+	return false
+
+
+func _exit_tree() -> void:
+	# Never leave the macOS cursor hidden when leaving the run.
+	if DisplayServer.get_name() != "headless":
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
 func _move_input(dt: float) -> void:
 	var player: Dictionary = _run["player"]
 	var dir := Vector2.ZERO
@@ -551,8 +624,12 @@ func _move_input(dt: float) -> void:
 		var speed := float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) * 6.0 \
 			* float(player.get("hazardSlow", 1.0))
 		dir = dir.normalized()
-		var nx := float(player.get("x", 0.0)) + dir.x * speed * dt
-		var nz := float(player.get("z", 0.0)) + dir.y * speed * dt
+		# Camera-relative WASD, matching the web: forward = away from the camera,
+		# right = camera right (bundle @866266).
+		var wx := sin(_cam_yaw) * dir.y + cos(_cam_yaw) * dir.x
+		var wz := cos(_cam_yaw) * dir.y - sin(_cam_yaw) * dir.x
+		var nx := float(player.get("x", 0.0)) + wx * speed * dt
+		var nz := float(player.get("z", 0.0)) + wz * speed * dt
 		# Prop colliders block the way: the same cylinder test the reference runs against its
 		# collider grid. When a diagonal move hits, slide along the axis that is still free.
 		if _terrain == null:
@@ -568,13 +645,18 @@ func _move_input(dt: float) -> void:
 				player["x"] = nx
 			elif not _terrain.hit_prop(cx, nz, _ground_y(cx, nz) + 0.6, 0.45):
 				player["z"] = nz
-		player["facing"] = 2 if dir.x > 0.0 else 6
+		# PMD sheets store 8 rows clockwise from "down/front": row 0 faces +z
+		# (towards the start camera), row 2 faces +x, row 4 faces -z, row 6 -x.
+		player["facing"] = posmod(roundi(atan2(wx, wz) / (PI / 4.0)), 8)
 	var lim := _terrain.walk_lim() if _terrain != null else ARENA_SIZE * 0.5 - 2.0
 	player["x"] = clampf(float(player.get("x", 0.0)), -lim, lim)
 	player["z"] = clampf(float(player.get("z", 0.0)), -lim, lim)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _look_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	if not (event is InputEventKey) or not event.pressed:
 		return
 	var modal := str(_run.get("state", "")) == "modal" and _modal_scrim.visible
@@ -740,8 +822,8 @@ func _render(dt: float) -> void:
 				mat.albedo_texture = tex
 	_last_px = px
 	_last_pz = pz
-	var pitch := float(PbData.const_of("camera.pitch", 0.45))
-	var dist := float(PbData.const_of("camera.dist", 9.0))
+	var pitch := _cam_pitch
+	var dist := _cam_dist
 	# Hit feedback: the run class carries a `trauma` value that shake() adds to.
 	var taken_now := float(PbJson.as_dict(_run.get("stats", {})).get("damageTaken", 0.0))
 	if taken_now > _last_damage_taken + 0.001:
@@ -761,8 +843,15 @@ func _render(dt: float) -> void:
 	var shake_amount := _trauma * _trauma * 0.6 * _shake_scale
 	var shake_offset := Vector3(PbRng.randf_range(-shake_amount, shake_amount),
 		PbRng.randf_range(-shake_amount, shake_amount), 0.0)
-	# Same rig as the reference (pitch .45, dist 9), riding the height field.
-	_camera.position = Vector3(px, py + sin(pitch) * dist, pz + cos(pitch) * dist) + shake_offset
+	# Same rig as the reference (pitch .45, dist 9), riding the height field and
+	# orbiting the player on the mouse-driven yaw.
+	var cos_pitch := cos(pitch)
+	# Keep the boom above the height field even at the -0.25 pitch clamp.
+	var cam_y := maxf(py + sin(pitch) * dist, py + 0.4)
+	_camera.position = Vector3(
+		px + sin(_cam_yaw) * cos_pitch * dist,
+		cam_y,
+		pz + cos(_cam_yaw) * cos_pitch * dist) + shake_offset
 	_camera.look_at(Vector3(px + shake_offset.x * 0.3, py + 1.0, pz + shake_offset.z * 0.3), Vector3.UP)
 
 	var pool: Dictionary = _run.get("enemies", {})
