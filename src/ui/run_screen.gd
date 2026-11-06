@@ -132,6 +132,27 @@ var _cam_dist := 9.0
 var _look_sensitivity := 1.0
 var _look_invert_y := false
 var _mouse_captured := false
+# Player vertical motion. The web actor is a height-field walker with a real vertical
+# velocity (`vel.y -= 30*dt`, bundle @870247), Space jump (`vel.y = 11*sqrt(jumpHeight)`,
+# second jump 0.92x, @870202), a 0.6 step limit probed `radius*0.8` ahead (`ne/.6, re=radius*.8`,
+# @871154) and ground snapping within 0.9 while walking downhill. Feet height used to be
+# `_ground_y()` teleported every frame, which removed jumping and let the actor walk up any
+# cliff; these keep the same sim state (x/z) and only simulate y.
+const PLAYER_RADIUS := 0.5
+const GRAVITY := 30.0
+const JUMP_SPEED := 11.0
+const STEP_LIMIT := 0.6
+const PROBE_DIST := PLAYER_RADIUS * 0.8
+const GROUND_SNAP := 0.9
+## Types that auto-climb a blocked step in the web (`wb`): fighting/bug/ghost (plus floats).
+const CLIMB_TYPES := ["fighting", "bug", "ghost"]
+var _player_py := 0.0
+var _player_vy := 0.0
+var _grounded := true
+var _jumps_left := 0
+var _py_ready := false
+var _cam_follow_y := 0.0
+var _cam_follow_ready := false
 
 
 func _ready() -> void:
@@ -567,6 +588,13 @@ func _start_run() -> void:
 	_cam_dist = clampf(float(settings.get("camDist", PbData.const_of("camera.dist", 9.0))), 4.5, 26.0)
 	_look_sensitivity = clampf(float(settings.get("sensitivity", 1.0)), 0.1, 3.0)
 	_look_invert_y = bool(settings.get("invertY", false))
+	# Vertical state re-seeds from the new spawn point on the next frame.
+	_player_py = 0.0
+	_player_vy = 0.0
+	_grounded = true
+	_jumps_left = 0
+	_py_ready = false
+	_cam_follow_ready = false
 	_sync_mouse_capture()
 	_time = 0.0
 	_last_damage_taken = 0.0
@@ -1282,6 +1310,14 @@ func _exit_tree() -> void:
 
 func _move_input(dt: float) -> void:
 	var player: Dictionary = _run["player"]
+	var px := float(player.get("x", 0.0))
+	var pz := float(player.get("z", 0.0))
+	if not _py_ready:
+		# First playable frame after the terrain exists: start standing on the height field.
+		_player_py = _ground_y(px, pz)
+		_player_vy = 0.0
+		_grounded = true
+		_py_ready = true
 	var dir := Vector2.ZERO
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 		dir.x -= 1.0
@@ -1291,6 +1327,9 @@ func _move_input(dt: float) -> void:
 		dir.y -= 1.0
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
 		dir.y += 1.0
+	# Gravity runs every frame, airborne or not (bundle @870247 `vel.y -= db*e`, db = 30).
+	_player_vy -= GRAVITY * dt
+	var blocked := false
 	if dir != Vector2.ZERO:
 		var speed := float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) * 6.0 \
 			* float(player.get("hazardSlow", 1.0))
@@ -1299,29 +1338,96 @@ func _move_input(dt: float) -> void:
 		# right = camera right (bundle @866266).
 		var wx := sin(_cam_yaw) * dir.y + cos(_cam_yaw) * dir.x
 		var wz := cos(_cam_yaw) * dir.y - sin(_cam_yaw) * dir.x
-		var nx := float(player.get("x", 0.0)) + wx * speed * dt
-		var nz := float(player.get("z", 0.0)) + wz * speed * dt
-		# Prop colliders block the way: the same cylinder test the reference runs against its
-		# collider grid. When a diagonal move hits, slide along the axis that is still free.
+		var dx := wx * speed * dt
+		var dz := wz * speed * dt
+		# Prop colliders + the web's step/slope probe (`ie`, @871154): a move axis is refused
+		# when the surface `radius*0.8` ahead is more than 0.6 above the feet. Resolve each
+		# axis separately so a diagonal move slides along the free one.
 		if _terrain == null:
-			player["x"] = nx
-			player["z"] = nz
+			player["x"] = px + dx
+			player["z"] = pz + dz
 		else:
-			var cx := float(player.get("x", 0.0))
-			var cz := float(player.get("z", 0.0))
-			if not _terrain.hit_prop(nx, nz, _ground_y(nx, nz) + 0.6, 0.45):
-				player["x"] = nx
-				player["z"] = nz
-			elif not _terrain.hit_prop(nx, cz, _ground_y(nx, cz) + 0.6, 0.45):
-				player["x"] = nx
-			elif not _terrain.hit_prop(cx, nz, _ground_y(cx, nz) + 0.6, 0.45):
-				player["z"] = nz
+			var cx := px
+			var cz := pz
+			if not _step_blocked(cx + dx, cz, dx, 0.0) \
+					and not _terrain.hit_prop(cx + dx, cz, _player_py, PLAYER_RADIUS):
+				player["x"] = cx + dx
+			else:
+				blocked = true
+			cx = float(player.get("x", 0.0))
+			if not _step_blocked(cx, cz + dz, 0.0, dz) \
+					and not _terrain.hit_prop(cx, cz + dz, _player_py, PLAYER_RADIUS):
+				player["z"] = cz + dz
+			else:
+				blocked = true
 		# PMD sheets store 8 rows clockwise from "down/front": row 0 faces +z
 		# (towards the start camera), row 2 faces +x, row 4 faces -z, row 6 -x.
 		player["facing"] = posmod(roundi(atan2(wx, wz) / (PI / 4.0)), 8)
+	# Fighting/bug/ghost types climb a blocked step by lifting off (bundle @871154).
+	if blocked:
+		var types := PbJson.as_array(player.get("types", []))
+		for t in CLIMB_TYPES:
+			if types.has(t):
+				_player_vy = maxf(_player_vy, 7.5)
+				break
 	var lim := _terrain.walk_lim() if _terrain != null else ARENA_SIZE * 0.5 - 2.0
 	player["x"] = clampf(float(player.get("x", 0.0)), -lim, lim)
 	player["z"] = clampf(float(player.get("z", 0.0)), -lim, lim)
+	# Vertical integration + ground contact (@873494): land when the feet reach the surface,
+	# snap down small drops while grounded, and only leave the ground when clearly airborne.
+	_player_py += _player_vy * dt
+	var floor_y := _ground_y(float(player.get("x", 0.0)), float(player.get("z", 0.0)))
+	if _player_py <= floor_y:
+		_player_py = floor_y
+		if _player_vy < 0.0:
+			_player_vy = 0.0
+		_grounded = true
+		_jumps_left = _extra_jumps(player)
+	elif _grounded and _player_vy <= 0.0 and _player_py - floor_y < GROUND_SNAP:
+		_player_py = floor_y
+		_player_vy = 0.0
+	elif _player_py > floor_y + 0.25:
+		_grounded = false
+	elif _player_vy <= 0.0:
+		_player_py = floor_y
+		_grounded = true
+
+
+## The web's `ie(x,z,dx,dz)`: refuse an axis when the surface under the target position, or
+## `radius*0.8` further along that axis, sits more than 0.6 above the actor's feet.
+func _step_blocked(x: float, z: float, dx: float, dz: float) -> bool:
+	if _terrain == null:
+		return false
+	var ceiling := _player_py + STEP_LIMIT
+	if _terrain.height(x, z) > ceiling:
+		return true
+	var probe_x := x + signf(dx) * PROBE_DIST
+	var probe_z := z + signf(dz) * PROBE_DIST
+	return _terrain.height(probe_x, probe_z) > ceiling
+
+
+func _extra_jumps(player: Dictionary) -> int:
+	var stats := PbJson.as_dict(player.get("stats", {}))
+	return maxi(0, int(floorf(PbJson.as_float(stats.get("extraJumps", 0.0), 0.0))))
+
+
+## Space: `vel.y = 11*sqrt(jumpHeight)`, then `extraJumps` mid-air jumps at 0.92x (@870202).
+func _try_jump() -> void:
+	if not _py_ready:
+		return
+	var player: Dictionary = _run["player"]
+	var stats := PbJson.as_dict(player.get("stats", {}))
+	var jump_h := maxf(0.05, PbJson.as_float(stats.get("jumpHeight", 1.0), 1.0))
+	var speed := JUMP_SPEED * sqrt(jump_h)
+	if _grounded:
+		_player_vy = speed
+		_grounded = false
+		_jumps_left = _extra_jumps(player)
+	elif _jumps_left > 0:
+		_jumps_left -= 1
+		_player_vy = speed * 0.92
+	else:
+		return
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1357,6 +1463,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			# re keymap: aim = KeyQ -> toggle runtime aim mode (auto/manual).
 			if not _paused and not over:
 				_toggle_aim()
+		KEY_SPACE:
+			# re keymap: jump = Space (bundle @870202 `n.hit('Space')`).
+			if not modal and not _paused and not over:
+				_try_jump()
 		KEY_E:
 			# re keymap: capture throw = KeyE (kS.tryThrow/throwBall @1082671).
 			# Interactables share the key: portal > guardian altar > Meowth shop,
@@ -1455,7 +1565,8 @@ func _player_screen_point() -> Vector2:
 	var player: Dictionary = _run.get("player", {})
 	var px := float(player.get("x", 0.0))
 	var pz := float(player.get("z", 0.0))
-	return _world_screen_point(Vector3(px, _ground_y(px, pz) + 1.2, pz))
+	var py := _player_py if _py_ready else _ground_y(px, pz)
+	return _world_screen_point(Vector3(px, py + 1.2, pz))
 
 
 func _world_screen_point(pos: Vector3) -> Vector2:
@@ -1470,7 +1581,7 @@ func _render(dt: float) -> void:
 	var player: Dictionary = _run.get("player", {})
 	var px := float(player.get("x", 0.0))
 	var pz := float(player.get("z", 0.0))
-	var py := _ground_y(px, pz)
+	var py := _player_py if _py_ready else _ground_y(px, pz)
 	_player_node.position = Vector3(px, py, pz)
 	if _view != null:
 		_view.tick(dt, Vector3(px, py, pz), _camera)
@@ -1528,15 +1639,23 @@ func _render(dt: float) -> void:
 	var shake_offset := Vector3(PbRng.randf_range(-shake_amount, shake_amount),
 		PbRng.randf_range(-shake_amount, shake_amount), 0.0)
 	# Same rig as the reference (pitch .45, dist 9), riding the height field and
-	# orbiting the player on the mouse-driven yaw.
+	# orbiting the player on the mouse-driven yaw. The web lerps its camera target
+	# towards the player at rate 10 (@1561868 `camTarget.y = nl(..., r.y, 10, e)`),
+	# which keeps jumps readable instead of snapping the boom every frame.
+	if not _cam_follow_ready:
+		_cam_follow_y = py
+		_cam_follow_ready = true
+	else:
+		_cam_follow_y += (py - _cam_follow_y) * (1.0 - exp(-10.0 * maxf(dt, 0.0001)))
 	var cos_pitch := cos(pitch)
 	# Keep the boom above the height field even at the -0.25 pitch clamp.
-	var cam_y := maxf(py + sin(pitch) * dist, py + 0.4)
+	var cam_y := maxf(_cam_follow_y + sin(pitch) * dist, _cam_follow_y + 0.4)
 	_camera.position = Vector3(
 		px + sin(_cam_yaw) * cos_pitch * dist,
 		cam_y,
 		pz + cos(_cam_yaw) * cos_pitch * dist) + shake_offset
-	_camera.look_at(Vector3(px + shake_offset.x * 0.3, py + 1.0, pz + shake_offset.z * 0.3), Vector3.UP)
+	_camera.look_at(Vector3(px + shake_offset.x * 0.3, _cam_follow_y + 1.0,
+		pz + shake_offset.z * 0.3), Vector3.UP)
 
 	var pool: Dictionary = _run.get("enemies", {})
 	var used := 0
