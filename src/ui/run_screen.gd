@@ -587,6 +587,13 @@ func _process(delta: float) -> void:
 	_sync_mouse_capture()
 	_time += delta
 	var dt := minf(delta, 1.0 / 15.0)
+	# The level-up window is state-driven, not a self-closing popup: once the run
+	# leaves "modal" (card picked / skipped / banished) the scrim must leave with
+	# it. Leaving it visible kept a mouse_filter STOP Control over the whole run
+	# and kept the stale .card.offer row clickable -- the "next level-up won't
+	# respond" report. Always tear it down, then rebuild from current offers.
+	if str(_run.get("state", "play")) != "modal":
+		_close_modal()
 	if str(_run.get("state", "play")) == "over":
 		_render(dt)
 		_hud.sync(_run, dt)
@@ -1039,13 +1046,34 @@ func _render(dt: float) -> void:
 
 
 # ------------------------------------------------------------------ modals
+## Tear the level-up window down and forget its cached token, so the next
+## open_offers() always rebuilds a fresh .card.offer row from the current
+## `offers` array (never a stale, unclickable one).
+func _close_modal() -> void:
+	if _modal_state == "" and not _modal_scrim.visible:
+		return
+	_modal_scrim.visible = false
+	_modal_state = ""
+	_banish_mode = false
+	_banish_pick = -1
+	for c in _modal_cards.get_children():
+		c.queue_free()
+	for c in _modal_actions.get_children():
+		c.queue_free()
+	for c in _modal_mini.get_children():
+		c.queue_free()
+
+
 ## showLevelUp() parity (bundle @2173200): h1 + .cards of .card.offer + the
 ## reroll/skip/banish actions + buildMini current-move row.
 func _update_modal() -> void:
 	if str(_run.get("state", "play")) != "modal":
-		_modal_scrim.visible = false
+		_close_modal()
 		return
-	var token := "offers:%d" % int(_run.get("pendingLevels", 0))
+	# Counters are part of the token: reroll/skip/banish rebuild the row.
+	var token := "offers:%d:%d:%d:%d" % [
+		int(_run.get("pendingLevels", 0)), int(_run.get("rerolls", 0)),
+		int(_run.get("skips", 0)), int(_run.get("banishes", 0))]
 	if _modal_state == token:
 		_modal_scrim.visible = true
 		return
