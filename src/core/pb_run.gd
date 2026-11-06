@@ -88,7 +88,7 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"banishes": 0,
 		"orbs": [],
 		"messages": [],
-		# Cosmetic cast records for the renderer (PbRun._push_fire_fx). Damage is
+		# Cosmetic cast records for the renderer (PbRun._push_fx). Damage is
 		# already resolved by strike(), so RunScreen only animates; headless sims
 		# simply accumulate a capped list nobody reads.
 		"fxEvents": [],
@@ -853,10 +853,13 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 	var player: Dictionary = state["player"]
 	var count := maxi(1, int(built.get("count", 1)))
 	var stats := PbJson.as_dict(player.get("stats", {}))
-	# Fire casts are the first move family with a ported visual layer (the web's
-	# per-move `draw/trail/hit` closures at bundle @439385). Record the world
-	# points now, while the target slot still owns this enemy's position.
-	var fire := str(def.get("type", "")) == "fire"
+	var arch := str(def.get("arch", ""))
+	# Every cast queues a cosmetic record for RunScreen (the web's per-move
+	# `draw/trail/hit/...` closures at bundle @439385). Record the world points
+	# now, while the target slot still owns this enemy's position. Buffs and
+	# weather moves deal no damage, so they emit their own cast record.
+	if arch == "buff" or arch == "weather":
+		_push_fx_cast(state, def)
 	for hit in count:
 		var tx := float(PbEnemies.get_field(pool, "x", target))
 		var tz := float(PbEnemies.get_field(pool, "z", target))
@@ -905,8 +908,8 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 					_on_kill_info(state, PbJson.as_dict(alpha_info))
 		state["stats"]["damage"] = float(state["stats"]["damage"]) + dealt
 		state["stats"]["hits"] = int(state["stats"].get("hits", 0)) + 1
-		if fire and dealt > 0.0:
-			_push_fire_fx(state, tx, tz, dealt, bool(out["crit"]))
+		if dealt > 0.0:
+			_push_fx(state, def, tx, tz, dealt, bool(out["crit"]))
 		# §4.9: the golden Meowth drops a coin on every hit (0.16 s cooldown).
 		PbWeatherEvents.on_hit(state, target)
 		if bool(out["crit"]):
@@ -930,22 +933,50 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 					return
 
 
-## Queue one cosmetic fire-cast record for RunScreen (projectile + impact).
-## This runs after PbEnemies.damage(), so `dmg` is the same number the sim
-## applied -- the renderer never rolls or alters damage.
-static func _push_fire_fx(state: Dictionary, tx: float, tz: float, dmg: float, crit: bool) -> void:
+## Queue one cosmetic hit record for RunScreen. This runs after
+## PbEnemies.damage(), so `dmg` is the same number the sim applied -- the
+## renderer never rolls or alters damage. `arch` selects the presentation form
+## (RunScreen.FX_FORM, built from the web's per-move vfx table @439385).
+static func _push_fx(state: Dictionary, def: Dictionary, tx: float, tz: float,
+		dmg: float, crit: bool) -> void:
 	var events := PbJson.as_array(state.get("fxEvents", []))
 	# Headless runs never consume the list: keep it bounded instead of growing.
 	if events.size() >= 64:
 		events.clear()
 	var player: Dictionary = state["player"]
 	events.append({
+		"kind": "hit",
+		"move": str(def.get("key", "")),
+		"type": str(def.get("type", "normal")),
+		"arch": str(def.get("arch", "")),
 		"x": float(player.get("x", 0.0)),
 		"z": float(player.get("z", 0.0)),
 		"tx": tx,
 		"tz": tz,
 		"dmg": dmg,
 		"crit": crit,
+	})
+	state["fxEvents"] = events
+
+
+## Buff/weather moves deal no damage, yet the web still shows a cast ring
+## (`cast()`/`aura()` primitives in the vfx table). One record per cast.
+static func _push_fx_cast(state: Dictionary, def: Dictionary) -> void:
+	var events := PbJson.as_array(state.get("fxEvents", []))
+	if events.size() >= 64:
+		events.clear()
+	var player: Dictionary = state["player"]
+	events.append({
+		"kind": "cast",
+		"move": str(def.get("key", "")),
+		"type": str(def.get("type", "normal")),
+		"arch": str(def.get("arch", "")),
+		"x": float(player.get("x", 0.0)),
+		"z": float(player.get("z", 0.0)),
+		"tx": float(player.get("x", 0.0)),
+		"tz": float(player.get("z", 0.0)),
+		"dmg": 0.0,
+		"crit": false,
 	})
 	state["fxEvents"] = events
 
