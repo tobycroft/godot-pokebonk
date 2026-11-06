@@ -13,6 +13,9 @@ extends Control
 
 var _state: Dictionary = {}
 var _els := {}
+## Camera yaw fed by RunScreen; the radar rotates with it like the web's `drawMinimap`
+## (`n.rotate(a)`, a = camYaw unless mapNorthUp, bundle @2160976).
+var cam_yaw := 0.0
 
 var _hp_lag := 1.0
 var _hp_lag_hold := 0.0
@@ -777,6 +780,7 @@ func _sync_minimap(state: Dictionary, player: Dictionary) -> void:
 	if minimap == null:
 		return
 	minimap.player_pos = Vector2(float(player.get("x", 0.0)), float(player.get("z", 0.0)))
+	minimap.yaw = cam_yaw
 	var blips := []
 	var pool := PbRun.pool_of(state)
 	for entry in PbEnemies.live_indices(pool):

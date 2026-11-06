@@ -326,6 +326,10 @@ class Minimap:
 	extends Control
 	var world_radius := 30.0        # metres from the player that fit in the disc
 	var player_pos := Vector2.ZERO
+	## Radar rotation: the web's minimap keeps the player centred and rotates the map by the
+	## camera yaw (`translate(200,200); rotate(camYaw)`, bundle @2160976), so "forward" on the
+	## radar always points away from the camera. `northUp` is off by default there.
+	var yaw := 0.0
 	var blips: Array = []           # [{"x","z","color","r"}]
 
 	func _init() -> void:
@@ -345,7 +349,9 @@ class Minimap:
 			var off := Vector2(float(b["x"]) - player_pos.x, float(b["z"]) - player_pos.y)
 			if off.length() > world_radius:
 				continue
-			var p := center + off / world_radius * (rad - 4.0)
+			# Canvas `rotate(camYaw)` in the web; Vector2.rotated uses the same y-down
+			# clockwise convention, so forward stays up on the radar.
+			var p := center + off.rotated(yaw) / world_radius * (rad - 4.0)
 			draw_circle(p, float(b.get("r", 3.0)), b["color"])
 		# player marker at the centre
 		draw_circle(center, 4.5, Color.WHITE)

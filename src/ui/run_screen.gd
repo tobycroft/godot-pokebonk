@@ -1209,6 +1209,9 @@ func _process(delta: float) -> void:
 	if _run.is_empty():
 		return
 	_sync_mouse_capture()
+	if _hud != null:
+		# The radar rotates with the camera, like the web minimap (bundle @2160976).
+		_hud.cam_yaw = _cam_yaw
 	_time += delta
 	var dt := minf(delta, 1.0 / 15.0)
 	# The level-up window is state-driven, not a self-closing popup: once the run
