@@ -25,20 +25,64 @@ var _sun: DirectionalLight3D
 var _enemy_nodes: Array[MeshInstance3D] = []
 var _orb_nodes: Array[MeshInstance3D] = []
 var _bolt_nodes: Array[MeshInstance3D] = []
-# Fire-cast visuals: a pool of additive flame billboards + sparks. The web's
-# per-move draw()/hit() closures (bundle @439385) are bodies, not data; this is
-# the port's replacement for the fire family only (see docs / pb_moves.gd:11).
-const PROJ_POOL := 24
-const SPARK_POOL := 96
-const RING_POOL := 12
+# Attack-cast visuals. The web's per-move vfx table (bundle main-C5MieX6g @439385)
+# is a set of runtime pixel-shape closures, not data; each entry exposes some
+# combination of `strike/hit/draw/trail/cone/beam/nova/boom/sky+warn/dash/orbit/
+# zone/link/cast/aura` plus an optional `shape/color/size` projectile. The port
+# plays one form per archetype, picked from the dominant primitive shared by the
+# moves of that archetype (see FX_FORM). Every form reuses the same small pools
+# below, tinted from PbTheme.type_color so no colour is hard-coded here.
+const PROJ_POOL := 28
+const SPARK_POOL := 128
+const RING_POOL := 20
+const DISC_POOL := 12
+const BEAM_POOL := 40
 var _fx_root: Node3D
 var _proj_nodes: Array[MeshInstance3D] = []
 var _spark_nodes: Array[MeshInstance3D] = []
 var _ring_nodes: Array[MeshInstance3D] = []
+var _disc_nodes: Array[MeshInstance3D] = []
+var _beam_nodes: Array[MeshInstance3D] = []
 var _proj_cursor := 0
 var _spark_cursor := 0
 var _ring_cursor := 0
-var _flame_tex: GradientTexture2D
+var _disc_cursor := 0
+var _beam_cursor := 0
+var _glow_tex: ImageTexture
+var _ring_tex: ImageTexture
+var _strip_tex: ImageTexture
+## Archetype -> web form. Derived by matching every move of each port archetype
+## against its entry in the web vfx table (Ah/Am/Pm/Um/Jm/$m, @437192): e.g. all
+## `beam` archetype moves carry `beam()`, all `meteor`/`smite` carry `sky+warn`,
+## all `cone` carry `cone()`. `random` (metronome) has no entry at all, so it
+## stays silent, as in the web.
+const FX_FORM := {
+	"strike": "melee",
+	"dash": "dash",
+	"bolt": "projectile",
+	"homing": "projectile",
+	"barrage": "projectile",
+	"boomerang": "projectile",
+	"wave": "projectile",
+	"drain": "projectile",
+	"orb": "boom",
+	"lob": "boom",
+	"vortex": "boom",
+	"trap": "boom",
+	"nova": "nova",
+	"spin": "nova",
+	"meteor": "sky",
+	"smite": "sky",
+	"beam": "beam",
+	"cone": "cone",
+	"orbit": "orbit",
+	"chain": "link",
+	"aura": "aura",
+	"trail": "zone",
+	"buff": "aura",
+	"weather": "aura",
+	"random": "none",
+}
 const HudFx = preload("res://src/ui/hud_fx.gd")
 
 var _hud: RunHud
@@ -597,39 +641,92 @@ func _sync_bolts() -> void:
 
 
 # ------------------------------------------------------------------ attack fx
-# The web draws each fire cast from runtime pixel shapes (PixFlame in the move
-# vfx table at main-C5MieX6g-mvpjh5lt.js @439385); it ships no fire png/glb/fx
-# asset to port, so the same soft glow is generated from a GradientTexture2D.
-func _flame_texture() -> GradientTexture2D:
-	if _flame_tex != null:
-		return _flame_tex
-	var grad := Gradient.new()
-	grad.set_color(0, Color(1.0, 0.9, 0.55, 1.0))
-	grad.set_color(1, Color(1.0, 0.14, 0.01, 0.0))
-	grad.add_point(0.25, Color(1.0, 0.55, 0.06, 0.95))
-	grad.add_point(0.6, Color(1.0, 0.28, 0.02, 0.45))
-	var tex := GradientTexture2D.new()
-	tex.gradient = grad
-	tex.fill = GradientTexture2D.FILL_RADIAL
-	tex.fill_from = Vector2(0.5, 0.5)
-	tex.fill_to = Vector2(0.5, 0.0)
-	tex.width = 64
-	tex.height = 64
-	_flame_tex = tex
-	return tex
+# The web draws each cast from runtime pixel shapes (bundle @439385) and ships
+# no fire/element png/glb asset to port, so the soft glow is generated at runtime
+# and tinted per event by PbTheme.type_color.
+func _glow_texture() -> ImageTexture:
+	if _glow_tex != null:
+		return _glow_tex
+	# Hand-built radial alpha falloff: GradientTexture2D's radial fill left a
+	# hard square edge in the additive pass, which read as UI boxes in-run.
+	var size := 64
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var c := float(size - 1) * 0.5
+	for y in size:
+		for x in size:
+			var d := Vector2(float(x) - c, float(y) - c).length() / c
+			# Solid core with a soft rim: a pure quadratic fell off so fast that
+			# the shapes read as faint smears against the bright grass.
+			var a := 1.0
+			if d > 0.35:
+				a = pow((1.0 - d) / 0.65, 1.6)
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, clampf(a, 0.0, 1.0)))
+	_glow_tex = ImageTexture.create_from_image(img)
+	return _glow_tex
 
 
-func _flame_material(alpha: float) -> StandardMaterial3D:
+## Hollow ring mask for nova/impact waves (the web's `ring()` primitive).
+func _ring_texture() -> ImageTexture:
+	if _ring_tex != null:
+		return _ring_tex
+	var size := 64
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var c := float(size - 1) * 0.5
+	for y in size:
+		for x in size:
+			var d := Vector2(float(x) - c, float(y) - c).length() / c
+			var a := smoothstep(0.5, 0.82, d) * (1.0 - smoothstep(0.86, 1.0, d))
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, clampf(a, 0.0, 1.0)))
+	_ring_tex = ImageTexture.create_from_image(img)
+	return _ring_tex
+
+
+func _glow_material(billboard := true, ring := false, strip := false) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	# Normal alpha, not additive: the additive pass clipped to white over the
+	# bright grass field and lost the element colour (the web's own shapes are
+	# solid-colour pixel sprites; only its separate glow layer is additive).
+	if billboard:
+		mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-	mat.albedo_texture = _flame_texture()
-	mat.albedo_color = Color(1.0, 1.0, 1.0, alpha)
+	if strip:
+		mat.albedo_texture = _strip_texture()
+	elif ring:
+		mat.albedo_texture = _ring_texture()
+	else:
+		mat.albedo_texture = _glow_texture()
+	mat.albedo_color = Color.WHITE
 	return mat
+
+
+## Solid strip with soft edges across its width: the shape the web's `beams`
+## queue draws (a straight quad), unlike the round glow used for orbs.
+func _strip_texture() -> ImageTexture:
+	if _strip_tex != null:
+		return _strip_tex
+	var size := 32
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	for y in size:
+		var v := float(y) / float(size - 1)
+		var a := pow(1.0 - absf(v - 0.5) * 2.0, 0.7)
+		for x in size:
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, clampf(a, 0.0, 1.0)))
+	_strip_tex = ImageTexture.create_from_image(img)
+	return _strip_tex
+
+
+func _make_fx_quad(size: float, billboard: bool, ring := false, strip := false) -> MeshInstance3D:
+	var node := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(size, size)
+	node.mesh = quad
+	node.material_override = _glow_material(billboard, ring, strip)
+	node.visible = false
+	_fx_root.add_child(node)
+	return node
 
 
 func _build_attack_fx() -> void:
@@ -637,33 +734,21 @@ func _build_attack_fx() -> void:
 	_fx_root.name = "AttackFx"
 	add_child(_fx_root)
 	for i in PROJ_POOL:
-		var node := MeshInstance3D.new()
-		var quad := QuadMesh.new()
-		quad.size = Vector2(1.4, 1.4)
-		node.mesh = quad
-		node.material_override = _flame_material(1.0)
-		node.visible = false
-		_fx_root.add_child(node)
-		_proj_nodes.append(node)
+		_proj_nodes.append(_make_fx_quad(1.4, true))
 	for i in SPARK_POOL:
-		var node := MeshInstance3D.new()
-		var quad := QuadMesh.new()
-		quad.size = Vector2(0.6, 0.6)
-		node.mesh = quad
-		node.material_override = _flame_material(1.0)
-		node.visible = false
-		_fx_root.add_child(node)
-		_spark_nodes.append(node)
+		_spark_nodes.append(_make_fx_quad(0.6, true))
 	for i in RING_POOL:
-		var node := MeshInstance3D.new()
-		var quad := QuadMesh.new()
-		quad.size = Vector2(1.0, 1.0)
-		node.mesh = quad
-		node.material_override = _flame_material(1.0)
-		node.rotation = Vector3(-PI / 2, 0, 0)
-		node.visible = false
-		_fx_root.add_child(node)
-		_ring_nodes.append(node)
+		_ring_nodes.append(_make_fx_quad(1.0, true, true))
+	# Ground rings lie flat: no billboard, so the -90 deg pitch sticks.
+	for i in DISC_POOL:
+		var disc := _make_fx_quad(1.0, false, true)
+		disc.rotation = Vector3(-PI / 2, 0, 0)
+		_disc_nodes.append(disc)
+	# Beams are ribbons placed with an explicit basis (see _spawn_beam). The web
+	# draws them as thin solid strips (`beams.spawn(...,width,.05)` @430519) with
+	# a half-length white core, so they get their own soft-edged strip texture.
+	for i in BEAM_POOL:
+		_beam_nodes.append(_make_fx_quad(1.0, false, false, true))
 
 
 ## Drain PbRun's capped cosmetic queue. Damage already happened in the sim
@@ -673,98 +758,419 @@ func _sync_fx_events() -> void:
 	if events.is_empty():
 		return
 	_run["fxEvents"] = []
-	var budget := 6
+	var budget := 8
 	for raw in events:
 		if budget <= 0:
 			break
 		budget -= 1
-		_spawn_fire_cast(PbJson.as_dict(raw))
+		_spawn_fx_event(PbJson.as_dict(raw))
 
 
-func _take_proj() -> MeshInstance3D:
-	var node := _proj_nodes[_proj_cursor % _proj_nodes.size()]
-	_proj_cursor += 1
-	var old = node.get_meta("fx_tween", null)
+func _spawn_fx_event(ev: Dictionary) -> void:
+	if _fx_root == null:
+		return
+	var color := PbTheme.type_color(str(ev.get("type", "normal")))
+	if str(ev.get("kind", "hit")) == "cast":
+		_fx_aura(ev, color)
+		return
+	match str(FX_FORM.get(str(ev.get("arch", "")), "projectile")):
+		"none":
+			return
+		"melee":
+			_fx_melee(ev, color)
+		"dash":
+			_fx_dash(ev, color)
+		"nova":
+			_fx_nova(ev, color)
+		"sky":
+			_fx_sky(ev, color)
+		"beam":
+			_fx_beam(ev, color)
+		"cone":
+			_fx_cone(ev, color)
+		"orbit":
+			_fx_orbit(ev, color)
+		"link":
+			_fx_link(ev, color)
+		"zone":
+			_fx_zone(ev, color)
+		"aura":
+			_fx_aura(ev, color)
+		"boom":
+			_fx_boom(ev, color)
+		_:
+			_fx_projectile(ev, color)
+
+
+## World-space endpoints of one cast: caster chest -> target body.
+func _fx_points(ev: Dictionary) -> Array:
+	var px := float(ev.get("x", 0.0))
+	var pz := float(ev.get("z", 0.0))
+	var tx := float(ev.get("tx", px))
+	var tz := float(ev.get("tz", pz))
+	return [
+		Vector3(px, _ground_y(px, pz) + 1.2, pz),
+		Vector3(tx, _ground_y(tx, tz) + 1.0, tz),
+	]
+
+
+func _reset_fx_node(node: MeshInstance3D, color: Color, alpha := 1.0) -> StandardMaterial3D:
+	var old = node.get_meta("fx_tween", null) if node.has_meta("fx_tween") else null
 	if old != null and old is Tween:
 		(old as Tween).kill()
 	node.visible = true
 	var mat := node.material_override as StandardMaterial3D
 	if mat != null:
-		mat.albedo_color.a = 1.0
+		mat.albedo_color = Color(color.r, color.g, color.b, alpha)
+	return mat
+
+
+func _take_proj(color: Color) -> MeshInstance3D:
+	var node := _proj_nodes[_proj_cursor % _proj_nodes.size()]
+	_proj_cursor += 1
+	_reset_fx_node(node, color)
+	node.scale = Vector3.ONE
 	return node
 
 
-func _spawn_fire_cast(ev: Dictionary) -> void:
-	if _fx_root == null:
-		return
-	var px := float(ev.get("x", 0.0))
-	var pz := float(ev.get("z", 0.0))
-	var tx := float(ev.get("tx", px))
-	var tz := float(ev.get("tz", pz))
-	var from := Vector3(px, _ground_y(px, pz) + 1.2, pz)
-	var to := Vector3(tx, _ground_y(tx, tz) + 1.0, tz)
+func _take_spark(color: Color) -> MeshInstance3D:
+	var node := _spark_nodes[_spark_cursor % _spark_nodes.size()]
+	_spark_cursor += 1
+	_reset_fx_node(node, color)
+	return node
+
+
+func _take_ring(color: Color) -> MeshInstance3D:
+	var node := _ring_nodes[_ring_cursor % _ring_nodes.size()]
+	_ring_cursor += 1
+	_reset_fx_node(node, color, 0.9)
+	return node
+
+
+func _take_disc(color: Color) -> MeshInstance3D:
+	var node := _disc_nodes[_disc_cursor % _disc_nodes.size()]
+	_disc_cursor += 1
+	_reset_fx_node(node, color, 0.85)
+	return node
+
+
+func _take_beam(color: Color) -> MeshInstance3D:
+	var node := _beam_nodes[_beam_cursor % _beam_nodes.size()]
+	_beam_cursor += 1
+	_reset_fx_node(node, color)
+	return node
+
+
+# ---------------------------------------------------------------- forms
+## `bolt/orb/homing/barrage/boomerang/wave/drain` all use the web's
+## `draw + hit + trail` shape: a tinted projectile that flies to the target.
+func _fx_projectile(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
 	var dur := clampf(from.distance_to(to) / 16.0, 0.12, 0.34)
-	# Muzzle flash so the cast reads as coming from the player, not nowhere.
-	_spawn_spark(from + Vector3(0.0, 0.1, 0.0), Vector3.ZERO, 0.14, 1.8)
-	var node := _take_proj()
+	_spawn_spark(from + Vector3(0.0, 0.1, 0.0), Vector3.ZERO, 0.14, 1.6, color)
+	var node := _take_proj(color)
 	node.position = from
 	node.scale = Vector3.ONE * 0.75
 	var tw := node.create_tween()
 	node.set_meta("fx_tween", tw)
 	tw.tween_property(node, "position", to, dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.parallel().tween_property(node, "scale", Vector3.ONE * 1.35, dur)
-	tw.tween_callback(func() -> void: _fire_impact(node, to, ev))
+	tw.parallel().tween_property(node, "scale", Vector3.ONE * 1.3, dur)
+	tw.tween_callback(_impact_and_hide.bind(node, to, ev, color, false))
 
 
-func _fire_impact(node: MeshInstance3D, at: Vector3, ev: Dictionary) -> void:
-	node.visible = false
+## `strike()` in the web: `uh()` @429777 lays two sine-offset chains of beam
+## segments from the caster to the target (vine-whip calls it with a mirrored,
+## shorter second arc), then a twinkle and a ring of particles at the target.
+func _fx_melee(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
+	var d := to - from
+	if d.length() < 0.05:
+		_fx_impact(to, ev, color, false)
+		return
+	var side := Vector3(-d.z, 0.0, d.x).normalized()
+	for arc in [1.0, -0.6]:
+		var prev := from
+		for i in range(1, 9):
+			var t := float(i) / 8.0
+			var off := sin(t * PI) * float(arc)
+			var p: Vector3 = from.lerp(to, t) + side * off \
+				+ Vector3(0.0, sin(t * PI) * 0.25, 0.0)
+			_spawn_beam(prev, p, color, 0.34 * (1.0 - t * 0.35), 0.15)
+			prev = p
+	_spawn_spark(to + Vector3(0.0, 0.2, 0.0), Vector3.ZERO, 0.16, 2.4,
+		color.lightened(0.55))
+	var tw := create_tween()
+	tw.tween_interval(0.14)
+	tw.tween_callback(func() -> void: _fx_impact(to, ev, color, false))
+
+
+## `dash()` in the web (@446737 quick-attack): five short pale streaks straddling
+## the charge line, then a twinkle flare at the target.
+func _fx_dash(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
+	var dir := to - from
+	var flat := Vector3(dir.x, 0.0, dir.z)
+	if flat.length() < 0.001:
+		flat = Vector3(0.0, 0.0, -1.0)
+	flat = flat.normalized()
+	var side := Vector3(-flat.z, 0.0, flat.x)
+	var tint := color.lightened(0.55)
+	for i in 5:
+		var a: Vector3 = from + flat * randf_range(-0.4, 2.0) \
+			+ side * randf_range(-0.9, 0.9) + Vector3(0.0, randf_range(0.2, 1.4), 0.0)
+		_spawn_beam(a, a + flat * 1.0, tint, 0.18, 0.16)
+	_spawn_spark(to + Vector3(0.0, 0.4, 0.0), Vector3.ZERO, 0.18, 3.0,
+		color.lightened(0.8))
+	var tw := create_tween()
+	tw.tween_interval(0.12)
+	tw.tween_callback(func() -> void: _fx_impact(to, ev, color, false))
+
+
+## `nova()` in the web: an expanding ring + dust around the caster.
+func _fx_nova(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
+	_spawn_disc(_ground(from.x, from.z) + Vector3(0.0, 0.06, 0.0), color, 1.4, 0.4)
+	_spawn_ring(from + Vector3(0.0, 0.4, 0.0), color, 1.4)
 	for i in 10:
-		var dir := Vector3(randf_range(-1.0, 1.0), randf_range(0.2, 1.3), randf_range(-1.0, 1.0)).normalized()
-		_spawn_spark(at + Vector3(0.0, 0.25, 0.0), dir * randf_range(0.9, 2.0), randf_range(0.28, 0.45), 1.0)
-	_spawn_spark(at, Vector3.UP * 0.35, 0.24, 2.8)
-	_spawn_ring(Vector3(at.x, _ground_y(at.x, at.z) + 0.06, at.z))
-	if _fx != null:
-		var crit := bool(ev.get("crit", false))
-		_fx.spawn_floater(UI.fmt_num(float(ev.get("dmg", 0.0))),
-			Color(1.0, 0.85, 0.3) if crit else Color(1.0, 0.95, 0.8),
-			_world_screen_point(Vector3(at.x, at.y + 1.0, at.z)))
+		var ang := float(i) / 10.0 * TAU
+		var dir := Vector3(cos(ang), randf_range(0.1, 0.5), sin(ang))
+		_spawn_spark(from + Vector3(0.0, 0.3, 0.0), dir * 1.6, 0.22, 1.0, color)
+	var tw := create_tween()
+	tw.tween_interval(0.08)
+	tw.tween_callback(func() -> void: _fx_impact(to, ev, color, false))
 
 
-func _spawn_ring(at: Vector3) -> void:
-	var node := _ring_nodes[_ring_cursor % _ring_nodes.size()]
-	_ring_cursor += 1
-	var old = node.get_meta("fx_tween", null)
-	if old != null and old is Tween:
-		(old as Tween).kill()
-	node.position = at
-	node.scale = Vector3.ONE * 0.6
-	node.visible = true
-	var mat := node.material_override as StandardMaterial3D
-	if mat != null:
-		mat.albedo_color.a = 0.9
+## `sky + warn` in the web: telegraph disc, then something falls from above.
+func _fx_sky(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var to: Vector3 = pts[1]
+	_spawn_disc(_ground(to.x, to.z) + Vector3(0.0, 0.06, 0.0), color, 1.0, 0.34)
+	var node := _take_proj(color)
+	node.position = _ground(to.x, to.z) + Vector3(0.0, 14.0, 0.0)
+	node.scale = Vector3.ONE * 0.9
 	var tw := node.create_tween()
 	node.set_meta("fx_tween", tw)
-	tw.tween_property(node, "scale", Vector3.ONE * 3.6, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(node, "position", to, 0.3) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(_impact_and_hide.bind(node, to, ev, color, true))
+
+
+## `beam()` in the web (`fh()` @430519): one full-length coloured strip plus a
+## half-length core mixed 50 % toward white, so the beam reads even when its
+## element colour matches the terrain.
+func _fx_beam(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
+	_spawn_beam(from + Vector3(0.0, 0.1, 0.0), to, color, 0.95, 0.2)
+	_spawn_beam(from + Vector3(0.0, 0.1, 0.0), from.lerp(to, 0.55),
+		color.lerp(Color.WHITE, 0.5), 0.42, 0.18)
+	_spawn_ring(from + Vector3(0.0, 0.3, 0.0), color, 0.9)
+	var tw := create_tween()
+	tw.tween_interval(0.16)
+	tw.tween_callback(func() -> void: _fx_impact(to, ev, color, false))
+
+
+## `cone()` in the web: a spread of particles from the caster towards the target.
+func _fx_cone(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
+	var dir := Vector3(to.x - from.x, 0.0, to.z - from.z)
+	if dir.length() < 0.001:
+		dir = Vector3.FORWARD
+	dir = dir.normalized()
+	var side := Vector3(-dir.z, 0.0, dir.x)
+	for i in 12:
+		var spread := randf_range(-0.55, 0.55)
+		var d := (dir + side * spread).normalized()
+		var dist := from.distance_to(to) * randf_range(0.55, 0.95)
+		_spawn_spark(from + Vector3(0.0, 0.3, 0.0), d * dist,
+			randf_range(0.16, 0.3), randf_range(0.8, 1.3), color)
+	var tw := create_tween()
+	tw.tween_interval(0.14)
+	tw.tween_callback(func() -> void: _fx_impact(to, ev, color, false))
+
+
+## `orbit()` in the web: shapes circling the caster once.
+func _fx_orbit(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
+	for i in 4:
+		var ang := float(i) / 4.0 * TAU
+		_spawn_spark(from + Vector3(cos(ang) * 1.6, 0.9, sin(ang) * 1.6),
+			Vector3(0.0, 0.2, 0.0), 0.26, 1.2, color)
+	var tw := create_tween()
+	tw.tween_interval(0.1)
+	tw.tween_callback(func() -> void: _fx_impact(to, ev, color, false))
+
+
+## `link()` in the web: zigzag segments between caster and target.
+func _fx_link(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
+	var prev := from
+	for i in range(1, 5):
+		var t := float(i) / 4.0
+		var p: Vector3 = from.lerp(to, t) + Vector3(
+			randf_range(-0.7, 0.7), randf_range(-0.4, 0.6), randf_range(-0.7, 0.7))
+		_spawn_beam(prev, p, color, 0.28, 0.12)
+		prev = p
+	var tw := create_tween()
+	tw.tween_interval(0.1)
+	tw.tween_callback(func() -> void: _fx_impact(to, ev, color, false))
+
+
+## `cast()` / `aura()` in the web: a ring on the caster (buffs, weather, charge).
+func _fx_aura(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	_spawn_ring(from + Vector3(0.0, 0.6, 0.0), color, 1.1)
+	_spawn_disc(_ground(from.x, from.z) + Vector3(0.0, 0.06, 0.0), color, 1.0, 0.45)
+	for i in 6:
+		var ang := float(i) / 6.0 * TAU
+		_spawn_spark(from + Vector3(cos(ang) * 1.0, 0.2, sin(ang) * 1.0),
+			Vector3(0.0, 1.2, 0.0), 0.45, 0.9, color)
+
+
+## `zone()` in the web: a ground patch where the move lands.
+func _fx_zone(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var to: Vector3 = pts[1]
+	var g := _ground(to.x, to.z)
+	_spawn_disc(g + Vector3(0.0, 0.06, 0.0), color, 1.5, 0.5)
+	_spawn_ring(g + Vector3(0.0, 0.1, 0.0), color, 0.8)
+
+
+## `boom + draw + trail` in the web: a lobbed projectile that explodes on arrival.
+func _fx_boom(ev: Dictionary, color: Color) -> void:
+	var pts := _fx_points(ev)
+	var from: Vector3 = pts[0]
+	var to: Vector3 = pts[1]
+	var dur := clampf(from.distance_to(to) / 18.0, 0.18, 0.42)
+	var mid: Vector3 = (from + to) * 0.5 + Vector3(0.0, 1.8, 0.0)
+	var node := _take_proj(color)
+	node.position = from
+	node.scale = Vector3.ONE * 0.7
+	var tw := node.create_tween()
+	node.set_meta("fx_tween", tw)
+	tw.tween_property(node, "position", mid, dur * 0.55) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(node, "position", to, dur * 0.45) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(node, "scale", Vector3.ONE * 1.25, dur)
+	tw.tween_callback(_impact_and_hide.bind(node, to, ev, color, true))
+
+
+# ------------------------------------------------------------- primitives
+func _impact_and_hide(node: MeshInstance3D, at: Vector3, ev: Dictionary,
+		color: Color, strong: bool) -> void:
+	node.visible = false
+	_fx_impact(at, ev, color, strong)
+
+
+func _fx_impact(at: Vector3, ev: Dictionary, color: Color, strong: bool) -> void:
+	var count := 14 if strong else 10
+	for i in count:
+		var dir := Vector3(randf_range(-1.0, 1.0), randf_range(0.15, 1.2),
+			randf_range(-1.0, 1.0)).normalized()
+		_spawn_spark(at + Vector3(0.0, 0.25, 0.0), dir * randf_range(0.9, 2.2),
+			randf_range(0.26, 0.46), 1.0, color)
+	_spawn_spark(at, Vector3.UP * 0.35, 0.24, 2.8 if strong else 2.2, color.lightened(0.55))
+	_spawn_ring(Vector3(at.x, at.y + 0.2, at.z), color, 1.0)
+	_spawn_disc(_ground(at.x, at.z) + Vector3(0.0, 0.06, 0.0), color, 1.0, 0.34)
+	if _fx == null:
+		return
+	var dmg := float(ev.get("dmg", 0.0))
+	if dmg <= 0.0:
+		return
+	var crit := bool(ev.get("crit", false))
+	_fx.spawn_floater(UI.fmt_num(dmg),
+		Color(1.0, 0.85, 0.3) if crit else Color(1.0, 0.97, 0.9),
+		_world_screen_point(Vector3(at.x, at.y + 1.0, at.z)))
+
+
+func _ground(x: float, z: float) -> Vector3:
+	return Vector3(x, _ground_y(x, z), z)
+
+
+func _spawn_ring(at: Vector3, color: Color, size_mul := 1.0) -> void:
+	var node := _take_ring(color)
+	node.position = at
+	node.scale = Vector3.ONE * 0.6 * size_mul
+	var mat := node.material_override as StandardMaterial3D
+	var tw := node.create_tween()
+	node.set_meta("fx_tween", tw)
+	tw.tween_property(node, "scale", Vector3.ONE * 3.6 * size_mul, 0.28) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if mat != null:
 		tw.parallel().tween_property(mat, "albedo_color:a", 0.0, 0.28)
 	tw.tween_callback(func() -> void: node.visible = false)
 
 
-func _spawn_spark(at: Vector3, offset: Vector3, life: float, size_mul: float) -> void:
-	var node := _spark_nodes[_spark_cursor % _spark_nodes.size()]
-	_spark_cursor += 1
-	var old = node.get_meta("fx_tween", null)
-	if old != null and old is Tween:
-		(old as Tween).kill()
+## Flat ring that expands across the ground (impact/nova/telegraph).
+func _spawn_disc(at: Vector3, color: Color, size_mul: float, life: float) -> void:
+	var node := _take_disc(color)
 	node.position = at
-	node.scale = Vector3.ONE * size_mul * 0.5
-	node.visible = true
+	node.scale = Vector3.ONE * 0.5 * size_mul
 	var mat := node.material_override as StandardMaterial3D
-	if mat != null:
-		mat.albedo_color.a = 1.0
 	var tw := node.create_tween()
 	node.set_meta("fx_tween", tw)
-	tw.tween_property(node, "position", at + offset, life).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(node, "scale", Vector3.ONE * 3.0 * size_mul, life) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if mat != null:
+		tw.parallel().tween_property(mat, "albedo_color:a", 0.0, life)
+	tw.tween_callback(func() -> void: node.visible = false)
+
+
+## Additive ribbon stretched between two world points, facing the camera.
+func _spawn_beam(a: Vector3, b: Vector3, color: Color, width: float, life: float) -> void:
+	var node := _take_beam(color)
+	var d := b - a
+	var length := d.length()
+	if length < 0.001:
+		node.visible = false
+		return
+	var fwd := d / length
+	var cam := Vector3.UP
+	if _camera != null and _camera.is_inside_tree():
+		cam = _camera.global_position - (a + b) * 0.5
+	var up := cam.cross(fwd)
+	if up.length() < 0.001:
+		up = Vector3.UP
+	up = up.normalized()
+	var right := fwd.cross(up).normalized()
+	node.transform = Transform3D(Basis(fwd, up, right), (a + b) * 0.5)
+	node.scale = Vector3(length, width, 1.0)
+	var mat := node.material_override as StandardMaterial3D
+	var tw := node.create_tween()
+	node.set_meta("fx_tween", tw)
+	if mat != null:
+		tw.tween_property(mat, "albedo_color:a", 0.0, life)
+	tw.parallel().tween_property(node, "scale:y", width * 0.3, life)
+	tw.tween_callback(func() -> void: node.visible = false)
+
+
+func _spawn_spark(at: Vector3, offset: Vector3, life: float, size_mul: float,
+		color: Color) -> void:
+	var node := _take_spark(color)
+	node.position = at
+	node.scale = Vector3.ONE * size_mul * 0.5
+	var mat := node.material_override as StandardMaterial3D
+	var tw := node.create_tween()
+	node.set_meta("fx_tween", tw)
+	tw.tween_property(node, "position", at + offset, life) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(node, "scale", Vector3.ONE * size_mul * 0.1, life)
 	if mat != null:
 		tw.parallel().tween_property(mat, "albedo_color:a", 0.0, life)
