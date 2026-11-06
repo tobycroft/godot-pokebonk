@@ -82,6 +82,7 @@ const FX_FORM := {
 	"buff": "aura",
 	"weather": "aura",
 	"random": "none",
+	"slam": "nova",
 }
 const HudFx = preload("res://src/ui/hud_fx.gd")
 
@@ -146,6 +147,21 @@ const PROBE_DIST := PLAYER_RADIUS * 0.8
 const GROUND_SNAP := 0.9
 ## Types that auto-climb a blocked step in the web (`wb`): fighting/bug/ghost (plus floats).
 const CLIMB_TYPES := ["fighting", "bug", "ghost"]
+## Shift (`dash='ShiftLeft'` @7387; also ShiftRight/ControlLeft @867905). The web
+## has no stamina: a ground tap sets `slideT=.55, slideCd=.9` and a 1.9x
+## (`E*1.9`, 2.3x on ice) velocity that decays by `exp(-2.2*dt)` (@868273). An
+## airborne tap dives (`vel.y=-34`, horizontal x.35, @868067); landing calls
+## `slam()` (@855540) with `mb=2` cooldown, `hb=8` fall normalisation and
+## `gb=6.3` base move speed (@834772).
+const BASE_SPEED := 6.3
+const SLIDE_TIME := 0.55
+const SLIDE_CD := 0.9
+const SLIDE_MUL := 1.9
+const SLIDE_DECAY := 2.2
+const DIVE_FALL_SPEED := 34.0
+const DIVE_MIN_HEIGHT := 1.2
+const DIVE_HORIZONTAL := 0.35
+const SLAM_CD := 2.0
 var _player_py := 0.0
 var _player_vy := 0.0
 var _grounded := true
@@ -153,6 +169,15 @@ var _jumps_left := 0
 var _py_ready := false
 var _cam_follow_y := 0.0
 var _cam_follow_ready := false
+## Shift state: slide timer, cooldown, decaying speed + captured world direction;
+## dive flag, apex height (for the landing fall) and the slam cooldown.
+var _slide_t := 0.0
+var _slide_cd := 0.0
+var _slide_speed := 0.0
+var _slide_dir := Vector2.ZERO
+var _diving := false
+var _apex := 0.0
+var _slam_cd := 0.0
 
 
 func _ready() -> void:
@@ -595,6 +620,13 @@ func _start_run() -> void:
 	_jumps_left = 0
 	_py_ready = false
 	_cam_follow_ready = false
+	_slide_t = 0.0
+	_slide_cd = 0.0
+	_slide_speed = 0.0
+	_slide_dir = Vector2.ZERO
+	_diving = false
+	_apex = 0.0
+	_slam_cd = 0.0
 	_sync_mouse_capture()
 	_time = 0.0
 	_last_damage_taken = 0.0
@@ -1321,26 +1353,39 @@ func _move_input(dt: float) -> void:
 		_player_vy = 0.0
 		_grounded = true
 		_py_ready = true
-	var dir := Vector2.ZERO
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		dir.x -= 1.0
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		dir.x += 1.0
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		dir.y -= 1.0
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		dir.y += 1.0
+	_slide_cd = maxf(0.0, _slide_cd - dt)
+	_slam_cd = maxf(0.0, _slam_cd - dt)
+	var dir := _input_vector()
 	# Gravity runs every frame, airborne or not (bundle @870247 `vel.y -= db*e`, db = 30).
 	_player_vy -= GRAVITY * dt
+	# While diving the web pins `vel.y = Math.min(vel.y, -34)` every frame (@870600).
+	if _diving:
+		_player_vy = minf(_player_vy, -DIVE_FALL_SPEED)
 	var blocked := false
-	if dir != Vector2.ZERO:
-		var speed := float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) * 6.0 \
-			* float(player.get("hazardSlow", 1.0))
-		dir = dir.normalized()
+	var speed := BASE_SPEED * float(PbJson.as_dict(player.get("stats", {})).get("moveSpeed", 1.0)) \
+		* float(player.get("hazardSlow", 1.0))
+	var wx := 0.0
+	var wz := 0.0
+	var moving := false
+	if _slide_t > 0.0:
+		# Slide: the web skips its acceleration branch and decays the captured
+		# velocity by exp(-2.2*dt) each frame (@868273), so input is ignored.
+		_slide_t = maxf(0.0, _slide_t - dt)
+		_slide_speed *= exp(-SLIDE_DECAY * dt)
+		speed = _slide_speed
+		wx = _slide_dir.x
+		wz = _slide_dir.y
+		moving = true
+	elif dir != Vector2.ZERO:
 		# Camera-relative WASD, matching the web: forward = away from the camera,
 		# right = camera right (bundle @866266).
-		var wx := sin(_cam_yaw) * dir.y + cos(_cam_yaw) * dir.x
-		var wz := cos(_cam_yaw) * dir.y - sin(_cam_yaw) * dir.x
+		wx = sin(_cam_yaw) * dir.y + cos(_cam_yaw) * dir.x
+		wz = cos(_cam_yaw) * dir.y - sin(_cam_yaw) * dir.x
+		moving = true
+		if _diving:
+			# `vel.x *= .35; vel.z *= .35` at dive start (@868067).
+			speed *= DIVE_HORIZONTAL
+	if moving:
 		var dx := wx * speed * dt
 		var dz := wz * speed * dt
 		# Prop colliders + the web's step/slope probe (`ie`, @871154): a move axis is refused
@@ -1357,15 +1402,20 @@ func _move_input(dt: float) -> void:
 				player["x"] = cx + dx
 			else:
 				blocked = true
+				_slide_dir.x = 0.0
 			cx = float(player.get("x", 0.0))
 			if not _step_blocked(cx, cz + dz, 0.0, dz) \
 					and not _terrain.hit_prop(cx, cz + dz, _player_py, PLAYER_RADIUS):
 				player["z"] = cz + dz
 			else:
 				blocked = true
+				_slide_dir.y = 0.0
 		# PMD sheets store 8 rows clockwise from "down/front": row 0 faces +z
 		# (towards the start camera), row 2 faces +x, row 4 faces -z, row 6 -x.
 		player["facing"] = posmod(roundi(atan2(wx, wz) / (PI / 4.0)), 8)
+	# A slide cancelled on both axes (wall/steep slope) ends instead of idling.
+	if _slide_t > 0.0 and _slide_dir == Vector2.ZERO:
+		_slide_t = 0.0
 	# Fighting/bug/ghost types climb a blocked step by lifting off (bundle @871154).
 	if blocked:
 		var types := PbJson.as_array(player.get("types", []))
@@ -1379,11 +1429,15 @@ func _move_input(dt: float) -> void:
 	# Vertical integration + ground contact (@873494): land when the feet reach the surface,
 	# snap down small drops while grounded, and only leave the ground when clearly airborne.
 	_player_py += _player_vy * dt
+	# `apex` is the highest point of the current airtime; the slam fall uses it.
+	_apex = _player_py if _grounded else maxf(_apex, _player_py)
 	var floor_y := _ground_y(float(player.get("x", 0.0)), float(player.get("z", 0.0)))
 	if _player_py <= floor_y:
 		_player_py = floor_y
 		if _player_vy < 0.0:
 			_player_vy = 0.0
+		if _diving:
+			_settle_dive(floor_y)
 		_grounded = true
 		_jumps_left = _extra_jumps(player)
 	elif _grounded and _player_vy <= 0.0 and _player_py - floor_y < GROUND_SNAP:
@@ -1394,6 +1448,63 @@ func _move_input(dt: float) -> void:
 	elif _player_vy <= 0.0:
 		_player_py = floor_y
 		_grounded = true
+
+
+## Shift landing from a dive: `slam(groundY, apex-groundY)` (@855540), with the
+## 2 s `mb` cooldown suppressing damage but still playing the land feedback.
+func _settle_dive(floor_y: float) -> void:
+	_diving = false
+	var fall := maxf(0.0, _apex - floor_y)
+	var o := clampf(fall / 8.0, 0.0, 1.0)
+	if _slam_cd > 0.0:
+		Audio.sfx("hit")
+		return
+	_slam_cd = SLAM_CD
+	var player: Dictionary = _run["player"]
+	PbRun.player_slam(_run, float(player.get("x", 0.0)), float(player.get("z", 0.0)), fall)
+	Audio.sfx("hit")
+	_trauma = minf(1.0, _trauma + 0.14 + 0.26 * o)
+
+
+## Shift (@867905): airborne = dive, grounded = 0.55 s slide at 1.9x.
+func _try_dash() -> void:
+	if not _py_ready:
+		return
+	var player: Dictionary = _run["player"]
+	var px := float(player.get("x", 0.0))
+	var pz := float(player.get("z", 0.0))
+	# Dive needs the feet more than 1.2 above the surface; input is not required.
+	if not _grounded and not _diving and _player_py - _ground_y(px, pz) > DIVE_MIN_HEIGHT:
+		_diving = true
+		_player_vy = -DIVE_FALL_SPEED
+		Audio.sfx("hit")
+		return
+	# Slide needs movement input (`x>0`) and `slideCd<=0` (@868273).
+	if _grounded and _slide_cd <= 0.0:
+		var dir := _input_vector()
+		if dir == Vector2.ZERO:
+			return
+		var stats := PbJson.as_dict(player.get("stats", {}))
+		var speed := BASE_SPEED * float(stats.get("moveSpeed", 1.0)) \
+			* float(player.get("hazardSlow", 1.0))
+		_slide_dir = Vector2(sin(_cam_yaw) * dir.y + cos(_cam_yaw) * dir.x,
+			cos(_cam_yaw) * dir.y - sin(_cam_yaw) * dir.x).normalized()
+		_slide_speed = speed * SLIDE_MUL
+		_slide_t = SLIDE_TIME
+		_slide_cd = SLIDE_CD
+
+
+func _input_vector() -> Vector2:
+	var dir := Vector2.ZERO
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		dir.x -= 1.0
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		dir.x += 1.0
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		dir.y -= 1.0
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		dir.y += 1.0
+	return dir.normalized() if dir != Vector2.ZERO else Vector2.ZERO
 
 
 ## The web's `ie(x,z,dx,dz)`: refuse an axis when the surface under the target position, or
@@ -1470,6 +1581,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			# re keymap: jump = Space (bundle @870202 `n.hit('Space')`).
 			if not modal and not _paused and not over:
 				_try_jump()
+		KEY_SHIFT, KEY_CTRL:
+			# re keymap: dash = ShiftLeft (`ga.dash` @7387; ShiftRight/ControlLeft
+			# accepted at @867905). Ground = slide, air = dive, no stamina.
+			if not modal and not _paused and not over:
+				_try_dash()
 		KEY_E:
 			# re keymap: capture throw = KeyE (kS.tryThrow/throwBall @1082671).
 			# Interactables share the key: portal > guardian altar > Meowth shop,

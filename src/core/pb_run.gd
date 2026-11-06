@@ -863,33 +863,7 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 	for hit in count:
 		var tx := float(PbEnemies.get_field(pool, "x", target))
 		var tz := float(PbEnemies.get_field(pool, "z", target))
-		var ctx := {
-			"movedef": def,
-			"inst": built,
-			"actor": PbActor.actor_for_damage(player),
-			"def_types": PbEnemies.types_of(pool, target),
-			"weather": _weather_id(state.get("weather")),
-			"flags": PbEnemies.flags(pool, target),
-			"elite": PbEnemies.is_elite(pool, target),
-			"boss": PbEnemies.is_boss(pool, target),
-			"exhaust": PbCombat.boss_exhaust(float(state.get("bossFightT", 0.0))) \
-				if target == int(state.get("bossIndex", -1)) else 1.0,
-			"curse": int(PbEnemies.get_field(pool, "curse", target) > 0.0),
-			"veil": int(PbEnemies.get_field(pool, "confusion", target) > 0.0),
-			"frozen": int(PbEnemies.get_field(pool, "freeze", target) > 0.0),
-			"paralysed": int(PbEnemies.get_field(pool, "paralysis", target) > 0.0),
-			"asleep": int(PbEnemies.get_field(pool, "sleep", target) > 0.0),
-			"poison_stacks": int(PbEnemies.get_field(pool, "poisonStacks", target)),
-			"shield": 0.0,
-			"scope": 1.0,
-			"status_count": 0,
-			# Ob.bonusDamageMult() @841430 / siegeMult @749555.
-			"bonusDamage": PbCombat.bonus_damage_mult(player, state, _weather_id(state.get("weather"))),
-			"ice_heal": str(player.get("ability", "")) == "ice-heal",
-			"siege": PbCombat.siege_mult(maxf(float(state.get("camp", 0.0)),
-				float(state.get("siegeIdle", 0.0))),
-				float(state.get("time", 0.0)), str(state.get("mode", "")) == "endless"),
-		}
+		var ctx := _strike_ctx(state, def, built, target)
 		var out := PbDamage.strike(ctx)
 		var dmg := float(out["damage"])
 		if dmg <= 0.0:
@@ -931,6 +905,125 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 				target = PbEnemies.nearest(pool, player_x(state), player_z(state), 22.0)
 				if target < 0:
 					return
+
+
+## The outgoing-damage context shared by move casts and the dive slam, so both
+## feed PbDamage.strike exactly the same defender/run flags.
+static func _strike_ctx(state: Dictionary, def: Dictionary, built: Dictionary,
+		target: int) -> Dictionary:
+	var pool := pool_of(state)
+	var player: Dictionary = state["player"]
+	return {
+		"movedef": def,
+		"inst": built,
+		"actor": PbActor.actor_for_damage(player),
+		"def_types": PbEnemies.types_of(pool, target),
+		"weather": _weather_id(state.get("weather")),
+		"flags": PbEnemies.flags(pool, target),
+		"elite": PbEnemies.is_elite(pool, target),
+		"boss": PbEnemies.is_boss(pool, target),
+		"exhaust": PbCombat.boss_exhaust(float(state.get("bossFightT", 0.0))) \
+			if target == int(state.get("bossIndex", -1)) else 1.0,
+		"curse": int(PbEnemies.get_field(pool, "curse", target) > 0.0),
+		"veil": int(PbEnemies.get_field(pool, "confusion", target) > 0.0),
+		"frozen": int(PbEnemies.get_field(pool, "freeze", target) > 0.0),
+		"paralysed": int(PbEnemies.get_field(pool, "paralysis", target) > 0.0),
+		"asleep": int(PbEnemies.get_field(pool, "sleep", target) > 0.0),
+		"poison_stacks": int(PbEnemies.get_field(pool, "poisonStacks", target)),
+		"shield": 0.0,
+		"scope": 1.0,
+		"status_count": 0,
+		# Ob.bonusDamageMult() @841430 / siegeMult @749555.
+		"bonusDamage": PbCombat.bonus_damage_mult(player, state, _weather_id(state.get("weather"))),
+		"ice_heal": str(player.get("ability", "")) == "ice-heal",
+		"siege": PbCombat.siege_mult(maxf(float(state.get("camp", 0.0)),
+			float(state.get("siegeIdle", 0.0))),
+			float(state.get("time", 0.0)), str(state.get("mode", "")) == "endless"),
+	}
+
+
+## Dive slam (bundle `slam()` @855540). A Shift dive that lands resolves through
+## the same `combat.hit` pipeline as moves, so it reuses PbDamage.strike.
+##   o      = clamp(fall / 8, 0, 1)                       (`hb=8` @834772)
+##   radius = (3.2 + 3.3*o) * sqrt(stats.area)
+##   base   = (12 + level*1.5) * Tv(stage) * slam * (1 + 2*o)
+##   Tv     = [1, 1.8, 3.2, 4][stage-1] ?? 4              (@743334)
+## move_instance normally folds stats.damage/physical/STAB/typeBoost into `real`,
+## so the same four layers are applied here by hand; the stun roll is
+## `.35 + .4*o` (@855540).
+static func player_slam(state: Dictionary, x: float, z: float, fall: float) -> Dictionary:
+	var pool := pool_of(state)
+	var player: Dictionary = state["player"]
+	var stats := PbJson.as_dict(player.get("stats", {}))
+	var o := clampf(fall / 8.0, 0.0, 1.0)
+	var area := maxf(0.05, PbJson.as_float(stats.get("area", 1.0), 1.0))
+	var radius := (3.2 + 3.3 * o) * sqrt(area)
+	var level := int(player.get("level", 1))
+	var stages := [1.0, 1.8, 3.2, 4.0]
+	var stage := int(state.get("stage", 1))
+	var stage_mult := float(stages[stage - 1]) if stage >= 1 and stage <= 4 else 4.0
+	var base := (12.0 + float(level) * 1.5) * stage_mult \
+		* PbJson.as_float(stats.get("slam", 1.0), 1.0) * (1.0 + 2.0 * o)
+	var types := PbJson.as_array(player.get("types", []))
+	var move_type := str(types[0]) if not types.is_empty() else "normal"
+	var actor := PbActor.actor_for_damage(player)
+	var astats := PbJson.as_dict(actor.get("stats", {}))
+	var stab := PbDamage.STAB_ADAPTABILITY if bool(actor.get("adaptability", false)) else PbDamage.STAB
+	var boost := PbJson.as_float(PbJson.as_dict(astats.get("typeBoost", {})).get(move_type, 1.0), 1.0)
+	var real := base * PbJson.as_float(astats.get("damage", 1.0), 1.0) \
+		* PbJson.as_float(astats.get("physical", 1.0), 1.0) * stab * boost
+	var def := {
+		"key": "dive-slam", "name": "Dive Slam", "arch": "slam", "type": move_type,
+		"cls": "physical", "status": "stun", "dmg": base, "count": 1, "pulses": 1,
+		"area": area, "dur": 1.0, "speed": 0.0, "pierce": 99, "stats": [],
+	}
+	var built := {
+		"real": real, "base": base, "count": 1, "pulses": 1, "area": area, "dur": 1.0,
+		"speed": 0.0, "pierce": 99, "bounce": 0, "statusChance": 0.35 + 0.4 * o,
+		"crit": 0.0, "reach": radius, "level": level,
+	}
+	var hits := 0
+	var total := 0.0
+	for raw in PbEnemies.within(pool, x, z, radius):
+		var target := int(raw)
+		var tx := float(PbEnemies.get_field(pool, "x", target))
+		var tz := float(PbEnemies.get_field(pool, "z", target))
+		var out := PbDamage.strike(_strike_ctx(state, def, built, target))
+		var dmg := float(out["damage"])
+		if dmg <= 0.0:
+			continue
+		var hit_res := PbEnemies.damage(pool, target, dmg)
+		var dealt := float(hit_res["dealt"])
+		if bool(hit_res.get("capture", false)):
+			PbCapture.on_defeated(state)
+		elif bool(hit_res.get("alpha", false)):
+			if not PbCapture.on_defeated(state, target):
+				var alpha_info := PbEnemies.kill(pool, target)
+				if alpha_info != null:
+					_on_kill_info(state, PbJson.as_dict(alpha_info))
+		state["stats"]["damage"] = float(state["stats"]["damage"]) + dealt
+		state["stats"]["hits"] = int(state["stats"].get("hits", 0)) + 1
+		hits += 1
+		total += dealt
+		_push_fx(state, def, tx, tz, dealt, bool(out["crit"]))
+		PbWeatherEvents.on_hit(state, target)
+		if bool(out["crit"]):
+			state["stats"]["crits"] = int(state["stats"].get("crits", 0)) + 1
+		if bool(out["mega"]):
+			state["stats"]["megaCrits"] = int(state["stats"].get("megaCrits", 0)) + 1
+		if out["status"] != null and PbStatus.roll(out["status"], float(out["statusChance"])):
+			PbEnemies.apply_status(pool, target, str(out["status"]),
+				float(stats.get("duration", 1.0)), dealt, float(stats.get("statusDamage", 1.0)))
+		var lifesteal := float(stats.get("lifesteal", 0.0))
+		if lifesteal > 0.0:
+			PbActor.heal(player, dealt * lifesteal, _heal_mult(state))
+		if bool(hit_res["died"]):
+			_on_kill_info(state, PbJson.as_dict(hit_res["info"]))
+	state["stats"]["slams"] = int(state["stats"].get("slams", 0)) + 1
+	# `this.iframes = Math.max(this.iframes, .3)` right after the slam (@855540).
+	player["iframes"] = maxf(float(player.get("iframes", 0.0)), 0.3)
+	return {"hits": hits, "damage": total, "radius": radius, "fall": fall,
+		"base": base, "real": real}
 
 
 ## Queue one cosmetic hit record for RunScreen. This runs after
