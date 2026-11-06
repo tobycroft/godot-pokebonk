@@ -25,6 +25,20 @@ var _sun: DirectionalLight3D
 var _enemy_nodes: Array[MeshInstance3D] = []
 var _orb_nodes: Array[MeshInstance3D] = []
 var _bolt_nodes: Array[MeshInstance3D] = []
+# Fire-cast visuals: a pool of additive flame billboards + sparks. The web's
+# per-move draw()/hit() closures (bundle @439385) are bodies, not data; this is
+# the port's replacement for the fire family only (see docs / pb_moves.gd:11).
+const PROJ_POOL := 24
+const SPARK_POOL := 96
+const RING_POOL := 12
+var _fx_root: Node3D
+var _proj_nodes: Array[MeshInstance3D] = []
+var _spark_nodes: Array[MeshInstance3D] = []
+var _ring_nodes: Array[MeshInstance3D] = []
+var _proj_cursor := 0
+var _spark_cursor := 0
+var _ring_cursor := 0
+var _flame_tex: GradientTexture2D
 const HudFx = preload("res://src/ui/hud_fx.gd")
 
 var _hud: RunHud
@@ -116,6 +130,7 @@ func _build_world() -> void:
 
 	_player_node = Node3D.new()
 	add_child(_player_node)
+	_build_attack_fx()
 
 	_camera = Camera3D.new()
 	add_child(_camera)
@@ -581,6 +596,181 @@ func _sync_bolts() -> void:
 		node.position = Vector3(mx, _ground_y(mx, mz) + 0.12, mz)
 
 
+# ------------------------------------------------------------------ attack fx
+# The web draws each fire cast from runtime pixel shapes (PixFlame in the move
+# vfx table at main-C5MieX6g-mvpjh5lt.js @439385); it ships no fire png/glb/fx
+# asset to port, so the same soft glow is generated from a GradientTexture2D.
+func _flame_texture() -> GradientTexture2D:
+	if _flame_tex != null:
+		return _flame_tex
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1.0, 0.9, 0.55, 1.0))
+	grad.set_color(1, Color(1.0, 0.14, 0.01, 0.0))
+	grad.add_point(0.25, Color(1.0, 0.55, 0.06, 0.95))
+	grad.add_point(0.6, Color(1.0, 0.28, 0.02, 0.45))
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(0.5, 0.0)
+	tex.width = 64
+	tex.height = 64
+	_flame_tex = tex
+	return tex
+
+
+func _flame_material(alpha: float) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	mat.albedo_texture = _flame_texture()
+	mat.albedo_color = Color(1.0, 1.0, 1.0, alpha)
+	return mat
+
+
+func _build_attack_fx() -> void:
+	_fx_root = Node3D.new()
+	_fx_root.name = "AttackFx"
+	add_child(_fx_root)
+	for i in PROJ_POOL:
+		var node := MeshInstance3D.new()
+		var quad := QuadMesh.new()
+		quad.size = Vector2(1.4, 1.4)
+		node.mesh = quad
+		node.material_override = _flame_material(1.0)
+		node.visible = false
+		_fx_root.add_child(node)
+		_proj_nodes.append(node)
+	for i in SPARK_POOL:
+		var node := MeshInstance3D.new()
+		var quad := QuadMesh.new()
+		quad.size = Vector2(0.6, 0.6)
+		node.mesh = quad
+		node.material_override = _flame_material(1.0)
+		node.visible = false
+		_fx_root.add_child(node)
+		_spark_nodes.append(node)
+	for i in RING_POOL:
+		var node := MeshInstance3D.new()
+		var quad := QuadMesh.new()
+		quad.size = Vector2(1.0, 1.0)
+		node.mesh = quad
+		node.material_override = _flame_material(1.0)
+		node.rotation = Vector3(-PI / 2, 0, 0)
+		node.visible = false
+		_fx_root.add_child(node)
+		_ring_nodes.append(node)
+
+
+## Drain PbRun's capped cosmetic queue. Damage already happened in the sim
+## (PbRun._fire -> PbDamage.strike); everything below is presentation only.
+func _sync_fx_events() -> void:
+	var events: Array = PbJson.as_array(_run.get("fxEvents", []))
+	if events.is_empty():
+		return
+	_run["fxEvents"] = []
+	var budget := 6
+	for raw in events:
+		if budget <= 0:
+			break
+		budget -= 1
+		_spawn_fire_cast(PbJson.as_dict(raw))
+
+
+func _take_proj() -> MeshInstance3D:
+	var node := _proj_nodes[_proj_cursor % _proj_nodes.size()]
+	_proj_cursor += 1
+	var old = node.get_meta("fx_tween", null)
+	if old != null and old is Tween:
+		(old as Tween).kill()
+	node.visible = true
+	var mat := node.material_override as StandardMaterial3D
+	if mat != null:
+		mat.albedo_color.a = 1.0
+	return node
+
+
+func _spawn_fire_cast(ev: Dictionary) -> void:
+	if _fx_root == null:
+		return
+	var px := float(ev.get("x", 0.0))
+	var pz := float(ev.get("z", 0.0))
+	var tx := float(ev.get("tx", px))
+	var tz := float(ev.get("tz", pz))
+	var from := Vector3(px, _ground_y(px, pz) + 1.2, pz)
+	var to := Vector3(tx, _ground_y(tx, tz) + 1.0, tz)
+	var dur := clampf(from.distance_to(to) / 16.0, 0.12, 0.34)
+	# Muzzle flash so the cast reads as coming from the player, not nowhere.
+	_spawn_spark(from + Vector3(0.0, 0.1, 0.0), Vector3.ZERO, 0.14, 1.8)
+	var node := _take_proj()
+	node.position = from
+	node.scale = Vector3.ONE * 0.75
+	var tw := node.create_tween()
+	node.set_meta("fx_tween", tw)
+	tw.tween_property(node, "position", to, dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(node, "scale", Vector3.ONE * 1.35, dur)
+	tw.tween_callback(func() -> void: _fire_impact(node, to, ev))
+
+
+func _fire_impact(node: MeshInstance3D, at: Vector3, ev: Dictionary) -> void:
+	node.visible = false
+	for i in 10:
+		var dir := Vector3(randf_range(-1.0, 1.0), randf_range(0.2, 1.3), randf_range(-1.0, 1.0)).normalized()
+		_spawn_spark(at + Vector3(0.0, 0.25, 0.0), dir * randf_range(0.9, 2.0), randf_range(0.28, 0.45), 1.0)
+	_spawn_spark(at, Vector3.UP * 0.35, 0.24, 2.8)
+	_spawn_ring(Vector3(at.x, _ground_y(at.x, at.z) + 0.06, at.z))
+	if _fx != null:
+		var crit := bool(ev.get("crit", false))
+		_fx.spawn_floater(UI.fmt_num(float(ev.get("dmg", 0.0))),
+			Color(1.0, 0.85, 0.3) if crit else Color(1.0, 0.95, 0.8),
+			_world_screen_point(Vector3(at.x, at.y + 1.0, at.z)))
+
+
+func _spawn_ring(at: Vector3) -> void:
+	var node := _ring_nodes[_ring_cursor % _ring_nodes.size()]
+	_ring_cursor += 1
+	var old = node.get_meta("fx_tween", null)
+	if old != null and old is Tween:
+		(old as Tween).kill()
+	node.position = at
+	node.scale = Vector3.ONE * 0.6
+	node.visible = true
+	var mat := node.material_override as StandardMaterial3D
+	if mat != null:
+		mat.albedo_color.a = 0.9
+	var tw := node.create_tween()
+	node.set_meta("fx_tween", tw)
+	tw.tween_property(node, "scale", Vector3.ONE * 3.6, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if mat != null:
+		tw.parallel().tween_property(mat, "albedo_color:a", 0.0, 0.28)
+	tw.tween_callback(func() -> void: node.visible = false)
+
+
+func _spawn_spark(at: Vector3, offset: Vector3, life: float, size_mul: float) -> void:
+	var node := _spark_nodes[_spark_cursor % _spark_nodes.size()]
+	_spark_cursor += 1
+	var old = node.get_meta("fx_tween", null)
+	if old != null and old is Tween:
+		(old as Tween).kill()
+	node.position = at
+	node.scale = Vector3.ONE * size_mul * 0.5
+	node.visible = true
+	var mat := node.material_override as StandardMaterial3D
+	if mat != null:
+		mat.albedo_color.a = 1.0
+	var tw := node.create_tween()
+	node.set_meta("fx_tween", tw)
+	tw.tween_property(node, "position", at + offset, life).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(node, "scale", Vector3.ONE * size_mul * 0.1, life)
+	if mat != null:
+		tw.parallel().tween_property(mat, "albedo_color:a", 0.0, life)
+	tw.tween_callback(func() -> void: node.visible = false)
+
+
 func _process(delta: float) -> void:
 	if _run.is_empty():
 		return
@@ -856,14 +1046,17 @@ func _boss_alive() -> bool:
 ## Screen-space anchor for the .floater: the hit number in the web build is a
 ## world-space vfx.number over the damaged actor; we project the player's head.
 func _player_screen_point() -> Vector2:
-	var viewport := get_viewport().get_visible_rect().size
 	var player: Dictionary = _run.get("player", {})
 	var px := float(player.get("x", 0.0))
 	var pz := float(player.get("z", 0.0))
-	var head := Vector3(px, _ground_y(px, pz) + 1.2, pz)
+	return _world_screen_point(Vector3(px, _ground_y(px, pz) + 1.2, pz))
+
+
+func _world_screen_point(pos: Vector3) -> Vector2:
+	var viewport := get_viewport().get_visible_rect().size
 	if _camera == null or not _camera.is_inside_tree():
 		return viewport * Vector2(0.5, 0.55)
-	var p := _camera.unproject_position(head)
+	var p := _camera.unproject_position(pos)
 	return Vector2(clampf(p.x, 40.0, viewport.x - 40.0), clampf(p.y, 60.0, viewport.y - 60.0))
 
 
@@ -1043,6 +1236,7 @@ func _render(dt: float) -> void:
 	_prompt.visible = prompt_on
 	if prompt_on:
 		_prompt.text = prompt_text
+	_sync_fx_events()
 
 
 # ------------------------------------------------------------------ modals

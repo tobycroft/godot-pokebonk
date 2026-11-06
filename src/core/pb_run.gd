@@ -88,6 +88,10 @@ static func create(species_id: int, biome: String = "forest", seed_value: int = 
 		"banishes": 0,
 		"orbs": [],
 		"messages": [],
+		# Cosmetic cast records for the renderer (PbRun._push_fire_fx). Damage is
+		# already resolved by strike(), so RunScreen only animates; headless sims
+		# simply accumulate a capped list nobody reads.
+		"fxEvents": [],
 		"shop": {},
 		"shopBuys": [],
 		"shopRerolls": 0,
@@ -849,7 +853,13 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 	var player: Dictionary = state["player"]
 	var count := maxi(1, int(built.get("count", 1)))
 	var stats := PbJson.as_dict(player.get("stats", {}))
+	# Fire casts are the first move family with a ported visual layer (the web's
+	# per-move `draw/trail/hit` closures at bundle @439385). Record the world
+	# points now, while the target slot still owns this enemy's position.
+	var fire := str(def.get("type", "")) == "fire"
 	for hit in count:
+		var tx := float(PbEnemies.get_field(pool, "x", target))
+		var tz := float(PbEnemies.get_field(pool, "z", target))
 		var ctx := {
 			"movedef": def,
 			"inst": built,
@@ -895,6 +905,8 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 					_on_kill_info(state, PbJson.as_dict(alpha_info))
 		state["stats"]["damage"] = float(state["stats"]["damage"]) + dealt
 		state["stats"]["hits"] = int(state["stats"].get("hits", 0)) + 1
+		if fire and dealt > 0.0:
+			_push_fire_fx(state, tx, tz, dealt, bool(out["crit"]))
 		# §4.9: the golden Meowth drops a coin on every hit (0.16 s cooldown).
 		PbWeatherEvents.on_hit(state, target)
 		if bool(out["crit"]):
@@ -916,6 +928,26 @@ static func _fire(state: Dictionary, def: Dictionary, built: Dictionary, target:
 				target = PbEnemies.nearest(pool, player_x(state), player_z(state), 22.0)
 				if target < 0:
 					return
+
+
+## Queue one cosmetic fire-cast record for RunScreen (projectile + impact).
+## This runs after PbEnemies.damage(), so `dmg` is the same number the sim
+## applied -- the renderer never rolls or alters damage.
+static func _push_fire_fx(state: Dictionary, tx: float, tz: float, dmg: float, crit: bool) -> void:
+	var events := PbJson.as_array(state.get("fxEvents", []))
+	# Headless runs never consume the list: keep it bounded instead of growing.
+	if events.size() >= 64:
+		events.clear()
+	var player: Dictionary = state["player"]
+	events.append({
+		"x": float(player.get("x", 0.0)),
+		"z": float(player.get("z", 0.0)),
+		"tx": tx,
+		"tz": tz,
+		"dmg": dmg,
+		"crit": crit,
+	})
+	state["fxEvents"] = events
 
 
 ## Dex "seen": normal enemies write it from the kill path (`tally` @766688),
