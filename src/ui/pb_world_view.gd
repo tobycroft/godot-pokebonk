@@ -304,25 +304,45 @@ func _build_props() -> void:
 	var atlas_h := PbJson.as_float(atlas.get("h"), 128.0)
 	var biome_id := str(biome.get("id", "forest"))
 	var tex := _env_texture("res://assets/env/%s/atlas.png" % biome_id, Color(1, 1, 1, 0))
-	var verts := PackedVector3Array()
-	var uvs := PackedVector2Array()
-	var colors := PackedColorArray()
-	var per_uv2 := PackedVector2Array()
-	var tangents := PackedFloat32Array()
-	var normals := PackedVector3Array()
-	var indices := PackedInt32Array()
+	var entries := []
 	var shadow_verts := PackedVector3Array()
 	var shadow_uvs := PackedVector2Array()
 	var shadow_indices := PackedInt32Array()
 	var light := PbJson.as_float(biome.get("light"), 1.0)
 	for p in terrain.props:
 		var kind: Dictionary = p["kind"]
-		var name := str(kind.get("name", ""))
 		if kind.has("model"):
 			continue          # real .glb props are placed by _build_models()
-		var rect: Dictionary = PbJson.as_dict(sprites.get(name))
+		var rect: Dictionary = PbJson.as_dict(sprites.get(str(kind.get("name", ""))))
 		if rect.is_empty():
 			continue
+		entries.append([p, kind, rect])
+	if entries.is_empty():
+		return
+	# One MultiMesh for every atlas prop. The previous batched ArrayMesh carried
+	# the per-prop anchor in TANGENT.xyz and its size in COLOR, but Godot normalises
+	# tangents and clamps vertex colours to 8 bit on upload, so every prop collapsed
+	# to a 1-unit billboard at the origin (which is why the trees never showed).
+	# MultiMesh keeps the anchor in MODEL_MATRIX and the rest in full-precision
+	# per-instance data.
+	var quad := ArrayMesh.new()
+	var qa := []
+	qa.resize(Mesh.ARRAY_MAX)
+	qa[Mesh.ARRAY_VERTEX] = PackedVector3Array([
+		Vector3(-0.5, 0.0, 0.0), Vector3(0.5, 0.0, 0.0),
+		Vector3(-0.5, 1.0, 0.0), Vector3(0.5, 1.0, 0.0)])
+	qa[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 2, 1, 3])
+	quad.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, qa)
+	var mm := MultiMesh.new()
+	mm.mesh = quad
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = true
+	mm.instance_count = entries.size()
+	for i in entries.size():
+		var p: Dictionary = entries[i][0]
+		var kind: Dictionary = entries[i][1]
+		var rect: Dictionary = entries[i][2]
+		var name := str(kind.get("name", ""))
 		var s := PbJson.as_float(kind.get("scale"), 0.05) * PbJson.as_float(p["s"], 1.0)
 		var w := PbJson.as_float(rect.get("w"), 0.0) * s
 		var h := PbJson.as_float(rect.get("h"), 0.0) * s
@@ -339,22 +359,11 @@ func _build_props() -> void:
 		var v_top := PbJson.as_float(rect.get("y"), 0.0) / atlas_h
 		var v_bottom := (PbJson.as_float(rect.get("y"), 0.0) + h / s) / atlas_h
 		var offset := 0.22 if name.begins_with("tree") else (0.1 if PbJson.as_float(kind.get("collider")) > 0.0 else 0.0)
-		var base := verts.size()
-		# A unit quad: x spans the sprite width, y is the relative height wind bends from.
-		verts.append(Vector3(-0.5, 0.0, 0.0))
-		verts.append(Vector3(0.5, 0.0, 0.0))
-		verts.append(Vector3(-0.5, 1.0, 0.0))
-		verts.append(Vector3(0.5, 1.0, 0.0))
-		uvs.append(Vector2(u0, v_bottom))
-		uvs.append(Vector2(u1, v_bottom))
-		uvs.append(Vector2(u0, v_top))
-		uvs.append(Vector2(u1, v_top))
-		for _c in 4:
-			colors.append(Color(w, h, PbJson.as_float(kind.get("sway")), 0.0))
-			tangents.append_array(PackedFloat32Array([x, y, z, 0.0]))
-			per_uv2.append(Vector2(s, offset))
-			normals.append(Vector3(0.0, 0.0, 1.0))
-		indices.append_array(PackedInt32Array([base, base + 1, base + 2, base + 2, base + 1, base + 3]))
+		# Basis columns carry floats too large for COLOR: (width, height, pixel).
+		var basis := Basis(Vector3(w, h, s),
+			Vector3(PbJson.as_float(kind.get("sway")), offset, 0.0), Vector3.UP)
+		mm.set_instance_transform(i, Transform3D(basis, Vector3(x, y, z)))
+		mm.set_instance_custom_data(i, Color(u0, v_bottom, u1 - u0, v_top - v_bottom))
 		var shadow := PbJson.as_float(kind.get("shadow"))
 		if shadow > 0.0:
 			var r := shadow * PbJson.as_float(p["s"], 1.0)
@@ -368,27 +377,14 @@ func _build_props() -> void:
 			shadow_uvs.append(Vector2(0.5, 0))
 			shadow_uvs.append(Vector2(0.5, 1))
 			shadow_indices.append_array(PackedInt32Array([sb, sb + 1, sb + 3, sb, sb + 3, sb + 2]))
-	if verts.is_empty():
-		return
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
-	arrays[Mesh.ARRAY_TEX_UV2] = per_uv2
-	arrays[Mesh.ARRAY_COLOR] = colors
-	arrays[Mesh.ARRAY_TANGENT] = tangents
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	var inst := MeshInstance3D.new()
-	inst.name = "Props"
-	inst.mesh = mesh
-	inst.material_override = _props_material(tex)
-	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Billboards are computed per vertex, so frustum culling on the whole mesh is useless.
-	inst.custom_aabb = AABB(Vector3(-terrain.world, -10, -terrain.world), Vector3(terrain.world * 2, 80, terrain.world * 2))
-	_mesh_root.add_child(inst)
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Props"
+	mmi.multimesh = mm
+	mmi.material_override = _props_material(tex)
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Billboards are computed per vertex, so frustum culling on the whole batch is useless.
+	mmi.custom_aabb = AABB(Vector3(-terrain.world, -10, -terrain.world), Vector3(terrain.world * 2, 80, terrain.world * 2))
+	_mesh_root.add_child(mmi)
 
 	if not shadow_verts.is_empty():
 		var sa := []
